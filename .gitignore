@@ -1,0 +1,7 @@
+*.jl.cov
+*.jl.mem
+*.tmp
+.DS_Store
+/build/PanoStitch/
+*.log
+nohup.out
