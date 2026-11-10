@@ -436,7 +436,7 @@ version = "0.5.12"
 deps = ["ColorTypes", "ColorVectorSpace", "Dates", "FileIO", "FixedPointNumbers", "ImageIO", "LibRaw_jll", "LinearAlgebra", "Mmap", "PrecompileTools", "Random", "RelocatableFolders", "Statistics", "TOML", "Zlib_jll", "Zstd_jll"]
 path = "."
 uuid = "b749652f-390a-49a1-8436-601bccfbaed9"
-version = "0.1.0"
+version = "0.2.0"
 
     [deps.PanoStitch.extensions]
     PanoStitchGUIExt = "GLMakie"

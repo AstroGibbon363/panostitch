@@ -1260,7 +1260,7 @@ version = "1.58.2+0"
 deps = ["ColorTypes", "ColorVectorSpace", "Dates", "FileIO", "FixedPointNumbers", "ImageIO", "LibRaw_jll", "LinearAlgebra", "Mmap", "PrecompileTools", "Random", "RelocatableFolders", "Statistics", "TOML", "Zlib_jll", "Zstd_jll"]
 path = ".."
 uuid = "b749652f-390a-49a1-8436-601bccfbaed9"
-version = "0.1.0"
+version = "0.2.0"
 weakdeps = ["GLMakie"]
 
     [deps.PanoStitch.extensions]
@@ -1270,7 +1270,7 @@ weakdeps = ["GLMakie"]
 deps = ["GLMakie", "PanoStitch"]
 path = "."
 uuid = "68881b23-c261-42d5-9645-2fb2ebcb226f"
-version = "0.1.0"
+version = "0.2.0"
 
 [[deps.Parsers]]
 deps = ["Dates", "PrecompileTools"]
