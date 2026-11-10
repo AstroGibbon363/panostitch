@@ -1,0 +1,53 @@
+[package]
+name = "panostitch"
+version = "0.3.0"
+edition = "2021"
+description = "Panorama stitching and star stacking for landscape astrophotography"
+license = "MIT"
+default-run = "panostitch"
+
+[lib]
+name = "panostitch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "panostitch"
+path = "src/bin/panostitch.rs"
+
+[[bin]]
+name = "panostack"
+path = "src/bin/panostack.rs"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "bmp"] }
+rayon = "1.10"
+nalgebra = "0.33"
+rand = "0.8"
+rand_chacha = "0.3"
+half = "2.4"
+memmap2 = "0.9"
+flate2 = "1.0"
+zstd = "0.13"
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+rawler = "0.8"
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+egui = "0.37"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dirs = "6.0"
+tempfile = "3"
+
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
