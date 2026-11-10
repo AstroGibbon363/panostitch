@@ -622,16 +622,25 @@ Sternen oder zu Strichspuren. Er ist für Landschafts-Astrofotografie gedacht:
 Die Kamera steht auf einem Stativ, der Himmel bewegt sich zwischen den
 Aufnahmen, der Vordergrund nicht.
 
+Er arbeitet wie Sequator, mit dem, was Sequator fehlt: Bias- und
+Flat-Dark-Bilder, lineare 32-Bit-Ausgabe, ein eigenes Vordergrundbild,
+Strichspuren ohne Lücken, automatische Himmelserkennung und keine Blackbox:
+Jede Aufnahme wird vermessen und bewertet, ein Diagramm zeigt die Messwerte,
+und ein Protokoll listet jeden Schritt mit dem, was er getan hat, und seiner
+Dauer.
+
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ Eingabeliste         │ [Base image] [Result] [Frame report] │ Post-processing     │
 │  Star images, Base,  │ [Fit] [Open project…] [Save project…]│  Background extr.   │
-│  Kalibrierung, Output│                                      │  Color calibration  │
+│  Kalibrierung, Fore- │                                      │  Color calibration  │
+│  ground, Output      │                                      │                     │
 │ Add Remove Clear     │   Basisbild (hier wird der Himmel    │  Colour noise       │
 │ Use as base          │   markiert), Ergebnis oder Bericht   │  Light pollution    │
 │ Einstellungsliste    │                                      │  Brightness, Tone   │
 │ Optionen des         │                                      │  Color space        │
 │ markierten Eintrags  │                                      │  [Save result…]     │
+│                      │                                      │  [Use in Stitcher]  │
 │ [Quick prev.] [Start]│  Statuszeile                         │                     │
 └──────────────────────┴──────────────────────────────────────┴─────────────────────┘
 ```
@@ -645,8 +654,9 @@ Einstellungsliste: Darunter erscheinen seine Optionen und eine Erklärung.
    Himmelsaufnahmen (oder tippen Sie einen Datei- oder Ordnerpfad in das
    Pfadfeld und drücken Sie Enter).
 2. Markieren Sie **Sky region**, wählen Sie **Boundary line** und ziehen Sie in
-   der Basisbild-Ansicht eine Linie entlang des Horizonts. Sterne werden nur
-   darüber gesucht.
+   der Basisbild-Ansicht eine Linie entlang des Horizonts, oder klicken Sie
+   auf **Detect sky** und korrigieren Sie die Maske mit dem Pinsel. Sterne
+   werden nur im Himmel gesucht.
 3. Klicken Sie auf **Quick preview**: ein kleines, schnelles Ergebnis aus
    höchstens 10 Aufnahmen, um die Einstellungen zu prüfen. Es wird nichts
    gespeichert.
@@ -666,6 +676,7 @@ Einstellungsliste: Darunter erscheinen seine Optionen und eine Erklärung.
 | **Bias images** | Kürzeste Belichtung, Objektivdeckel drauf, gleiche ISO. |
 | **Vignetting images** | Flats: eine gleichmäßig beleuchtete weiße Fläche, gleiche Brennweite und Blende. Korrigieren dunklere Ecken und Staubschatten. |
 | **Flat-dark images** | Darks für die Flats: gleiche ISO und Belichtungszeit wie die Vignettierungsbilder. |
+| **Foreground image** | Freiwillig: eine Aufnahme des Bodens vom selben Stativstandort – zur blauen Stunde, lang belichtet oder mit niedriger ISO. Sie ersetzt unterhalb der Himmelsregion den (verrauschten, dunklen) gestackten Vordergrund. **Match brightness** passt sie an die Helligkeit des gestackten Vordergrunds an; **Exposure (EV)** macht sie von dort aus heller oder dunkler. Braucht eine Himmelsregion. |
 | **Output** | `.tif` (16 Bit), `.jpg` (8 Bit) oder `.fits` / `.xisf` (32-Bit-Gleitkomma, linear, zur Weiterverarbeitung in Siril, PixInsight usw.). |
 
 Alle Kalibrierungsbilder sind freiwillig. Bei hoher ISO helfen schon wenige
@@ -675,8 +686,8 @@ Dunkelbilder viel.
 
 | Einstellung | Wirkung |
 |---|---|
-| **Composition** | **Align stars**: Die Aufnahmen werden an den Sternen ausgerichtet und vereint. **Accumulation** mittelt sie; **Select best pixels** (Vorgabe) lässt Ausreißer weg (Flugzeuge, Satelliten); **Freeze ground** richtet nur den Himmel aus, sodass Himmel und Vordergrund scharf bleiben (braucht eine Himmelsregion); **Align only** schreibt nur die ausgerichteten Aufnahmen. **Star trails**: keine Ausrichtung, der Himmel behält den hellsten Wert jedes Pixels; **Motion effect** lässt die Spuren am Anfang auslaufen. |
-| **Sky region** | Wo der Himmel ist. **Boundary line**: eine Linie entlang des Horizonts ziehen. **Gradient**: die Linie mit weichem Übergang. **Irregular mask**: den Himmel mit der linken Maustaste malen, mit der rechten radieren, Mausrad = Pinselgröße. Grob genügt, aber den Vordergrund nicht berühren. |
+| **Composition** | **Align stars**: Die Aufnahmen werden an den Sternen ausgerichtet und vereint. **Accumulation** mittelt sie; **Select best pixels** (Vorgabe) lässt Ausreißer weg (Flugzeuge, Satelliten); **Freeze ground** richtet nur den Himmel aus, sodass Himmel und Vordergrund scharf bleiben (braucht eine Himmelsregion); **Align only** schreibt nur die ausgerichteten Aufnahmen. **Star trails**: keine Ausrichtung, der Himmel behält den hellsten Wert jedes Pixels. **Trail fade**: **Fade in** (die Spuren beginnen schwach, Sequators Bewegungseffekt), **Fade out** oder **Both ends** (kometenartig an beiden Enden). **Fill gaps between frames**: Die kurzen Pausen des Kamera-Intervalls werden entlang der gemessenen Sternbewegung gefüllt, sodass die Spuren durchgehende Linien statt Striche sind. |
+| **Sky region** | Wo der Himmel ist. **Boundary line**: eine Linie entlang des Horizonts ziehen. **Gradient**: die Linie mit weichem Übergang. **Irregular mask**: den Himmel mit der linken Maustaste malen, mit der rechten radieren; **Brush size** (Schieberegler oder Mausrad). **Detect sky** malt eine erste Maske aus Helligkeit und Sternen – ungefähr, also prüfen und mit dem Pinsel korrigieren. **Mask feather** macht den Rand der Maske weich, nur zum Himmel hin, sodass der Vordergrund nichts vom Himmel abbekommt (keine Säume am Horizont). **Show detected stars** kreist die Sterne ein, die der letzte Lauf in der gezeigten Aufnahme gefunden hat. |
 | **Sigma clipping** | Wie streng Ausreißer entfernt werden (unten / oben × σ). Üblich sind 2–3; kleinere Werte entfernen mehr, lassen aber mehr Rauschen. Braucht mindestens 4 Aufnahmen, am besten 10 und mehr. |
 | **Frame rejection** | Lässt Aufnahmen weg, die deutlich schlechter als die typische sind: Wolken oder Tau (schwächere Sterne), wenige Sterne, unscharfe oder längliche Sterne (Fokus, Wind, angestoßenes Stativ). |
 | **RAW conversion** | Weißabgleich (Kamera, Bilddurchschnitt, Tageslicht), Demosaicing (Vorgabe AHD; DHT oder AAHD haben bei hoher ISO oft weniger Farbrauschen) und **half size** (4× weniger Pixel, viel schneller). |
@@ -692,11 +703,17 @@ Dunkelbilder viel.
   zeigt sie an.
 - **Result**: der Stack nach der Nachbearbeitung. Ziehen verschiebt, das
   Mausrad zoomt, **Fit** zeigt alles.
-- **Frame report**: eine Zeile pro Himmelsaufnahme: gefundene Sterne,
-  Sterngröße (FWHM), Elongation, Himmelshelligkeit, Licht (Helligkeit der
-  Sterne gegenüber dem Basisbild), Ausrichtungsfehler und ob die Aufnahme
-  verwendet wurde. **Ein Klick auf eine Aufnahme** schließt sie aus (oder
-  wieder ein); danach erneut **Start** klicken.
+- **Frame report**: ein Diagramm aller Messwerte pro Aufnahme, jeweils durch
+  ihren Median geteilt, sodass eine schlechte Aufnahme auffällt (rot =
+  weggelassen, blau = Basisbild); darunter eine Zeile pro Himmelsaufnahme:
+  gefundene Sterne, Sterngröße (FWHM), Elongation, Himmelshelligkeit, Licht
+  (Helligkeit der Sterne gegenüber dem Basisbild), Ausrichtungsfehler, ob die
+  Aufnahme verwendet wurde und warum nicht. Unter der Tabelle steht das
+  **Verarbeitungsprotokoll**: jeder Schritt des Laufs, was er getan hat
+  (Kalibrierung, Himmelsregion, verwendete Aufnahmen, Verzeichnung,
+  Lückenfüllung, Vordergrund, Nachbearbeitung) und wie lange er gedauert hat.
+  **Ein Klick auf eine Aufnahme** im Diagramm oder in der Tabelle schließt sie
+  aus (oder wieder ein); danach erneut **Start** klicken.
 
 ### 13.5 Nachbearbeitung
 
@@ -715,6 +732,7 @@ Einstellungen, **Save result…** speichert erneut.
 | **Tone** | **sRGB curve** (wie eine Kamera), **Stretch** (Schwarzpunkt, Mitteltöne, Weißpunkt; automatisch oder von Hand) oder **Linear** (keine Kurve). |
 | **Color space** | sRGB oder Adobe RGB für TIFF- und JPEG-Ausgabe. |
 | **Linear (for processing)** | Schaltet alles ab und speichert ein lineares 32-Bit-FITS: das, was Siril oder PixInsight erwarten. |
+| **Use in the Stitcher** | Fügt das gespeicherte Ergebnis als ein Teilbild eines Panoramas in den Reiter Panorama stitcher ein (siehe 13.7). |
 
 ### 13.6 Projekte
 
@@ -724,12 +742,32 @@ bin/panostitch.jl nacht.stackproj`) lädt sie wieder. Dateien werden über ihren
 vollständigen Pfad gefunden, oder relativ zur Projektdatei, wenn der Ordner
 verschoben wurde.
 
-### 13.7 Tipps
+### 13.7 Panoramen aus gestackten Teilbildern
+
+Ein rauscharmes Milchstraßen-Panorama: Nehmen Sie an jeder Position des
+Panoramas mehrere Aufnahmen auf (mit Überlappung zwischen den Positionen),
+dann:
+
+1. Stacken Sie die Aufnahmen der ersten Position (Start) und klicken Sie auf
+   **Use in the Stitcher**.
+2. Ersetzen Sie die Himmelsaufnahmen durch die der nächsten Position, geben
+   Sie der Ausgabe einen neuen Namen, Start, wieder **Use in the Stitcher**;
+   und so weiter.
+3. Im Reiter Panorama stitcher fügt **Run all steps** die gestackten
+   Teilbilder zusammen.
+
+Speichern Sie jedes Teilbild als `.tif`; dieselbe Nachbearbeitung für alle
+Teilbilder hält Helligkeit und Farben gleich.
+
+### 13.8 Tipps
 
 - Nehmen Sie mindestens 10–20 Himmelsaufnahmen mit gleichen Einstellungen
   auf, direkt danach 10–20 Dunkelbilder, ohne die Kamera zu bewegen.
 - Setzen Sie die Himmelsregion sorgfältig: Bäume und Gebäude, die als Himmel
-  zählen, verschmiert die Ausrichtung.
+  zählen, verschmiert die Ausrichtung. **Detect sky** ist ein schneller
+  Anfang, nicht das letzte Wort.
+- Sehen Sie nach einer Quick preview in den Frame report: Das Diagramm zeigt
+  sofort, welche Aufnahmen schlechter sind (Wolken, Wind, Tau).
 - Nehmen Sie **Freeze ground**, wenn der Vordergrund wichtig ist, sonst
   **Select best pixels**.
 - Zur Weiterverarbeitung in anderen Programmen als `.fits` speichern und
@@ -792,6 +830,7 @@ Weitere nützliche Funktionen: `Stitcher.read_fits(pfad; half)` und
 | `bin/panostitch.jl` | Startet das Programm (das Fenster). |
 | `bin/panostack.jl` | Sterne stacken von der Kommandozeile (Optionen am Anfang der Datei). |
 | `examples/scripted_stitch.jl` | Lädt den Stitcher zur Verwendung in eigenen Skripten. |
+| `test/runtests.jl` | Tests des Sterne-Stackings an künstlichen Nachtszenen. |
 | `src/stitcher.jl` | Zusammenfügen: Laden (RAW, FITS), Merkmale, Zuordnung, Projektionen, Rendern, Streckung. |
 | `src/stacker.jl` | Sterne stacken. |
 | `src/PanoStitch.jl` | Einstiegspunkt des Pakets und Vorkompilierung (ohne Grafik). |

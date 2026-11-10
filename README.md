@@ -45,6 +45,7 @@ system (Windows, macOS, Linux) separately. Both scripts install what they need
 | `app/` | The program as a package (PanoStitchApp: PanoStitch + GLMakie, versions pinned in its Manifest), with the entry point of the standalone build. |
 | `bin/` | Launchers: the window and the command-line stacker. |
 | `examples/` | Using the package from your own scripts. |
+| `test/` | Tests of the stacking engine on synthetic night scenes: `julia --project=. -t auto test/runtests.jl`. |
 | `docs/` | User manual in English, Czech and German (Markdown and PDF), and the PDF build script. |
 | `build/` | Build script for the standalone program. |
 | `assets/fonts/` | DejaVu fonts used by the window (license included). |

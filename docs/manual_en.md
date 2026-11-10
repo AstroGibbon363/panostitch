@@ -581,16 +581,24 @@ exposures of the same scene into one image: a low-noise sky with sharp stars,
 or star trails. It is made for landscape astrophotography: the camera stands
 on a tripod, the sky moves between the frames, the foreground does not.
 
+It works like Sequator, with what Sequator lacks: bias and flat-dark frames,
+32-bit linear output, a separate foreground image, star trails without gaps,
+automatic sky detection, and no black box: every frame is measured and scored,
+a chart shows the measures, and a log lists each step with what it did and how
+long it took.
+
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ input list           │ [Base image] [Result] [Frame report] │ Post-processing     │
 │  Star images, Base,  │ [Fit] [Open project…] [Save project…]│  Background extr.   │
-│  calibration, Output │                                      │  Color calibration  │
+│  calibration, Fore-  │                                      │  Color calibration  │
+│  ground, Output      │                                      │                     │
 │ Add Remove Clear     │   base image (draw the sky here),    │  Colour noise       │
 │ Use as base          │   result, or frame report            │  Light pollution    │
 │ settings list        │                                      │  Brightness, Tone   │
 │ options of the       │                                      │  Color space        │
 │ highlighted entry    │                                      │  [Save result…]     │
+│                      │                                      │  [Use in Stitcher]  │
 │ [Quick prev.] [Start]│  status line                         │                     │
 └──────────────────────┴──────────────────────────────────────┴─────────────────────┘
 ```
@@ -603,7 +611,8 @@ explanation appear below the lists.
 1. Highlight **Star images**, click **Add…** and choose the star shots (or
    type a file or folder path into the path box and press Enter).
 2. Highlight **Sky region**, choose **Boundary line** and drag a line along the
-   horizon in the base image view. Stars are searched for only above it.
+   horizon in the base image view, or click **Detect sky** and correct the
+   mask with the brush. Stars are searched for only in the sky.
 3. Click **Quick preview**: a small, fast result from up to 10 frames, to check
    the settings. Nothing is saved.
 4. Highlight **Output** and choose where to save (default: `stacked.tif` next
@@ -621,6 +630,7 @@ explanation appear below the lists.
 | **Bias images** | Shortest exposure, lens cap on, same ISO. |
 | **Vignetting images** | Flat frames: an evenly lit white surface, same focal length and aperture. Corrects darker corners and dust shadows. |
 | **Flat-dark images** | Darks for the flats: same ISO and exposure time as the vignetting images. |
+| **Foreground image** | Optional: one shot of the ground from the same tripod position – at blue hour, a long exposure or low ISO. It replaces the (noisy, dark) stacked foreground below the sky region. **Match brightness** scales it to the stacked ground; **Exposure (EV)** brightens or darkens it from there. Needs a sky region. |
 | **Output** | `.tif` (16-bit), `.jpg` (8-bit), or `.fits` / `.xisf` (32-bit float, linear, for further processing in Siril, PixInsight etc.). |
 
 All calibration frames are optional. Even a few noise images help a lot at
@@ -630,8 +640,8 @@ high ISO.
 
 | Setting | What it does |
 |---|---|
-| **Composition** | **Align stars**: the frames are aligned on the stars and combined. **Accumulation** averages them; **Select best pixels** (default) drops outliers (planes, satellites); **Freeze ground** aligns only the sky, so sky and foreground both stay sharp (needs a sky region); **Align only** just writes the aligned frames. **Star trails**: no alignment, the sky keeps the brightest value of every pixel; **Motion effect** fades the start of the trails. |
-| **Sky region** | Where the sky is. **Boundary line**: drag a line along the horizon. **Gradient**: the line plus a soft transition. **Irregular mask**: paint the sky with the left mouse button, erase with the right one, mouse wheel = brush size. Paint roughly, but don't touch the foreground. |
+| **Composition** | **Align stars**: the frames are aligned on the stars and combined. **Accumulation** averages them; **Select best pixels** (default) drops outliers (planes, satellites); **Freeze ground** aligns only the sky, so sky and foreground both stay sharp (needs a sky region); **Align only** just writes the aligned frames. **Star trails**: no alignment, the sky keeps the brightest value of every pixel. **Trail fade**: **Fade in** (the trails start faint, Sequator's motion effect), **Fade out**, or **Both ends** (a comet-like taper). **Fill gaps between frames**: the short breaks of the camera's interval are filled along the measured star motion, so the trails are continuous lines instead of dashes. |
+| **Sky region** | Where the sky is. **Boundary line**: drag a line along the horizon. **Gradient**: the line plus a soft transition. **Irregular mask**: paint the sky with the left mouse button, erase with the right one; **Brush size** (slider or mouse wheel). **Detect sky** paints a first mask from the brightness and the stars – approximate, so check it and correct it with the brush. **Mask feather** softens the mask's edge, inside the sky only, so the foreground gets none of the sky (no halos along the horizon). **Show detected stars** circles the stars the last run found in the shown frame. |
 | **Sigma clipping** | How strictly outliers are removed (low / high × σ). 2–3 is usual; lower removes more but leaves more noise. Needs at least 4 frames, works best with 10+. |
 | **Frame rejection** | Leaves out frames clearly worse than the typical one: clouds or dew (dimmer stars), few stars, blurred or elongated stars (focus, wind, a bumped tripod). |
 | **RAW conversion** | White balance (camera, image average, daylight), demosaicing (AHD by default; DHT or AAHD often give less colour noise at high ISO) and **half size** (4× fewer pixels, much faster). |
@@ -646,10 +656,15 @@ high ISO.
   here. Click a file in the input list to see it.
 - **Result**: the stack after post-processing. Drag to pan, mouse wheel to
   zoom, **Fit** to see all of it.
-- **Frame report**: one line per star image: stars found, star size (FWHM),
+- **Frame report**: a chart of every measure per frame, each divided by its
+  median, so a bad frame stands out (red = left out, blue = the base image);
+  below it one line per star image: stars found, star size (FWHM),
   elongation, sky level, light (brightness of the stars compared with the
-  base image), alignment error and whether the frame was used. **Click a
-  frame** to exclude it (or include it again), then click **Start** again.
+  base image), alignment error, whether the frame was used and why not.
+  Under the table, the **process log**: every step of the run, what it did
+  (calibration, sky region, frames used, distortion, gap filling, foreground,
+  post-processing) and how long it took. **Click a frame** in the chart or
+  the table to exclude it (or include it again), then click **Start** again.
 
 ### 13.5 Post-processing
 
@@ -668,6 +683,7 @@ Applied to the stacked result at once; **Start** saves with these settings,
 | **Tone** | **sRGB curve** (as a camera does), **Stretch** (black point, midtones, white point; automatic or by hand) or **Linear** (no curve). |
 | **Color space** | sRGB or Adobe RGB for TIFF and JPEG output. |
 | **Linear (for processing)** | Switches everything off and saves a linear 32-bit FITS: what Siril or PixInsight expect. |
+| **Use in the Stitcher** | Adds the saved result to the Panorama stitcher tab, as one panel of a panorama (see 13.7). |
 
 ### 13.6 Projects
 
@@ -676,12 +692,29 @@ region and every setting. **Open project…** (or `julia bin/panostitch.jl
 night.stackproj`) brings it back. Files are found by their full path, or
 relative to the project file if the folder was moved.
 
-### 13.7 Tips
+### 13.7 Panoramas of stacked panels
+
+A Milky Way panorama with low noise: shoot several frames at each position of
+the panorama (with overlap between the positions), then:
+
+1. Stack the frames of the first position (Start), then click **Use in the
+   Stitcher**.
+2. Replace the star images with those of the next position, give the output a
+   new name, Start, **Use in the Stitcher** again; and so on.
+3. In the Panorama stitcher tab, **Run all steps** joins the stacked panels.
+
+Save each panel as `.tif`; the same post-processing for all panels keeps their
+brightness and colours alike.
+
+### 13.8 Tips
 
 - Shoot at least 10–20 star images with the same settings, plus 10–20 noise
   images right after, without moving the camera.
 - Set the sky region carefully: trees and buildings that are counted as sky
-  are blurred by the alignment.
+  are blurred by the alignment. **Detect sky** is a quick start, not the
+  last word.
+- Look at the Frame report after a Quick preview: the chart shows at once
+  which frames are worse (clouds, wind, dew).
 - Use **Freeze ground** when the foreground matters, **Select best pixels**
   when it does not.
 - For processing in other programs, save as `.fits` and switch on **Linear
@@ -744,6 +777,7 @@ Other useful functions: `Stitcher.read_fits(path; half)` and
 | `bin/panostitch.jl` | Starts the program (the window). |
 | `bin/panostack.jl` | Star stacking from the command line (options at the top of the file). |
 | `examples/scripted_stitch.jl` | Loads the stitcher for use from your own scripts. |
+| `test/runtests.jl` | Tests of the star stacking on synthetic night scenes. |
 | `src/stitcher.jl` | Stitching: loading (RAW, FITS), features, matching, projections, rendering, stretch. |
 | `src/stacker.jl` | Star stacking. |
 | `src/PanoStitch.jl` | Package entry point and precompilation (no graphics). |

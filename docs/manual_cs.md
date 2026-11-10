@@ -588,16 +588,24 @@ scény do jednoho obrázku: oblohy s nízkým šumem a ostrými hvězdami, nebo
 hvězdných stop. Je určená pro krajinářskou astrofotografii: fotoaparát stojí
 na stativu, obloha se mezi snímky pohybuje, popředí ne.
 
+Funguje jako Sequator, ale s tím, co Sequatoru chybí: bias a flat-dark snímky,
+32bitový lineární výstup, samostatný snímek popředí, hvězdné stopy bez mezer,
+automatické rozpoznání oblohy a žádná černá skříňka: každý snímek se změří a
+ohodnotí, graf ukáže naměřené hodnoty a protokol vypíše každý krok, co udělal a
+jak dlouho trval.
+
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ seznam vstupů        │ [Base image] [Result] [Frame report] │ Post-processing     │
 │  Star images, Base,  │ [Fit] [Open project…] [Save project…]│  Background extr.   │
-│  kalibrace, Output   │                                      │  Color calibration  │
+│  kalibrace, Fore-    │                                      │  Color calibration  │
+│  ground, Output      │                                      │                     │
 │ Add Remove Clear     │   základní snímek (zde se kreslí     │  Colour noise       │
 │ Use as base          │   obloha), výsledek nebo report      │  Light pollution    │
 │ seznam nastavení     │                                      │  Brightness, Tone   │
 │ volby zvýrazněné     │                                      │  Color space        │
 │ položky              │                                      │  [Save result…]     │
+│                      │                                      │  [Use in Stitcher]  │
 │ [Quick prev.] [Start]│  stavový řádek                       │                     │
 └──────────────────────┴──────────────────────────────────────┴─────────────────────┘
 ```
@@ -610,7 +618,8 @@ seznamy se objeví její volby a vysvětlení.
 1. Zvýrazněte **Star images**, klikněte na **Add…** a vyberte snímky oblohy
    (nebo zadejte cestu k souboru či složce do pole pro cestu a stiskněte Enter).
 2. Zvýrazněte **Sky region**, zvolte **Boundary line** a v náhledu základního
-   snímku táhněte čáru podél horizontu. Hvězdy se hledají jen nad ní.
+   snímku táhněte čáru podél horizontu, nebo klikněte na **Detect sky** a
+   masku opravte štětcem. Hvězdy se hledají jen na obloze.
 3. Klikněte na **Quick preview**: malý, rychlý výsledek z nejvýše 10 snímků
    pro kontrolu nastavení. Nic se neukládá.
 4. Zvýrazněte **Output** a zvolte, kam uložit (výchozí: `stacked.tif` vedle
@@ -628,6 +637,7 @@ seznamy se objeví její volby a vysvětlení.
 | **Bias images** | Nejkratší čas, krytka na objektivu, stejné ISO. |
 | **Vignetting images** | Flaty: rovnoměrně osvětlená bílá plocha, stejná ohnisková vzdálenost a clona. Opraví tmavší rohy a stíny prachu. |
 | **Flat-dark images** | Darky k flatům: stejné ISO a čas jako vinětační snímky. |
+| **Foreground image** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Match brightness** ho přizpůsobí jasu složeného popředí; **Exposure (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
 | **Output** | `.tif` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
 
 Všechny kalibrační snímky jsou nepovinné. Při vysokém ISO hodně pomůže i
@@ -637,8 +647,8 @@ několik tmavých snímků.
 
 | Nastavení | Co dělá |
 |---|---|
-| **Composition** | **Align stars**: snímky se zarovnají podle hvězd a spojí. **Accumulation** je průměruje; **Select best pixels** (výchozí) vynechá odlehlé hodnoty (letadla, satelity); **Freeze ground** zarovná jen oblohu, takže obloha i popředí zůstanou ostré (potřebuje oblast oblohy); **Align only** jen zapíše zarovnané snímky. **Star trails**: bez zarovnání, obloha si ponechá nejjasnější hodnotu každého pixelu; **Motion effect** nechá začátky stop slábnout. |
-| **Sky region** | Kde je obloha. **Boundary line**: táhněte čáru podél horizontu. **Gradient**: čára s plynulým přechodem. **Irregular mask**: oblohu malujte levým tlačítkem myši, mažte pravým, kolečko = velikost štětce. Stačí zhruba, ale nezasahujte do popředí. |
+| **Composition** | **Align stars**: snímky se zarovnají podle hvězd a spojí. **Accumulation** je průměruje; **Select best pixels** (výchozí) vynechá odlehlé hodnoty (letadla, satelity); **Freeze ground** zarovná jen oblohu, takže obloha i popředí zůstanou ostré (potřebuje oblast oblohy); **Align only** jen zapíše zarovnané snímky. **Star trails**: bez zarovnání, obloha si ponechá nejjasnější hodnotu každého pixelu. **Trail fade**: **Fade in** (stopy začínají slabě, efekt pohybu ze Sequatoru), **Fade out** nebo **Both ends** (zúžení na obou koncích jako u komety). **Fill gaps between frames**: krátké přestávky intervalu fotoaparátu se vyplní podle změřeného pohybu hvězd, takže stopy jsou souvislé čáry, ne čárkované. |
+| **Sky region** | Kde je obloha. **Boundary line**: táhněte čáru podél horizontu. **Gradient**: čára s plynulým přechodem. **Irregular mask**: oblohu malujte levým tlačítkem myši, mažte pravým; **Brush size** (posuvník nebo kolečko myši). **Detect sky** namaluje první masku podle jasu a hvězd – přibližně, proto ji zkontrolujte a opravte štětcem. **Mask feather** změkčí okraj masky, jen směrem do oblohy, takže popředí nedostane nic z oblohy (žádné svatozáře podél horizontu). **Show detected stars** zakroužkuje hvězdy, které poslední běh našel v zobrazeném snímku. |
 | **Sigma clipping** | Jak přísně se odstraňují odlehlé hodnoty (dolní / horní × σ). Obvykle 2–3; nižší odstraní víc, ale nechá víc šumu. Potřebuje aspoň 4 snímky, nejlépe 10 a více. |
 | **Frame rejection** | Vynechá snímky zřetelně horší než typický: mraky nebo rosa (slabší hvězdy), málo hvězd, rozmazané nebo protáhlé hvězdy (zaostření, vítr, ťuknutí do stativu). |
 | **RAW conversion** | Vyvážení bílé (fotoaparát, průměr snímku, denní světlo), demozaikování (výchozí AHD; DHT nebo AAHD mají při vysokém ISO často méně barevného šumu) a **half size** (4× méně pixelů, mnohem rychlejší). |
@@ -653,10 +663,15 @@ několik tmavých snímků.
   oblast oblohy. Kliknutím na soubor v seznamu vstupů ho zobrazíte.
 - **Result**: výsledek po dodatečném zpracování. Tažením posouváte, kolečkem
   myši zvětšujete, **Fit** ukáže celý.
-- **Frame report**: řádek pro každý snímek oblohy: nalezené hvězdy, velikost
-  hvězd (FWHM), protažení, úroveň oblohy, světlo (jas hvězd proti základnímu
-  snímku), chyba zarovnání a zda byl snímek použit. **Kliknutím na snímek**
-  ho vyřadíte (nebo znovu zařadíte); potom znovu klikněte na **Start**.
+- **Frame report**: graf všech měření pro každý snímek, vždy vydělených
+  mediánem, takže špatný snímek vyčnívá (červeně = vynechaný, modře =
+  základní snímek); pod ním řádek pro každý snímek oblohy: nalezené hvězdy,
+  velikost hvězd (FWHM), protažení, úroveň oblohy, světlo (jas hvězd proti
+  základnímu snímku), chyba zarovnání, zda byl snímek použit a proč ne. Pod
+  tabulkou je **protokol zpracování**: každý krok běhu, co udělal (kalibrace,
+  oblast oblohy, použité snímky, zkreslení, vyplnění mezer, popředí, dodatečné
+  zpracování) a jak dlouho trval. **Kliknutím na snímek** v grafu nebo v
+  tabulce ho vyřadíte (nebo znovu zařadíte); potom znovu klikněte na **Start**.
 
 ### 13.5 Dodatečné zpracování
 
@@ -675,6 +690,7 @@ result…** uloží znovu.
 | **Tone** | **sRGB curve** (jako fotoaparát), **Stretch** (černý bod, střední tóny, bílý bod; automaticky nebo ručně) nebo **Linear** (bez křivky). |
 | **Color space** | sRGB nebo Adobe RGB pro výstup TIFF a JPEG. |
 | **Linear (for processing)** | Vše vypne a uloží lineární 32bitový FITS: to, co očekává Siril nebo PixInsight. |
+| **Use in the Stitcher** | Přidá uložený výsledek do karty Panorama stitcher jako jeden díl panoramatu (viz 13.7). |
 
 ### 13.6 Projekty
 
@@ -683,12 +699,27 @@ oblohy a všemi nastaveními. **Open project…** (nebo `julia bin/panostitch.jl
 noc.stackproj`) ho znovu otevře. Soubory se hledají podle plné cesty, nebo
 relativně k souboru projektu, pokud byla složka přesunuta.
 
-### 13.7 Tipy
+### 13.7 Panoramata ze složených dílů
+
+Panorama Mléčné dráhy s nízkým šumem: na každé pozici panoramatu pořiďte
+několik snímků (pozice se překrývají), potom:
+
+1. Složte snímky první pozice (Start) a klikněte na **Use in the Stitcher**.
+2. Nahraďte snímky oblohy snímky další pozice, dejte výstupu nový název,
+   Start, znovu **Use in the Stitcher**; a tak dále.
+3. Na kartě Panorama stitcher spojí **Run all steps** složené díly.
+
+Každý díl ukládejte jako `.tif`; stejné dodatečné zpracování všech dílů
+udrží jejich jas a barvy stejné.
+
+### 13.8 Tipy
 
 - Pořiďte aspoň 10–20 snímků oblohy se stejným nastavením a hned potom
   10–20 tmavých snímků, aniž byste pohnuli fotoaparátem.
 - Oblast oblohy nastavte pečlivě: stromy a budovy započtené do oblohy zarovnání
-  rozmaže.
+  rozmaže. **Detect sky** je rychlý začátek, ne poslední slovo.
+- Po Quick preview se podívejte do Frame report: graf hned ukáže, které
+  snímky jsou horší (mraky, vítr, rosa).
 - Když záleží na popředí, použijte **Freeze ground**; když ne, **Select best
   pixels**.
 - Pro zpracování v jiných programech ukládejte do `.fits` a zapněte **Linear
@@ -751,6 +782,7 @@ Další užitečné funkce: `Stitcher.read_fits(cesta; half)` a
 | `bin/panostitch.jl` | Spouští program (okno). |
 | `bin/panostack.jl` | Skládání hvězd z příkazové řádky (volby jsou na začátku souboru). |
 | `examples/scripted_stitch.jl` | Načte skládací kód pro použití z vlastních skriptů. |
+| `test/runtests.jl` | Testy skládání hvězd na umělých nočních scénách. |
 | `src/stitcher.jl` | Skládání: načítání (RAW, FITS), body, párování, projekce, vykreslení, roztažení. |
 | `src/stacker.jl` | Skládání hvězd. |
 | `src/PanoStitch.jl` | Vstupní bod balíčku a předkompilace (bez grafiky). |
