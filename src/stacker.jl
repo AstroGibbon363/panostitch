@@ -1,14 +1,19 @@
 # Star stacking core (the GUI is stacker_gui.jl), after Sequator:
 #
 #   calibration masters (bias, darks, flats, flat darks) → every star image:
-#   load linear, calibrate, fix hot pixels, detect stars in the sky region →
-#   align to the base image (triangle matching + RANSAC, optionally with lens
-#   distortion and a smooth correction grid) → score and reject frames →
-#   combine (average, sigma clipping, freeze ground, star trails; optionally
-#   every N frames for a time-lapse) → post-processing (`postprocess`, can be
-#   redone on the kept linear stack): background extraction, colour
-#   calibration, light pollution, star enhancement → brightness, HDR, tone
-#   (sRGB curve, histogram stretch or linear; sRGB or Adobe RGB) → save.
+#   load linear, calibrate, fix hot pixels, detect stars in the sky region
+#   (drawn, painted or detected automatically) → align to the base image
+#   (triangle matching + RANSAC, optionally with lens distortion and a smooth
+#   correction grid) → score and reject frames → combine (average, sigma
+#   clipping, freeze ground, star trails with fading and gap filling;
+#   optionally every N frames for a time-lapse) → optionally the ground from a
+#   separate foreground image → post-processing (`postprocess`, can be redone
+#   on the kept linear stack): background extraction, colour calibration,
+#   light pollution, star enhancement → brightness, HDR, tone (sRGB curve,
+#   histogram stretch or linear; sRGB or Adobe RGB) → save.
+#
+# Every run returns a frame report (what was measured and decided per frame)
+# and a log of the steps with their timings, so nothing happens unseen.
 #
 # The frames are kept as Float16, in RAM or (if they do not fit) in a temporary
 # file next to the output: deleted at once on Linux / macOS (the space is freed
@@ -39,7 +44,7 @@ const DEFAULTS = (
     motion_effect = false, model = :homography, interpolation = "Lanczos",
     sigma = (low = 3.0, high = 3.0, iters = 3),
     reject = (auto = true, min_light = 0.6, min_stars = 0.5, max_fwhm = 1.5, max_elong = 1.3),
-    sky = (mode = "None", line = nothing, gradient = 0.1, mask = falses(0, 0)),
+    sky = (mode = "None", line = nothing, gradient = 0.1, mask = falses(0, 0), feather = 0.01),
     auto_brightness = true, hdr = false, dynamic_noise = false, merge4 = false,
     color_space = "sRGB", tone = "sRGB curve", stretch = (auto = true, black = 0.0, mid = 0.25, white = 1.0),
     bg_extraction = (on = false, degree = 2), color_calibration = false,
@@ -47,7 +52,13 @@ const DEFAULTS = (
     light_pollution = (filter = "Off", strength = 50, iaa = false, degree = 2, tiles = 20),
     enhance_stars = (on = false, strength = 50),
     timelapse = (on = false, frames = 10),
+    trails = (fade = "Off", fill_gaps = false),       # fade: Off, Fade in, Fade out, Both ends
+    foreground = (path = "", match = true, ev = 0.0),
 )
+
+const FADES = ("Off", "Fade in", "Fade out", "Both ends")
+const GAP_SPACING = 3.0          # px between the shifted copies that fill a gap in a trail
+const GAP_MAX_STEPS = 8
 
 """
 Base pixel → frame pixel: a homography H, optionally with radial lens
@@ -339,7 +350,14 @@ merge4(img) = St.block_average(img, 2) .* 4f0
 # Sky region: weight 1 = sky, 0 = foreground (fractions in between: gradient)
 # --------------------------------------------------------------------------
 
+"""
+Sky weight W (h × w): 1 = sky, 0 = foreground. Boundary line / Gradient: the
+line, with the gradient zone below it. Irregular mask: the painted mask with a
+soft edge `feather` (fraction of the width) wide, inside the sky only, so the
+foreground never gets any of the aligned sky (no halos along the horizon).
+"""
 function sky_weight(sky, h, w)
+    sky = merge(DEFAULTS.sky, sky)
     W = ones(Float32, h, w)
     if sky.mode in ("Boundary line", "Gradient") && sky.line !== nothing
         u1, v1, u2, v2 = sky.line
@@ -353,7 +371,7 @@ function sky_weight(sky, h, w)
             end
         end
     elseif sky.mode == "Irregular mask" && !isempty(sky.mask) && any(sky.mask)
-        M = St.blur(Float32.(sky.mask), 0.7)
+        M = mask_weight(sky.mask, sky.feather)
         mh, mw = size(M)
         Threads.@threads for x in 1:w
             for y in 1:h
@@ -362,6 +380,91 @@ function sky_weight(sky, h, w)
         end
     end
     return W
+end
+
+"""Painted mask → weights at the mask's resolution: 0 outside, rising to 1 over `feather` × width inside."""
+function mask_weight(mask, feather)
+    mh, mw = size(mask)
+    σ = max(0.5, feather * mw / 2)
+    B = St.blur(Float32.(mask), σ)
+    return map((b, m) -> m ? clamp(2b - 1, 0f0, 1f0) : 0f0, B, mask)
+end
+
+"""
+Sky mask (true = sky) of a landscape shot with the sky at the top, `rows` × `cols`
+(rows: same aspect by default). On a coarse grid, each column is split where
+the brightness (log) and the density of point-like stars change most between
+above and below (a two-part fit); columns without a clear change are all sky.
+The horizons are smoothed across columns, refined to the steepest brightness
+edge near them, and moved up a little, so the mask stays off the foreground.
+Returns (mask, horizon as a fraction of the height per mask column).
+"""
+function detect_sky(img; cols = 400, rows = nothing, margin = 0.01)
+    L = St.luminance(img)
+    h, w = size(L)
+    rows === nothing && (rows = max(1, round(Int, cols * h / w)))
+    v = vec(L)[1:max(1, length(L) ÷ 200_000):end]
+    m = max(Float32(median(v)), 1f-5)
+    A = log.(L .+ 0.05f0 * m)                                     # brightness, scale-free
+    Hp = L .- St.blur(L, 2.0)
+    hv = vec(Hp)[1:max(1, length(Hp) ÷ 200_000):end]
+    σ = 1.4826f0 * Float32(median(abs.(hv .- median(hv)))) + 1f-7
+    nx = 48
+    c = max(4, w ÷ nx)
+    nx, ny = cld(w, c), cld(h, c)
+    B = zeros(Float64, ny, nx); D = zeros(Float64, ny, nx)
+    Threads.@threads for j in 1:nx
+        for i in 1:ny
+            ys, xs = (i-1)*c+1:min(i * c, h), (j-1)*c+1:min(j * c, w)
+            B[i, j] = median(view(A, ys, xs))
+            n = 0
+            for y in ys, x in xs
+                (2 <= y <= h - 1 && 2 <= x <= w - 1) || continue
+                p = Hp[y, x]
+                p > 6σ || continue
+                (p >= Hp[y-1, x] && p >= Hp[y+1, x] && p >= Hp[y, x-1] && p >= Hp[y, x+1]) && (n += 1)
+            end
+            D[i, j] = n
+        end
+    end
+    sb = max(1.4826 * median(abs.(diff(B; dims = 1))), 0.02)     # row-to-row brightness noise
+    sd = mean(D[1:max(1, ny ÷ 4), :]) + 0.5                       # star density near the top
+    hz = fill(Float64(ny), nx)                                    # coarse horizon (rows of sky)
+    for j in 1:nx
+        best, at = 0.0, ny
+        for r in 1:ny-1
+            db = mean(view(B, 1:r, j)) - mean(view(B, r+1:ny, j))
+            dd = mean(view(D, 1:r, j)) - mean(view(D, r+1:ny, j))
+            sc = 2sqrt(r * (ny - r)) / ny * (max(db, 0) / (4sb) + max(dd, 0) / sd)
+            sc > best && (best = sc; at = r)
+        end
+        best > 1 && (hz[j] = at)
+    end
+    hz = [median(hz[max(1, j - 2):min(nx, j + 2)]) for j in 1:nx]
+    # Fine: the steepest drop of the smoothed brightness within a cell of the coarse horizon.
+    As = St.blur(A, 1.5)
+    horizon = zeros(cols)
+    for u in 1:cols
+        x0, x1 = clamp(floor(Int, (u - 1) * w / cols) + 1, 1, w), clamp(floor(Int, u * w / cols), 1, w)
+        j = clamp(cld(x0 + x1, 2c), 1, nx)
+        y0 = hz[j] * c
+        if hz[j] >= ny                                            # all sky
+            horizon[u] = 1.0 + margin
+            continue
+        end
+        yb, ystar, drop = round(Int, y0), round(Int, y0), 0.0
+        for y in max(3, round(Int, y0 - c)):min(h - 2, round(Int, y0 + c))
+            d = mean(view(As, y - 2, x0:x1)) - mean(view(As, y + 2, x0:x1))
+            d > drop && (drop = d; ystar = y)
+        end
+        horizon[u] = (drop > 2sb ? ystar : yb) / h
+    end
+    horizon = [median(horizon[max(1, u - 3):min(cols, u + 3)]) for u in 1:cols] .- margin
+    mask = falses(rows, cols)
+    for u in 1:cols, r in 1:rows
+        (r - 0.5) / rows < horizon[u] && (mask[r, u] = true)
+    end
+    return mask, clamp.(horizon, 0, 1)
 end
 
 # --------------------------------------------------------------------------
@@ -681,18 +784,36 @@ function sigma_mean!(v, n, lo, hi, iters)
 end
 
 """
+Brightness of each of K trail frames: 1, or rising from 0.1 (Fade in: the
+trails start faint, Sequator's motion effect), falling (Fade out), or both
+(rising over the first and falling over the last third).
+"""
+function trail_fade(kind, K)
+    return map(1:K) do k
+        Float32(kind == "Fade in" ? 0.1 + 0.9 * (k / K)^2 :
+                kind == "Fade out" ? 0.1 + 0.9 * ((K - k + 1) / K)^2 :
+                kind == "Both ends" ? 0.1 + 0.9 * min(1, 3min((k - 0.5) / K, 1 - (k - 0.5) / K))^2 : 1.0)
+    end
+end
+fade_kind(cfg) = cfg.trails.fade == "Off" && cfg.motion_effect ? "Fade in" : cfg.trails.fade
+
+"""
 The stacked image (linear). `mode`: :accumulation (average), :best (sigma-clipped
 average), :freeze (sky aligned, foreground not, each sigma-clipped), :trails
 (sky: brightest value, optionally fading; foreground: sigma-clipped average).
+Star trails: `gaps[k]` (frame k pixel → frame k+1 pixel, or nothing) fills the
+gap between frames k and k+1 with `steps` copies of frame k shifted along the
+way, so the trails do not break up into dashes.
 """
-function combine(D, frames, W, cfg, mode; progress, ref = nothing)
+function combine(D, frames, W, cfg, mode; progress, ref = nothing, gaps = nothing, steps = 0)
     _, w, h, _ = size(D)
     K = length(frames)
     lo, hi, its = cfg.sigma.low, cfg.sigma.high, cfg.sigma.iters
     warps = [f.warp for f in frames]
     lz = cfg.interpolation == "Lanczos"
     gains = [f.gain for f in frames]
-    fade = [cfg.motion_effect ? Float32(0.1 + 0.9 * (k / K)^2) : 1f0 for k in 1:K]
+    fade = trail_fade(fade_kind(cfg), K)
+    fill = mode === :trails && gaps !== nothing && steps > 0
     sel = cfg.selective
     out = Img(undef, h, w)
     chunks = collect(Iterators.partition(1:h, 4))
@@ -725,9 +846,25 @@ function combine(D, frames, W, cfg, mode; progress, ref = nothing)
                     end
                 end
             end
+            gap = (0f0, 0f0, 0f0)
+            if fill && m > 0
+                for k in 1:K-1
+                    M = gaps[k]
+                    M === nothing && continue
+                    qx, qy = St.apply_h(M, x, y)
+                    dx, dy = qx - x, qy - y
+                    for j in 1:steps
+                        t = j / (steps + 1)
+                        s = sample(D, k, x - t * dx, y - t * dy, w, h)
+                        s === nothing && continue
+                        f = fade[k] + Float32(t) * (fade[k+1] - fade[k])
+                        gap = ntuple(c -> max(gap[c], f * s[c] * gains[k][c]), Val(3))
+                    end
+                end
+            end
             val = ntuple(Val(3)) do c
                 if mode === :trails
-                    t = m > 0 ? maximum(fade[k] * gnd[c][k] for k in 1:ng) : 0f0
+                    t = m > 0 ? max(maximum(fade[k] * gnd[c][k] for k in 1:ng), gap[c]) : 0f0
                     g = m < 1 ? sigma_mean!(gnd[c], ng, lo, hi, its) : 0f0
                     m * t + (1 - m) * g
                 elseif mode === :freeze
@@ -761,6 +898,42 @@ function resample(D, k, wp; lanczos = true)
         end
     end
     return out
+end
+
+# --------------------------------------------------------------------------
+# Foreground image: a separate exposure of the ground (blue hour, a long or
+# low-ISO shot from the same tripod position) replaces the stacked foreground
+# below the sky region, matched to its brightness.
+# --------------------------------------------------------------------------
+
+"""The foreground image at the stack's size (same framing; scaled if only the resolution differs)."""
+function load_foreground(cfg, load, h, w)
+    img = load(cfg.foreground.path)
+    cfg.merge4 && (img = merge4(img))
+    fh, fw = size(img)
+    (fh, fw) == (h, w) && return img
+    abs(fw / fh - w / h) < 0.01 * w / h ||
+        error("The foreground image is $(fw)×$(fh), not the shape of the star images ($(w)×$(h)).")
+    img = St.resize(img, h / fh)
+    return [img[min(y, size(img, 1)), min(x, size(img, 2))] for y in 1:h, x in 1:w]
+end
+
+"""
+Sky from the stack, ground from `fg` (both linear), across the sky weight W.
+The foreground is scaled to the brightness of the stacked ground (`match`)
+and by 2^ev. Returns (image, scale used).
+"""
+function blend_foreground(stacked, fg, W, f)
+    k = 2.0^f.ev
+    n = length(W)
+    gnd = [i for i in 1:max(1, n ÷ 200_000):n if W[i] <= 0.01]
+    if f.match && length(gnd) >= 50
+        a = median(St.luminance(stacked[i]) for i in gnd)
+        b = median(St.luminance(fg[i]) for i in gnd)
+        a > 0 && b > 0 && (k *= a / b)
+    end
+    kf = Float32(k)
+    return map((s, g, m) -> m * s + (1 - m) * kf * g, stacked, fg, W), k
 end
 
 # --------------------------------------------------------------------------
@@ -1038,6 +1211,22 @@ function postprocess(raw, W, cfg; fwhm = NaN, gain = nothing)
     return (linear = lin, image = disp, gain = gain, background = background, stretch = str)
 end
 
+"""The post-processing settings in words (for the log)."""
+function postprocess_summary(cfg)
+    cfg = merge(DEFAULTS, cfg)
+    p = String[]
+    cfg.bg_extraction.on && push!(p, "background extraction (degree $(cfg.bg_extraction.degree))")
+    cfg.color_calibration && push!(p, "colour calibration")
+    cfg.color_noise.on && push!(p, "colour noise $(cfg.color_noise.strength)")
+    lp = cfg.light_pollution
+    lp.filter == "Off" || push!(p, "light pollution $(lowercase(lp.filter)) $(lp.strength)" * (lp.iaa ? " + I.A.A." : ""))
+    cfg.enhance_stars.on && push!(p, "star light $(cfg.enhance_stars.strength)")
+    cfg.auto_brightness && push!(p, "auto brightness")
+    cfg.hdr && push!(p, "HDR")
+    push!(p, "$(cfg.tone), $(cfg.color_space)")
+    return join(p, ", ")
+end
+
 """Save a stack result again with (possibly changed) post-processing settings: FITS / XISF linear."""
 function save_result(res, cfg)
     p = postprocess(res.raw, res.W, cfg; fwhm = res.fwhm)
@@ -1098,6 +1287,10 @@ end
 
 function stack_run(cfg; preview, progress, loader)
     cfg = merge(DEFAULTS, cfg)
+    cfg = merge(cfg, (trails = merge(DEFAULTS.trails, cfg.trails), foreground = merge(DEFAULTS.foreground, cfg.foreground)))
+    log = String[]                                  # what was done, with timings
+    t_start = time(); t_step = Ref(time())
+    note!(msg) = (push!(log, "$(lpad(round(time() - t_step[]; digits = 1), 6)) s  $msg"); t_step[] = time())
     load = loader !== nothing ? loader : p -> load_linear(p, cfg; preview)
     stars = sort(unique(cfg.stars))
     infos = [FrameInfo(path = p, status = p in cfg.excluded ? :excluded : :pending) for p in stars]
@@ -1117,10 +1310,19 @@ function stack_run(cfg; preview, progress, loader)
     mode in (:best, :freeze) && length(cand) < 4 && error("Select best pixels and Freeze ground need at least 4 star images.")
     mode === :freeze && cfg.sky.mode == "None" &&
         error("Freeze ground needs a sky region (boundary line, gradient or irregular mask).")
+    usefg = !isempty(cfg.foreground.path)
+    usefg && cfg.sky.mode == "None" &&
+        error("A foreground image needs a sky region (boundary line, gradient, irregular mask or automatic).")
+    gapfill = mode === :trails && cfg.trails.fill_gaps
     dir = isempty(cfg.output) ? tempdir() : dirname(abspath(cfg.output))
     pick(ps) = preview ? ps[1:min(end, PREVIEW_CALIB)] : ps
     cal = calibration(merge(cfg, (darks = pick(cfg.darks), bias = pick(cfg.bias), flats = pick(cfg.flats),
                                   flatdarks = pick(cfg.flatdarks))), load, dir; progress)
+    ncal = [(length(pick(getfield(cfg, k))), n) for (k, n) in ((:darks, "noise"), (:bias, "bias"),
+                                                              (:flats, "vignetting"), (:flatdarks, "flat-dark"))]
+    note!("Calibration: " * (all(==(0), first.(ncal)) ? "none" :
+          join(["master $n of $k frames" for (k, n) in ncal if k > 0], ", ") *
+          (isempty(cfg.darks) ? "" : "; $(length(cal.hot)) hot pixels found in the noise images")))
 
     # Load, calibrate and measure every frame (the base first: it fixes the size).
     function prepare(fi)
@@ -1132,7 +1334,13 @@ function stack_run(cfg; preview, progress, loader)
     progress("Loading the base image $(basename(base.path))…", nothing)
     img0 = prepare(base)
     h, w = size(img0)
+    if cfg.sky.mode == "Automatic"
+        mask, hz = detect_sky(img0)
+        cfg = merge(cfg, (sky = merge(cfg.sky, (mode = "Irregular mask", mask = mask)),))
+        note!("Sky detected automatically in the base image: $(round(Int, 100 * count(mask) / length(mask))) % of the frame")
+    end
     W = sky_weight(cfg.sky, h, w)
+    cfg.sky.mode == "None" || note!("Sky region ($(cfg.sky.mode)): $(round(Int, 100 * count(>=(0.5), W) / length(W))) % of the frame")
     D = framestore(h, w, length(cand), dir)
     function measure!(fi, k, img)
         size(img) == (h, w) || error("$(basename(fi.path)) is $(size(img, 2))×$(size(img, 1)), the base image $(w)×$(h).")
@@ -1179,8 +1387,42 @@ function stack_run(cfg; preview, progress, loader)
     base.matched, base.err = base.stars, 0.0
     bl = base.light
     foreach(fi -> fi.light = bl > 0 ? fi.light / bl : NaN, cand)
+    note!("Loaded, calibrated and measured $(length(cand)) frames" * (aligned ? ", aligned to $(basename(base.path))" : "") *
+          (cfg.dynamic_noise ? ", dynamic hot pixels replaced" : "") * (cfg.merge4 ? ", 2×2 pixels merged" : "") *
+          "; $(h)×$(w) px; base: $(base.stars) stars, FWHM $(round(base.fwhm; digits = 1)) px")
     reject!(cand, cfg, aligned)
     frames = [fi for fi in cand if used(fi)]
+    nrej = count(fi -> fi.status in (:rejected, :failed), cand)
+    note!("Frames used: $(length(frames)) of $(length(infos))" *
+          (nrej > 0 ? "; $nrej left out (reasons in the table)" : "") *
+          (count(fi -> fi.status === :excluded, infos) > 0 ? "; $(count(fi -> fi.status === :excluded, infos)) excluded by you" : "") *
+          (cfg.reject.auto ? "" : "; automatic rejection off"))
+    gaps, steps = nothing, 0
+    if gapfill && length(frames) > 1
+        # Star motion from each frame to the next: the gaps are filled along it.
+        progress("Measuring the star motion between frames…", nothing)
+        gaps = Vector{Union{Nothing,Matrix{Float64}}}(nothing, length(frames))
+        Threads.@threads for k in 1:length(frames)-1
+            a, b = frames[k], frames[k+1]
+            try
+                M, n, err = align_stars(a.detected, b.detected, w; model = cfg.model)
+                gaps[k] = M
+                b.matched, b.err = n, err
+            catch e
+                b.reason = "no gap filling before this frame: " * (e isa ErrorException ? e.msg : sprint(showerror, e))
+            end
+        end
+        dmax = 0.0
+        for M in gaps
+            M === nothing && continue
+            for (x, y) in ((1, 1), (w, 1), (1, h), (w, h), (w / 2, h / 2))
+                dmax = max(dmax, hypot((St.apply_h(M, x, y) .- (x, y))...))
+            end
+        end
+        steps = clamp(ceil(Int, dmax / GAP_SPACING) - 1, 0, GAP_MAX_STEPS)
+        note!("Gap filling: star motion up to $(round(dmax; digits = 1)) px per frame, $steps shifted " *
+              "cop$(steps == 1 ? "y" : "ies") per gap; $(count(!isnothing, gaps)) of $(length(frames) - 1) gaps measured")
+    end
     if cfg.unify_exposure
         for fi in frames
             fi.gain = ntuple(c -> fi.level[c] > 0 ? Float32(base.level[c] / fi.level[c]) : 1f0, 3)
@@ -1193,7 +1435,14 @@ function stack_run(cfg; preview, progress, loader)
             kind = median([fi.matched for fi in frames if fi !== base]) >= 80 ? :complex : :lens
         end
         progress("Correcting distortion ($kind)…", nothing)
-        correct_distortion!(frames, base, kind, h, w)
+        k1 = correct_distortion!(frames, base, kind, h, w)
+        note!("Distortion correction ($kind): radial k1 = $(round(k1; digits = 4))" * (kind === :complex ? ", plus a correction grid per frame" : "") *
+              "; median alignment error $(round(medfin([fi.err for fi in frames if fi !== base]); digits = 2)) px")
+    end
+    fg = nothing
+    if usefg
+        progress("Loading the foreground image…", nothing)
+        fg = load_foreground(cfg, load, h, w)
     end
     saved = String[]
     if mode === :alignonly
@@ -1224,7 +1473,9 @@ function stack_run(cfg; preview, progress, loader)
             win = n:n+N-1
             progress("Time-lapse frame $n/$nout…", nothing)
             ref = mode === :trails ? nothing : frames[win[cld(N, 2)]].warp
-            raw_ = combine(view(D, :, :, :, ks[win]), frames[win], W, cfg, mode; progress, ref)
+            g = gaps === nothing ? nothing : [k < last(win) ? gaps[k] : nothing for k in win]
+            raw_ = combine(view(D, :, :, :, ks[win]), frames[win], W, cfg, mode; progress, ref, gaps = g, steps)
+            fg === nothing || (raw_ = blend_foreground(raw_, fg, W, cfg.foreground)[1])
             pp = postprocess(raw_, W, cfg; fwhm = base.fwhm, gain = gain0)
             gain0 === nothing && (gain0 = pp.gain; stacked = raw_)
             if !preview
@@ -1236,19 +1487,34 @@ function stack_run(cfg; preview, progress, loader)
     else
         # A view of the store with only the frames in use.
         Dv = length(ks) == size(D, 4) ? D : view(D, :, :, :, ks)
-        stacked = combine(Dv, frames, W, cfg, mode; progress)
+        stacked = combine(Dv, frames, W, cfg, mode; progress, gaps, steps)
+    end
+    note!("Combined: " * Dict(:accumulation => "average", :best => "sigma-clipped average ($(cfg.sigma.low) / $(cfg.sigma.high) σ, $(cfg.sigma.iters)×)",
+                              :freeze => "freeze ground (sky aligned, foreground in place, sigma-clipped)",
+                              :trails => "star trails (brightest value in the sky" * (fade_kind(cfg) == "Off" ? "" : ", $(lowercase(fade_kind(cfg)))") * ")",
+                              :alignonly => "aligned frames written")[mode] *
+          (cfg.timelapse.on && mode !== :alignonly ? "; time-lapse of every $(cfg.timelapse.frames) frames" : "") *
+          (cfg.unify_exposure ? "; exposure unified" : ""))
+    if fg !== nothing && !cfg.timelapse.on && mode !== :alignonly
+        stacked, kfg = blend_foreground(stacked, fg, W, cfg.foreground)
+        note!("Foreground from $(basename(cfg.foreground.path)), brightness ×$(round(kfg; sigdigits = 3))" *
+              (cfg.foreground.match ? " (matched to the stacked ground" * (cfg.foreground.ev == 0 ? "" : ", $(cfg.foreground.ev) EV") * ")" : ""))
     end
     progress("Post-processing…", nothing)
     pp = postprocess(stacked, W, cfg; fwhm = base.fwhm)
     lin, disp, gain = pp.linear, pp.image, pp.gain
+    note!("Post-processing: " * postprocess_summary(cfg) * "; brightness ×$(round(gain; sigdigits = 3))")
     if !preview && mode !== :alignonly && !cfg.timelapse.on
         isempty(cfg.output) && error("No output file.")
         progress("Saving $(basename(cfg.output))…", nothing)
         St.save_panorama(cfg.output, St.isastro(cfg.output) ? lin : disp)
         push!(saved, cfg.output)
     end
+    isempty(saved) || note!("Saved " * (length(saved) == 1 ? saved[1] : "$(length(saved)) files in $(dirname(saved[1]))"))
+    push!(log, "$(lpad(round(time() - t_start; digits = 1), 6)) s  in total")
     return (image = disp, linear = lin, report = infos, gain = gain, saved = saved, base = base.path,
-            background = pp.background, stretch = pp.stretch, raw = stacked, W = W, fwhm = base.fwhm)
+            background = pp.background, stretch = pp.stretch, raw = stacked, W = W, fwhm = base.fwhm,
+            log = log, mask = cfg.sky.mode == "Irregular mask" ? cfg.sky.mask : nothing)
 end
 
 """The frame report as a text table."""
