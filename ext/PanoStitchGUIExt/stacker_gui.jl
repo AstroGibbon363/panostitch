@@ -1,21 +1,25 @@
-# Star stacking page, modelled on Sequator: the input files (star images, base
-# image, calibration frames, output) on the top left; the processing settings
+# Star stacking page, modelled on Sequator but with what it lacks (bias and
+# flat-dark frames, a foreground image, trail fades and gap filling, automatic
+# sky detection, frame scoring, a quality chart and a log of every step): the
+# input files (star images, base image, calibration frames, foreground, output) on the top left; the processing settings
 # below; the options of the highlighted entry under them; Quick preview and
 # Start. On the right: the base image (where the sky region is drawn), the
 # result, and the frame report. The work is done by Stacker (stacker.jl).
 #
 # Base image view: in "Boundary line" / "Gradient" mode drag a line along the
 # horizon; in "Irregular mask" mode paint the sky with the left button, erase
-# with the right one, mouse wheel = brush size. Frame report: click a frame to
-# exclude it (or include it again). Result: drag to pan, wheel to zoom.
+# with the right one, mouse wheel = brush size ("Detect sky" paints a first
+# mask). Frame report: click a frame (in the table or the chart) to exclude it
+# (or include it again). Result: drag to pan, wheel to zoom.
 #
 # Projects (.stackproj, TOML text) keep the file lists, the sky region and
 # every setting; files are found by absolute path, else relative to the project.
 
 const STACK_GROUPS = ("Star images", "Base image", "Noise images", "Bias images", "Vignetting images",
-                      "Flat-dark images", "Output")
-const OUT = 7                     # the Output entry; groups 1–6 hold files
-const GROUP_KEYS = ("stars", "base", "darks", "bias", "flats", "flatdarks")   # in project files
+                      "Flat-dark images", "Foreground image", "Output")
+const FG = 7                      # the foreground image (one file, like the base image)
+const OUT = 8                     # the Output entry; groups 1–7 hold files
+const GROUP_KEYS = ("stars", "base", "darks", "bias", "flats", "flatdarks", "foreground")   # in project files
 const STACK_PROJECT_EXT = ".stackproj"
 const TREE_ROWS = 9               # visible rows of the input list
 const ROW_PX = 18                 # height of one row in the lists
@@ -33,6 +37,9 @@ const COLOR_SPACES = ("sRGB", "Adobe RGB")
 const TONES = ("sRGB curve", "Stretch", "Linear")
 const INTERPOLATIONS = ("Lanczos", "Bilinear")
 const WHITE_BALANCE = ("Camera" => :camera, "Average of image" => :auto, "Daylight" => :daylight)
+const FADES = Sk.FADES
+const CHART_SERIES = (("stars", :stars, :dodgerblue), ("FWHM", :fwhm, :orange), ("elongation", :elong, :mediumpurple),
+                      ("light", :light, :gold), ("sky level", :background, :gray60), ("align error", :err, :tomato))
 const DEMOSAIC = ("AHD" => 3, "DHT" => 11, "AAHD" => 12, "DCB" => 4, "PPG" => 2, "VNG" => 1, "Bilinear" => 0)
 
 
@@ -60,6 +67,11 @@ const STACK_NOTES = Dict(
         "suitable if there are dust shadows.",
     "Flat-dark images" => "Dark frames for the flats: same ISO and exposure time as the " *
         "vignetting images, lens cap on. Subtracted from the flats (else the bias is).",
+    "Foreground image" => "A separate shot of the ground from the same tripod position – at blue " *
+        "hour, a long exposure or low ISO – used below the sky region instead of the stacked " *
+        "foreground (which is noisy or dark at night). Needs a sky region. Not aligned: the ground " *
+        "stays in place.\n\nMatch brightness scales it to the stacked ground, so it fits the night; " *
+        "Exposure (EV) brightens or darkens it from there (+1 EV = twice as bright).",
     "Output" => "TIFF (.tif): 16-bit, as shown. JPEG (.jpg): 8-bit. FITS (.fits) or XISF (.xisf): " *
         "32-bit float, linear: only the brightness gain is applied, no tone curve, nothing " *
         "clipped – the most room for processing in Siril, PixInsight etc.\nAlign only writes the " *
@@ -75,12 +87,18 @@ const STACK_NOTES = Dict(
         "follows the perspective of wide-angle shots; similarity only shifts, turns, scales.\n" *
         "Interpolation: Lanczos is sharper, bilinear a little smoother and faster.\n\n" *
         "Star trails: no alignment; the sky gets the brightest value, the foreground the " *
-        "average. Motion effect fades the start of the trails.",
-    "Sky region" => "Marks the sky: stars are detected there, Freeze ground and Star trails " *
-        "treat the rest as foreground.\n  Boundary line – drag a line along the horizon.\n  " *
-        "Gradient – the line plus a transition zone below it.\n  Irregular mask – paint the sky " *
-        "(left button), erase (right), wheel = brush size. Roughly, but do not touch the " *
-        "foreground.\nAuxiliary highlight brightens the view.",
+        "average.\n  Trail fade – fade in (Sequator's motion effect: the trails start faint), fade " *
+        "out, or both ends (a comet-like taper).\n  Fill gaps – the short breaks between frames " *
+        "(the camera's interval) are filled along the measured star motion, so the trails are " *
+        "continuous instead of dashed.",
+    "Sky region" => "Marks the sky: stars are detected there, Freeze ground, Star trails and the " *
+        "foreground image treat the rest as foreground.\n  Boundary line – drag a line along the " *
+        "horizon.\n  Gradient – the line plus a transition zone below it.\n  Irregular mask – paint " *
+        "the sky (left button), erase (right); mouse wheel or the slider = brush size.\nDetect sky " *
+        "paints a first mask from brightness and stars (approximate: check it and correct with the " *
+        "brush). Mask feather softens the mask's edge, inside the sky only, so the foreground gets " *
+        "none of the sky. Auxiliary highlight brightens the view; Show detected stars marks the " *
+        "stars the last run found in the shown frame.",
     "Sigma clipping" => "Select best pixels, Freeze ground and the star-trails foreground drop " *
         "values further than low / high × σ from the centre, a few times over. Lower values " *
         "remove more (planes, satellites, hot pixels) but leave more noise; 2–3 is usual. " *
@@ -90,7 +108,9 @@ const STACK_NOTES = Dict(
         "(light), alignment error. Automatic rejection leaves out frames clearly worse than the " *
         "typical one: dimmer stars (clouds, haze, dew), few stars, blurred or elongated stars " *
         "(focus, wind, bumped tripod). The base image is never rejected.\nSee the Frame report " *
-        "after Preview or Start; click a frame there to exclude or include it.",
+        "after Preview or Start: a chart of every measure per frame (÷ its median, so outliers " *
+        "stand out; red = left out) above the table, and the log of every step. Click a frame in " *
+        "either to exclude or include it.",
     "RAW conversion" => "RAW files are decoded by LibRaw (dcraw_emu) without tone curve, as " *
         "stacking needs. White balance: the camera's, the image average, or daylight. " *
         "Demosaicing: AHD (default); DHT and AAHD often give less colour noise at high ISO; DCB, " *
@@ -142,7 +162,7 @@ const STACK_NOTES = Dict(
 )
 
 Base.@kwdef mutable struct StackState
-    files::Vector{Vector{String}} = [String[] for _ in 1:OUT-1]   # per group; base: 0 or 1
+    files::Vector{Vector{String}} = [String[] for _ in 1:OUT-1]   # per group; base, foreground: 0 or 1
     output::String = ""
     excluded::Set{String} = Set{String}()
     highlight::Tuple{Symbol,Int} = (:group, 1)   # (:group, g), (:file, row in the input list) or (:setting, k)
@@ -168,6 +188,7 @@ Base.@kwdef mutable struct StackState
     settings::Any = nothing                      # () -> settings for Stacker.stack
     project::Union{Nothing,String} = nothing     # last saved / opened project file
     api::Any = nothing                           # functions for scripting and tests
+    to_stitcher::Any = nothing                   # paths -> nothing: hand results to the Stitcher tab
 end
 
 function build_stacker!(fig, root; active = () -> true)
@@ -236,6 +257,10 @@ function build_stacker!(fig, root; active = () -> true)
     g = page(5)
     t_homog = toggle!(g, 1, "Homogenize vignetting"); note!(g, "Vignetting images")
     note!(page(6), "Flat-dark images")
+    g = page(FG)
+    t_fgmatch = toggle!(g, 1, "Match brightness to the stacked ground"; active = true)
+    s_fgev = slider!(g, 2, "Exposure (EV)", -3:0.1:3, 0.0)
+    note!(g, "Foreground image")
     g = page(OUT)
     outbox = Textbox(g[1, 1:2], placeholder = "output file (.tif / .jpg / .fits / .xisf)", width = 290, halign = :left)
     b_browse = Button(g[1, 3], label = "Browse…")
@@ -247,14 +272,19 @@ function build_stacker!(fig, root; active = () -> true)
     m_model = menu!(g, 3, "Model", MODELS_)
     m_interp = menu!(g, 4, "Interpolation", INTERPOLATIONS)
     t_select = toggle!(g, 5, "Selective (sigma clipping in the sky)")
-    t_motion = toggle!(g, 6, "Motion effect (star trails)")
+    m_fade = menu!(g, 6, "Trail fade", FADES)
+    t_gaps = toggle!(g, 7, "Fill gaps between frames (star trails)")
     note!(g, "Composition")
     g = spage(2)
     m_sky = menu!(g, 1, "Sky region", SKY_MODES)
     s_grad = slider!(g, 2, "Gradient (% height)", 1:1:50, 10)
-    s_brush = slider!(g, 3, "Brush (% width)", 0.5:0.5:30, 5.0)
-    t_aux = toggle!(g, 4, "Auxiliary highlight")
-    b_skyreset = Button(g[5, 1:3], label = "Reset sky region")
+    s_brush = slider!(g, 3, "Brush size (% width)", 0.5:0.5:30, 5.0)
+    s_feather = slider!(g, 4, "Mask feather (% width)", 0:0.5:10, 1.0)
+    t_aux = toggle!(g, 5, "Auxiliary highlight")
+    t_stars = toggle!(g, 6, "Show detected stars")
+    skyb = g[7, 1:3] = GridLayout()
+    b_detect = Button(skyb[1, 1], label = icon("◎", "Detect sky"), tellwidth = false)
+    b_skyreset = Button(skyb[1, 2], label = "Reset sky region", tellwidth = false)
     note!(g, "Sky region")
     g = spage(3)
     s_siglo = slider!(g, 1, "Sigma low", 1.0:0.1:5.0, 3.0)
@@ -329,6 +359,8 @@ function build_stacker!(fig, root; active = () -> true)
     b_linear = Button(prowb[1, 1], label = "Linear (for processing)", tellwidth = false)
     b_saveres = Button(prowb[1, 2], label = icon("⬇", "Save result…"), buttoncolor = P.go,
                        labelcolor = P.onaccent, tellwidth = false)
+    b_tostitch = Button(post[pnext(), 1:3], label = icon("⇄", "Use in the Stitcher (panorama panel)"),
+                        tellwidth = false)
     postnote = Observable(STACK_NOTES["Tone"])
     Label(post[pnext(), 1:3], postnote; fontsize = 12, color = P.muted, halign = :left,
           justification = :left, word_wrap = true, width = 320)
@@ -349,8 +381,13 @@ function build_stacker!(fig, root; active = () -> true)
     hidedecorations!(rax)
     deregister_interaction!(rax, :rectanglezoom)          # left-drag pans instead
     rax.panbutton = Mouse.left
-    repax = Axis(views.pages[3][1, 1], backgroundcolor = P.list)
+    chartax = Axis(views.pages[3][1, 1], backgroundcolor = P.list, xlabel = "frame", ylabel = "÷ median",
+                   xlabelsize = 11, ylabelsize = 11, xticklabelsize = 10, yticklabelsize = 10,
+                   xgridvisible = false, limits = (nothing, (0, 2.6)))
+    foreach(k -> deregister_interaction!(chartax, k), collect(keys(interactions(chartax))))
+    repax = Axis(views.pages[3][2, 1], backgroundcolor = P.list)
     passive!(repax)
+    rowsize!(views.pages[3], 1, Relative(0.34))
     Label(right[4, 1], status; halign = :left, justification = :left, word_wrap = true,
           tellwidth = false, color = P.status, fontsize = 15)
     rowsize!(right, 3, Relative(0.86))
@@ -383,7 +420,7 @@ function build_stacker!(fig, root; active = () -> true)
         return isempty(s.files[g]) ? P.off : :green
     end
     function row_text((g, k))
-        k == 0 && return STACK_GROUPS[g] * (g != 2 && g != OUT && !isempty(s.files[g]) ? " ($(length(s.files[g])))" : "")
+        k == 0 && return STACK_GROUPS[g] * (g ∉ (2, FG, OUT) && !isempty(s.files[g]) ? " ($(length(s.files[g])))" : "")
         k == -1 && return "     (auto) $(basename(base()))"
         k == -2 && return "     $(basename(s.output))"
         f = s.files[g][k]
@@ -428,7 +465,8 @@ function build_stacker!(fig, root; active = () -> true)
         comp = m_comp.selection[]
         rows = [
             (1, "Composition: $comp", true),
-            (1, "     " * (comp == "Star trails" ? (t_motion.active[] ? "Motion effect" : "Lighten") :
+            (1, "     " * (comp == "Star trails" ? (m_fade.selection[] == "Off" ? "Lighten" : m_fade.selection[]) *
+                                                 (t_gaps.active[] ? ", gaps filled" : "") :
                            m_align.selection[] * (t_select.active[] ? ", selective" : "")), true),
             (2, "Sky region: $(m_sky.selection[])", m_sky.selection[] != "None"),
             (3, "Sigma clipping: $(fmt(s_siglo.value[])) / $(fmt(s_sighi.value[])) σ, $(s_sigit.value[])×", true),
@@ -475,6 +513,7 @@ function build_stacker!(fig, root; active = () -> true)
     overlay = Observable(fill(RGBAf(0, 0, 0, 0), 1, 1))
     horizon = Observable(Point2f[])              # the boundary line and the end of the gradient
     brush = Observable(Point2f[])                # brush outline under the mouse
+    starpts = Observable(Point2f[])              # stars found in the shown frame by the last run
 
     dsize() = s.disp === nothing ? (1, 1) : size(s.disp)
     to_uv(p) = (sz = dsize(); ((p[1] - 0.5) / sz[2], (p[2] - 0.5) / sz[1]))
@@ -498,8 +537,10 @@ function build_stacker!(fig, root; active = () -> true)
             # A mask made for another aspect ratio no longer fits (none while nothing is shown).
             s.disp === nothing || size(s.mask) == (mh, mw) || (s.mask = falses(mh, mw))
             if size(s.mask) == (mh, mw)
+                Wm = any(s.mask) ? Sk.mask_weight(s.mask, s_feather.value[] / 100) : zeros(Float32, mh, mw)
                 for c in 1:mw, r in 1:mh
-                    !s.mask[r, c] && mod(r + c, 9) < 2 && (O[r, c] = hatch)
+                    wm = Wm[r, c]
+                    wm < 0.999 && mod(r + c, wm > 0 ? 18 : 9) < 2 && (O[r, c] = hatch)   # sparse: the feather
                 end
             end
         elseif mode != "None"
@@ -525,6 +566,21 @@ function build_stacker!(fig, root; active = () -> true)
         horizon[] = pts
     end
 
+    """Circles on the stars the last run detected in the shown frame (Show detected stars)."""
+    function update_stars!()
+        pts = Point2f[]
+        if t_stars.active[] && s.result !== nothing && s.disp !== nothing
+            fi = findfirst(f -> f.path == s.shown, s.result.report)
+            if fi !== nothing
+                rh, rw = size(s.result.image)
+                dh, dw = size(s.disp)
+                pts = [Point2f((st.x - 0.5) * dw / rw + 0.5, (st.y - 0.5) * dh / rh + 0.5)
+                       for st in s.result.report[fi].detected]
+            end
+        end
+        starpts[] = pts
+    end
+
     function draw_preview!()
         empty!(pax)
         s.disp === nothing && return
@@ -534,8 +590,11 @@ function build_stacker!(fig, root; active = () -> true)
         image!(pax, 0.5 .. w + 0.5, 0.5 .. h + 0.5, overlay; interpolate = false)
         lines!(pax, horizon; color = :orange, linewidth = 2)
         lines!(pax, brush; color = (:lightblue, 0.9), linewidth = 1.5)
+        scatter!(pax, starpts; marker = :circle, markersize = 13, color = (:white, 0.0),
+                 strokecolor = (:lime, 0.85), strokewidth = 1.2)
         limits!(pax, 0.5, w + 0.5, h + 0.5, 0.5)      # y descending: keeps the axis reversed
         update_overlay!()
+        update_stars!()
         update_title!()
     end
 
@@ -604,6 +663,7 @@ function build_stacker!(fig, root; active = () -> true)
         s.result = r
         s.report_top = 0
         draw_result!()
+        update_stars!()
         render_post!()
     end
 
@@ -665,13 +725,49 @@ function build_stacker!(fig, root; active = () -> true)
         limits!(rax, 0.5, w + 0.5, h + 0.5, 0.5)
     end
 
-    report_lines() = s.result === nothing ? String[] : split(chomp(Sk.report_text(s.result.report)), '\n')
+    report_lines() = s.result === nothing ? String[] :
+        vcat(split(chomp(Sk.report_text(s.result.report)), '\n'),
+             haskey(s.result, :log) ? vcat(["", "Process log (time per step):"], s.result.log) : String[])
+    nreport() = s.result === nothing ? 0 : length(s.result.report)
+
+    """Every measure per frame, divided by its median over the frames used; left-out frames shaded."""
+    function draw_chart!()
+        empty!(chartax)
+        s.result === nothing && return
+        infos = s.result.report
+        n = length(infos)
+        n == 0 && return
+        xs = collect(1:n)
+        for (k, fi) in enumerate(infos)
+            off = fi.status in (:rejected, :failed) ? (P.bad, 0.25) :
+                  (fi.status in (:excluded, :skipped) || fi.path in s.excluded) ? (P.muted, 0.25) :
+                  fi.status === :base ? (P.info, 0.25) : nothing
+            off === nothing || vspan!(chartax, [k - 0.5], [k + 0.5]; color = off)
+        end
+        hlines!(chartax, [1.0]; color = (P.muted, 0.6), linestyle = :dash)
+        drawn = false
+        for (label, f, col) in CHART_SERIES
+            v = Float64[Float64(getfield(fi, f)) for fi in infos]
+            okv = [v[k] for k in 1:n if infos[k].status in (:used, :base) && isfinite(v[k]) && v[k] > 0]
+            isempty(okv) && continue
+            m = median(okv)
+            m > 0 || continue
+            y = [isfinite(x) && !(f === :err && infos[k].status === :base) ? clamp(x / m, 0, 2.5) : NaN
+                 for (k, x) in enumerate(v)]
+            scatterlines!(chartax, xs, y; color = col, markersize = 6, linewidth = 1.5, label = label)
+            drawn = true
+        end
+        xlims!(chartax, 0.5, n + 0.5)
+        drawn && axislegend(chartax; position = :lt, orientation = :horizontal, labelsize = 10, framevisible = false,
+                   patchsize = (10, 6), backgroundcolor = (:white, 0.0), padding = 2, rowgap = 0, colgap = 6)
+    end
     function report_rows()
         px = widths(repax.scene.viewport[])[2]
         return max(5, floor(Int, px / ROW_PX))
     end
     function draw_report!()
         empty!(repax)
+        s.result === nothing && empty!(chartax)
         lines = report_lines()
         nrow = report_rows()
         if isempty(lines)
@@ -681,16 +777,17 @@ function build_stacker!(fig, root; active = () -> true)
             return
         end
         infos = s.result.report
+        draw_chart!()
         n = length(lines)
         s.report_top = clamp(s.report_top, 0, max(0, n - nrow))
         top = s.report_top
         limits!(repax, 0, 1, -(top + nrow), -top)
         vis = top+1:min(n, top + nrow)
-        col(k) = k == 1 ? P.fg :
+        col(k) = k == 1 ? P.fg : k > nreport() + 1 ? P.muted :
                  (fi = infos[k-1]; fi.path in s.excluded && fi.status !== :excluded ? P.muted :
                   fi.status === :base ? P.info : fi.status === :used ? P.ok :
                   fi.status in (:rejected, :failed) ? P.bad : P.muted)
-        text_of(k) = k == 1 ? lines[1] :
+        text_of(k) = (k == 1 || k > nreport() + 1) ? lines[k] :
                      (fi = infos[k-1]; lines[k] * (fi.path in s.excluded && fi.status !== :excluded ?
                                                    "  → excluded next run" :
                                                    !(fi.path in s.excluded) && fi.status === :excluded ?
@@ -722,6 +819,8 @@ function build_stacker!(fig, root; active = () -> true)
         elseif g == 2
             s.files[2] = [first(ps)]
             first(ps) in stars() || push!(stars(), first(ps))
+        elseif g == FG
+            s.files[FG] = [first(ps)]
         else
             append!(s.files[g], ps)
             sort!(s.files[g])
@@ -781,11 +880,14 @@ function build_stacker!(fig, root; active = () -> true)
         unify_exposure = t_unify.active[], homogenize_vignetting = t_homog.active[],
         composition = m_comp.selection[], align_mode = m_align.selection[], model = Symbol(m_model.selection[]),
         interpolation = m_interp.selection[],
-        selective = t_select.active[], motion_effect = t_motion.active[],
+        selective = t_select.active[], motion_effect = false,
+        trails = (fade = m_fade.selection[], fill_gaps = t_gaps.active[]),
+        foreground = (path = isempty(s.files[FG]) ? "" : s.files[FG][1], match = t_fgmatch.active[], ev = s_fgev.value[]),
         sigma = (low = s_siglo.value[], high = s_sighi.value[], iters = s_sigit.value[]),
         reject = (auto = t_rej.active[], min_light = s_rlight.value[] / 100, min_stars = s_rstars.value[] / 100,
                   max_fwhm = s_rfwhm.value[], max_elong = s_relong.value[]),
-        sky = (mode = m_sky.selection[], line = s.line, gradient = s_grad.value[] / 100, mask = copy(s.mask)),
+        sky = (mode = m_sky.selection[], line = s.line, gradient = s_grad.value[] / 100, mask = copy(s.mask),
+               feather = s_feather.value[] / 100),
         auto_brightness = t_autob.active[], hdr = t_hdr.active[], dynamic_noise = t_dyn.active[],
         merge4 = t_merge.active[], color_space = m_cs.selection[], tone = m_tone.selection[],
         stretch = (auto = t_sauto.active[], black = s_black.value[], mid = s_mid.value[], white = s_white.value[]),
@@ -898,14 +1000,49 @@ function build_stacker!(fig, root; active = () -> true)
     end
     on(_ -> views.current[] == 3 && draw_report!(), repax.scene.viewport)
 
-    for o in (m_comp.selection, m_align.selection, t_select.active, t_motion.active, m_sky.selection,
+    for o in (m_comp.selection, m_align.selection, t_select.active, m_fade.selection, t_gaps.active, m_sky.selection,
               s_siglo.value, s_sighi.value, s_sigit.value, t_rej.active, m_wb.selection, m_dem.selection,
               t_half.active, t_dyn.active, m_dist.selection, t_merge.active, t_tl.active, s_tl.value)
         on(_ -> draw_settings!(), o)
     end
     on(_ -> update_overlay!(), m_sky.selection)
     on(_ -> update_overlay!(), s_grad.value)
+    on(_ -> update_overlay!(), s_feather.value)
     on(_ -> draw_preview!(), t_aux.active)
+    on(t_stars.active) do on_
+        update_stars!()
+        on_ && s.result === nothing && (status[] = "Stars are shown after a run (Quick preview or Start).")
+    end
+    on(b_detect.clicks) do _
+        s.disp === nothing && (status[] = "Add star images first: the sky is detected in the shown frame."; return)
+        img, shown = s.disp, s.shown
+        status[] = "Detecting the sky in $(basename(shown))…"
+        @async try
+            mask, _ = bg(() -> Sk.detect_sky(img; cols = MASK_COLS, rows = mask_size()[1]))
+            s.mask = mask
+            m_sky.i_selected[] = findfirst(==("Irregular mask"), m_sky.options[])
+            update_overlay!()
+            status[] = "Sky detected in $(basename(shown)): $(round(Int, 100 * count(mask) / length(mask))) % of the " *
+                       "frame (hatched = foreground). Approximate: correct it with the brush – left button " *
+                       "paints sky, right erases, wheel = brush size."
+        catch e
+            status[] = "Sky detection failed: " * sprint(showerror, e isa TaskFailedException ? e.task.exception : e)
+        end
+    end
+    on(b_tostitch.clicks) do _
+        r = s.result
+        if r === nothing || r.preview || isempty(r.saved)
+            status[] = "Press Start first: the saved result goes to the Stitcher."
+        elseif length(r.saved) > 1
+            status[] = "This run saved $(length(r.saved)) files (time-lapse / align only); the Stitcher takes one stacked panel."
+        elseif s.to_stitcher === nothing
+            status[] = "No Stitcher in this window."
+        else
+            s.to_stitcher([r.saved[1]])
+            status[] = "$(basename(r.saved[1])) added to the Stitcher. Stack the next panel here (same settings, " *
+                       "a new output name), add it too, then stitch them there."
+        end
+    end
     post_controls = (t_bgx.active => "Background extraction", s_bgdeg.value => "Background extraction",
         t_ccal.active => "Color calibration", t_cnr.active => "Reduce colour noise",
         s_cnr.value => "Reduce colour noise", m_poll.selection => "Reduce light pollution",
@@ -981,6 +1118,10 @@ function build_stacker!(fig, root; active = () -> true)
             k = floor(Int, -mouseposition(setax)[2]) + 1
             rows = setting_rows()
             1 <= k <= length(rows) && highlight!((:setting, rows[k][1]))
+            return Consume(true)
+        elseif is_mouseinside(chartax) && s.result !== nothing
+            k = round(Int, mouseposition(chartax)[1])
+            1 <= k <= nreport() && toggle_exclude!(s.result.report[k].path)
             return Consume(true)
         elseif is_mouseinside(repax) && s.result !== nothing
             k = floor(Int, -mouseposition(repax)[2]) + 1
@@ -1080,9 +1221,10 @@ function build_stacker!(fig, root; active = () -> true)
     menu_by_name = Dict("composition" => m_comp, "stacking" => m_align, "model" => m_model, "sky region" => m_sky,
                         "white balance" => m_wb, "demosaicing" => m_dem, "distortion" => m_dist,
                         "light pollution" => m_poll, "color space" => m_cs, "tone" => m_tone,
-                        "interpolation" => m_interp)
+                        "interpolation" => m_interp, "trail fade" => m_fade)
     toggle_by_name = Dict("unify exposure" => t_unify, "homogenize vignetting" => t_homog, "selective" => t_select,
-                          "motion effect" => t_motion, "auxiliary highlight" => t_aux, "reject" => t_rej,
+                          "fill gaps" => t_gaps, "auxiliary highlight" => t_aux, "reject" => t_rej,
+                          "foreground match" => t_fgmatch, "show stars" => t_stars,
                           "half size" => t_half, "auto brightness" => t_autob, "hdr" => t_hdr,
                           "dynamic noises" => t_dyn, "iaa" => t_iaa, "show background" => t_showbg,
                           "background extraction" => t_bgx, "color calibration" => t_ccal,
@@ -1094,7 +1236,8 @@ function build_stacker!(fig, root; active = () -> true)
                           "light pollution degree" => s_deg, "light pollution tiles" => s_tiles,
                           "background degree" => s_bgdeg, "colour noise strength" => s_cnr,
                           "black point" => s_black, "midtones" => s_mid, "white point" => s_white,
-                          "enhance strength" => s_enh, "time-lapse frames" => s_tl)
+                          "enhance strength" => s_enh, "time-lapse frames" => s_tl, "feather" => s_feather,
+                          "foreground ev" => s_fgev)
 
     # The painted mask as run lengths (alternately not sky / sky, column by column).
     function runs(v)
@@ -1118,7 +1261,7 @@ function build_stacker!(fig, root; active = () -> true)
         dir = dirname(abspath(path))
         ref(p) = Dict("path" => abspath(p), "relative" => relpath(abspath(p), dir))
         d = Dict{String,Any}(
-            "format" => "PanoStitch stacking project", "version" => 1,
+            "format" => "PanoStitch stacking project", "version" => 2,
             "files" => Dict(GROUP_KEYS[g] => [ref(p) for p in s.files[g]] for g in 1:OUT-1),
             "excluded" => [k for (k, p) in enumerate(stars()) if p in s.excluded],
             "menus" => Dict(n => m.selection[] for (n, m) in menu_by_name),
@@ -1168,6 +1311,10 @@ function build_stacker!(fig, root; active = () -> true)
         for (n, t) in toggle_by_name
             v = get(get(d, "toggles", Dict()), n, nothing)
             v === nothing || (t.active[] = v)
+        end
+        # Version 1 projects: "motion effect" became the trail fade "Fade in".
+        if get(get(d, "toggles", Dict()), "motion effect", false) == true && !haskey(get(d, "menus", Dict()), "trail fade")
+            m_fade.i_selected[] = findfirst(==("Fade in"), m_fade.options[])
         end
         for (n, sl) in slider_by_name
             v = get(get(d, "sliders", Dict()), n, nothing)

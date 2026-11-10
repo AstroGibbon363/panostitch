@@ -7,7 +7,7 @@
 
 using Test, Random, Statistics
 using PanoStitch: Stacker as Sk, Stitcher as St
-using ColorTypes: RGB, red, green, blue
+using PanoStitch.Stitcher: RGB, red, green, blue
 
 const H, W = 300, 420
 horizon_of(x) = 0.62H + 18sin(x / 37) + 10sin(x / 11 + 1)        # ground below

@@ -8,8 +8,14 @@
 #   --darks X           noise images: a folder or comma-separated files
 #   --bias X, --flats X, --flatdarks X   the other calibration frames, the same way
 #   --mode M            accumulation | best (default) | freeze | alignonly | trails | trails-motion
+#   --fade F            star trails: in | out | both (fade the trails)
+#   --fill-gaps         star trails: fill the gaps between frames along the star motion
 #   --horizon V         sky region: horizontal line at V (0 = top, 1 = bottom) …
 #   --gradient G        … with a transition zone of G (fraction of the height)
+#   --auto-sky          sky region: detected automatically in the base image
+#   --foreground FILE   the ground from this image (same framing) instead of the stack; needs a sky region
+#   --fg-ev EV          … brighter / darker by EV (after matching it to the stacked ground)
+#   --fg-no-match       … without matching its brightness
 #   --sigma LO,HI       sigma clipping (default 3,3)
 #   --half              decode RAW files at half size (faster, less memory)
 #   --no-reject         keep every frame (no automatic rejection)
@@ -63,6 +69,18 @@ function main(args)
             m in ("trails", "trails-motion") ? (cfg[:composition] = "Star trails"; cfg[:motion_effect] = m == "trails-motion") :
                 (cfg[:align_mode] = Dict("accumulation" => "Accumulation", "best" => "Select best pixels",
                                          "freeze" => "Freeze ground", "alignonly" => "Align only")[m])
+        elseif a == "--fade"
+            f = Dict("in" => "Fade in", "out" => "Fade out", "both" => "Both ends")[next()]
+            cfg[:trails] = merge(get(cfg, :trails, Stacker.DEFAULTS.trails), (fade = f,))
+        elseif a == "--fill-gaps"
+            cfg[:trails] = merge(get(cfg, :trails, Stacker.DEFAULTS.trails), (fill_gaps = true,))
+        elseif a == "--auto-sky"; sky = merge(sky, (mode = "Automatic",))
+        elseif a == "--foreground"
+            cfg[:foreground] = merge(get(cfg, :foreground, Stacker.DEFAULTS.foreground), (path = abspath(next()),))
+        elseif a == "--fg-ev"
+            cfg[:foreground] = merge(get(cfg, :foreground, Stacker.DEFAULTS.foreground), (ev = parse(Float64, next()),))
+        elseif a == "--fg-no-match"
+            cfg[:foreground] = merge(get(cfg, :foreground, Stacker.DEFAULTS.foreground), (match = false,))
         elseif a == "--horizon"
             v = parse(Float64, next()); sky = merge(sky, (mode = sky.gradient > 0 ? "Gradient" : "Boundary line", line = (0.0, v, 1.0, v)))
         elseif a == "--gradient"
@@ -102,6 +120,7 @@ function main(args)
     last_ = Ref("")
     r = Stacker.stack(NamedTuple(cfg); progress = (m, _) -> m == last_[] || (last_[] = m; println(m)))
     print(Stacker.report_text(r.report))
+    println("\nProcess log:"); foreach(l -> println("  ", l), r.log)
     println("Saved: ", join(r.saved, ", "))
 end
 

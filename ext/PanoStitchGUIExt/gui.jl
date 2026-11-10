@@ -380,6 +380,7 @@ function build_window(paths; watch, restore, on_ui)
         fig.layout.block_updates = false
     end
     st.api = merge(st.api, (; stacker = sst))
+    sst.to_stitcher = ps -> (st.api.add(ps); tabs.current[] = 1)     # stacked panels → panorama
     tabs.current[] = 1                           # lays out the window (showpage!)
     isempty(stackprojs) || (tabs.current[] = 2; sst.api.open_project(first(stackprojs)))
     if restore !== nothing
@@ -1879,7 +1880,7 @@ function build_stitcher!(fig, root, paths; watch = true, active = () -> true)
     st.committed = snapshot()
     projs = filter(p -> endswith(lowercase(p), PROJECT_EXT), paths)
     isempty(projs) ? add_paths!(paths) : open_project!(first(projs))
-    st.api = (; save_project = save_project!, open_project = open_project!, undo = undo!, redo = redo!,
+    st.api = (; save_project = save_project!, open_project = open_project!, undo = undo!, redo = redo!, add = add_paths!,
               close = () -> (st.closed = true))
     UI[].simple && remove_blocks!(adv)
     watch && watch_changes!()
