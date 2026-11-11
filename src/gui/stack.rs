@@ -19,6 +19,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+pub const PROJECT_EXT: &str = ".stackproj";
+const GROUP_KEYS: [&str; 7] = ["stars", "base", "darks", "bias", "flats", "flatdarks", "foreground"];
+const DEM: [(u32, &str); 7] = [(3, "AHD"), (11, "DHT"), (12, "AAHD"), (4, "DCB"), (2, "PPG"), (1, "VNG"), (0, "Bilinear")];
+const WB: [(io::WhiteBalance, &str); 3] = [(io::WhiteBalance::Camera, "Camera"), (io::WhiteBalance::Auto, "Average of image"), (io::WhiteBalance::Daylight, "Daylight")];
 const GROUPS: [&str; 8] = ["Star images", "Base image", "Noise images", "Bias images", "Vignetting images", "Flat-dark images", "Foreground image", "Output"];
 const MASK_COLS: usize = 400;
 const PREVIEW_MAX: usize = 1600;
@@ -70,6 +74,44 @@ pub struct StackTab {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     dialog: Option<(Receiver<Picked>, &'static str)>,
+    pub simple: bool,
+    /// The highlighted settings entry (None: the options of the highlighted file group).
+    setting: Option<usize>,
+    project: Option<String>,
+    post_note: &'static str,
+}
+
+/// The painted mask as run lengths (alternately not sky / sky), column by column
+/// (the order the Julia version used, so its project files open here too).
+fn runs(m: &Bits) -> Vec<i64> {
+    let (mut out, mut cur, mut n) = (Vec::new(), false, 0i64);
+    for c in 0..m.w {
+        for r in 0..m.h {
+            let b = m.at(r, c);
+            if b == cur {
+                n += 1;
+            } else {
+                out.push(n);
+                cur = b;
+                n = 1;
+            }
+        }
+    }
+    out.push(n);
+    out
+}
+fn unruns(r: &[i64], rows: usize, cols: usize) -> Bits {
+    let mut m = Bits::new(rows, cols);
+    let mut p = 0usize;
+    for (k, &n) in r.iter().enumerate() {
+        for q in p..(p + n.max(0) as usize).min(rows * cols) {
+            if k % 2 == 1 {
+                m.set(q % rows, q / rows, true);
+            }
+        }
+        p += n.max(0) as usize;
+    }
+    m
 }
 
 impl Default for StackTab {
@@ -83,6 +125,7 @@ impl Default for StackTab {
             post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(String::new())),
             status: "Add star images to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), tx, rx, dialog: None,
+            simple: false, setting: None, project: None, post_note: super::notes::note("Tone"),
         }
     }
 }
@@ -329,13 +372,256 @@ impl StackTab {
                 self.dialog = None;
                 match r {
                     Picked::NoTool => self.status = dialogs::NO_DIALOG.into(),
-                    Picked::Files(ps) => self.add(ps),
                     Picked::Save(Some(p)) if what == "output" => self.cfg.output = p,
                     Picked::Save(Some(p)) if what == "result" => self.save_result(p),
+                    Picked::Save(Some(p)) if what == "saveproj" => match self.save_project(&p) {
+                        Ok(p) => self.status = format!("Saved project {p}."),
+                        Err(e) => self.status = format!("Error: {e}"),
+                    },
+                    Picked::Files(ps) if what == "openproj" => {
+                        if let Some(p) = ps.first() {
+                            self.open_project(&p.clone());
+                        }
+                    }
+                    Picked::Files(ps) => self.add(ps),
                     Picked::Save(_) => {}
                 }
             }
         }
+    }
+
+    /// Toggles, sliders and menus by the names used in project files.
+    #[allow(clippy::type_complexity)]
+    fn named(&mut self) -> (Vec<(&'static str, &mut bool)>, Vec<(&'static str, f64, Box<dyn FnMut(&mut StackConfig, f64)>)>) {
+        let c = &mut self.cfg;
+        let sl: Vec<(&'static str, f64, Box<dyn FnMut(&mut StackConfig, f64)>)> = vec![
+            ("gradient", c.sky.gradient * 100.0, Box::new(|c, v| c.sky.gradient = v / 100.0)),
+            ("feather", c.sky.feather * 100.0, Box::new(|c, v| c.sky.feather = v / 100.0)),
+            ("sigma low", c.sigma.low, Box::new(|c, v| c.sigma.low = v)),
+            ("sigma high", c.sigma.high, Box::new(|c, v| c.sigma.high = v)),
+            ("sigma iterations", c.sigma.iters as f64, Box::new(|c, v| c.sigma.iters = v as usize)),
+            ("min light", c.reject.min_light * 100.0, Box::new(|c, v| c.reject.min_light = v / 100.0)),
+            ("min stars", c.reject.min_stars * 100.0, Box::new(|c, v| c.reject.min_stars = v / 100.0)),
+            ("max fwhm", c.reject.max_fwhm, Box::new(|c, v| c.reject.max_fwhm = v)),
+            ("max elongation", c.reject.max_elong, Box::new(|c, v| c.reject.max_elong = v)),
+            ("light pollution strength", c.light_pollution.strength, Box::new(|c, v| c.light_pollution.strength = v)),
+            ("light pollution degree", c.light_pollution.degree as f64, Box::new(|c, v| c.light_pollution.degree = v as usize)),
+            ("light pollution tiles", c.light_pollution.tiles as f64, Box::new(|c, v| c.light_pollution.tiles = v as usize)),
+            ("background degree", c.bg_extraction.1 as f64, Box::new(|c, v| c.bg_extraction.1 = v as usize)),
+            ("colour noise strength", c.color_noise.1, Box::new(|c, v| c.color_noise.1 = v)),
+            ("black point", c.stretch.black, Box::new(|c, v| c.stretch.black = v)),
+            ("midtones", c.stretch.mid, Box::new(|c, v| c.stretch.mid = v)),
+            ("white point", c.stretch.white, Box::new(|c, v| c.stretch.white = v)),
+            ("enhance strength", c.enhance_stars.1, Box::new(|c, v| c.enhance_stars.1 = v)),
+            ("time-lapse frames", c.timelapse.1 as f64, Box::new(|c, v| c.timelapse.1 = v as usize)),
+            ("foreground ev", c.foreground.ev, Box::new(|c, v| c.foreground.ev = v)),
+        ];
+        let tg: Vec<(&'static str, &mut bool)> = vec![
+            ("unify exposure", &mut c.unify_exposure), ("homogenize vignetting", &mut c.homogenize_vignetting),
+            ("selective", &mut c.selective), ("fill gaps", &mut c.trails.1), ("reject", &mut c.reject.auto),
+            ("foreground match", &mut c.foreground.match_brightness), ("half size", &mut c.raw.half),
+            ("auto brightness", &mut c.auto_brightness), ("hdr", &mut c.hdr), ("dynamic noises", &mut c.dynamic_noise),
+            ("iaa", &mut c.light_pollution.iaa), ("background extraction", &mut c.bg_extraction.0),
+            ("color calibration", &mut c.color_calibration), ("colour noise", &mut c.color_noise.0),
+            ("automatic stretch", &mut c.stretch.auto), ("enhance star light", &mut c.enhance_stars.0),
+            ("merge 4 pixels", &mut c.merge4), ("time-lapse", &mut c.timelapse.0),
+            ("auxiliary highlight", &mut self.aux), ("show stars", &mut self.show_stars), ("show background", &mut self.show_bg),
+        ];
+        (tg, sl)
+    }
+
+    fn menus(&self) -> Vec<(&'static str, String)> {
+        let c = &self.cfg;
+        vec![
+            ("composition", c.composition.name().into()),
+            ("stacking", c.align_mode.name().into()),
+            ("model", c.model.name().into()),
+            ("sky region", c.sky.mode.name().into()),
+            ("white balance", WB.iter().find(|w| w.0 == c.raw.wb).map(|w| w.1).unwrap_or("Camera").into()),
+            ("demosaicing", DEM.iter().find(|d| d.0 == c.raw.quality).map(|d| d.1).unwrap_or("AHD").into()),
+            ("distortion", c.distortion.name().into()),
+            ("light pollution", c.light_pollution.filter.name().into()),
+            ("color space", c.color_space.name().into()),
+            ("tone", c.tone.name().into()),
+            ("interpolation", c.interpolation.name().into()),
+            ("trail fade", c.trails.0.name().into()),
+            ("raw decoder", c.raw.decoder.name().into()),
+        ]
+    }
+
+    fn set_menu(&mut self, k: &str, v: &str) {
+        let c = &mut self.cfg;
+        match k {
+            "composition" => c.composition = Composition::from_name(v).unwrap_or(c.composition),
+            "stacking" => c.align_mode = AlignMode::from_name(v).unwrap_or(c.align_mode),
+            "model" => c.model = Model::from_name(v).filter(|m| matches!(m, Model::Homography | Model::Similarity)).unwrap_or(c.model),
+            "sky region" => c.sky.mode = SkyMode::from_name(v).unwrap_or(c.sky.mode),
+            "white balance" => c.raw.wb = WB.iter().find(|w| w.1 == v).map(|w| w.0).unwrap_or(c.raw.wb),
+            "demosaicing" => c.raw.quality = DEM.iter().find(|d| d.1 == v).map(|d| d.0).unwrap_or(c.raw.quality),
+            "distortion" => c.distortion = Distortion::from_name(v).unwrap_or(c.distortion),
+            "light pollution" => c.light_pollution.filter = Pollution::from_name(v).unwrap_or(c.light_pollution.filter),
+            "color space" => c.color_space = ColorSpace::from_name(v).unwrap_or(c.color_space),
+            "tone" => c.tone = Tone::from_name(v).unwrap_or(c.tone),
+            "interpolation" => c.interpolation = Interpolation::from_name(v).unwrap_or(c.interpolation),
+            "trail fade" => c.trails.0 = Fade::from_name(v).unwrap_or(c.trails.0),
+            "raw decoder" => {
+                if let Some(d) = io::RawDecoder::from_name(v).filter(|d| *d == io::RawDecoder::Auto || io::available_raw_decoders().contains(d)) {
+                    c.raw.decoder = d;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Projects (.stackproj, TOML text) keep the file lists, the sky region and every setting.
+    pub fn save_project(&mut self, path: &str) -> Result<String, String> {
+        use toml::{Table, Value};
+        let mut path = path.to_string();
+        if !path.to_lowercase().ends_with(PROJECT_EXT) {
+            path += PROJECT_EXT;
+        }
+        let dir = std::path::absolute(&path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let fref = |p: &str| {
+            let ap = std::path::absolute(p).unwrap_or_else(|_| p.into());
+            let mut t = Table::new();
+            t.insert("path".into(), ap.to_string_lossy().to_string().into());
+            t.insert("relative".into(), super::relpath(&ap, &dir).into());
+            Value::Table(t)
+        };
+        let mut d = Table::new();
+        d.insert("format".into(), "PanoStitch stacking project".into());
+        d.insert("version".into(), 2.into());
+        d.insert("files".into(), Value::Table((0..7).map(|g| (GROUP_KEYS[g].to_string(), Value::Array(self.files[g].iter().map(|p| fref(p)).collect()))).collect()));
+        let excl: Vec<Value> = self.files[0].iter().enumerate().filter(|(_, p)| self.cfg.excluded.contains(p)).map(|(k, _)| Value::from((k + 1) as i64)).collect();
+        d.insert("excluded".into(), Value::Array(excl));
+        d.insert("menus".into(), Value::Table(self.menus().into_iter().map(|(k, v)| (k.to_string(), Value::from(v))).collect()));
+        let out = self.cfg.output.clone();
+        let line = self.cfg.sky.line;
+        let mask = self.cfg.sky.mask.clone();
+        let brush = self.brush;
+        let (tg, sl) = self.named();
+        d.insert("toggles".into(), Value::Table(tg.into_iter().map(|(k, v)| (k.to_string(), Value::from(*v))).collect()));
+        let mut slt: Table = sl.into_iter().map(|(k, v, _)| (k.to_string(), Value::from(v))).collect();
+        slt.insert("brush".into(), brush.into());
+        d.insert("sliders".into(), Value::Table(slt));
+        if !out.is_empty() {
+            d.insert("output".into(), fref(&out));
+        }
+        if let Some(l) = line {
+            d.insert("sky_line".into(), Value::Array(vec![l.0.into(), l.1.into(), l.2.into(), l.3.into()]));
+        }
+        if mask.any() {
+            let mut t = Table::new();
+            t.insert("size".into(), Value::Array(vec![(mask.h as i64).into(), (mask.w as i64).into()]));
+            t.insert("runs".into(), Value::Array(runs(&mask).into_iter().map(Value::from).collect()));
+            d.insert("sky_mask".into(), Value::Table(t));
+        }
+        std::fs::write(&path, toml::to_string(&d).map_err(|e| e.to_string())?).map_err(|e| format!("Cannot save {path}: {e}"))?;
+        self.project = Some(path.clone());
+        Ok(path)
+    }
+
+    pub fn open_project(&mut self, path: &str) {
+        if self.running {
+            self.status = "Wait until the stacking has finished.".into();
+            return;
+        }
+        match self.read_project(path) {
+            Ok(s) => self.status = s,
+            Err(e) => self.status = e,
+        }
+    }
+
+    fn read_project(&mut self, path: &str) -> Result<String, String> {
+        use toml::Value;
+        let text = std::fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {e}", basename(path)))?;
+        let d: toml::Table = text.parse().map_err(|e| format!("Cannot read {}: {e}", basename(path)))?;
+        if d.get("format").and_then(|v| v.as_str()) != Some("PanoStitch stacking project") {
+            return Err(format!("{} is not a stacking project.", basename(path)));
+        }
+        let dir = std::path::absolute(path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let resolve = |r: &Value| -> (Option<String>, String) {
+            let ap = r.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let rel = dir.join(r.get("relative").and_then(|v| v.as_str()).unwrap_or(""));
+            let found = if std::path::Path::new(&ap).is_file() { Some(ap.clone()) } else if rel.is_file() { Some(rel.to_string_lossy().to_string()) } else { None };
+            (found, ap)
+        };
+        let mut missing = Vec::new();
+        let files = d.get("files").and_then(|v| v.as_table()).cloned().unwrap_or_default();
+        let mut found_stars: Vec<Option<String>> = Vec::new();
+        for g in 0..7 {
+            let recs = files.get(GROUP_KEYS[g]).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let fs: Vec<Option<String>> = recs.iter().map(|r| { let (f, ap) = resolve(r); if f.is_none() { missing.push(basename(&ap)); } f }).collect();
+            if g == 0 {
+                found_stars = fs.clone();
+            }
+            self.files[g] = fs.into_iter().flatten().collect();
+        }
+        self.cfg.excluded = d.get("excluded").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|k| k.as_integer()).filter_map(|k| found_stars.get(k as usize - 1).cloned().flatten()).collect()).unwrap_or_default();
+        // The output need not exist yet: keep its absolute path if that folder exists.
+        self.cfg.output = match d.get("output") {
+            Some(o) => {
+                let ap = o.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if std::path::Path::new(&ap).parent().is_some_and(|p| p.is_dir()) { ap } else { dir.join(o.get("relative").and_then(|v| v.as_str()).unwrap_or("stacked.tif")).to_string_lossy().to_string() }
+            }
+            None => String::new(),
+        };
+        let tbl = |k: &str| d.get(k).and_then(|v| v.as_table()).cloned().unwrap_or_default();
+        for (k, v) in tbl("menus") {
+            if let Some(v) = v.as_str() {
+                self.set_menu(&k, v);
+            }
+        }
+        let toggles = tbl("toggles");
+        // Version 1 projects: "motion effect" became the trail fade "Fade in".
+        if toggles.get("motion effect").and_then(|v| v.as_bool()) == Some(true) && !tbl("menus").contains_key("trail fade") {
+            self.cfg.trails.0 = Fade::In;
+        }
+        let sliders = tbl("sliders");
+        if let Some(b) = sliders.get("brush").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))) {
+            self.brush = b;
+        }
+        let (tg, sl) = self.named();
+        for (k, v) in tg {
+            if let Some(b) = toggles.get(k).and_then(|x| x.as_bool()) {
+                *v = b;
+            }
+        }
+        let mut setters = Vec::new();
+        for (k, _, f) in sl {
+            if let Some(v) = sliders.get(k).and_then(|x| x.as_float().or(x.as_integer().map(|i| i as f64))) {
+                setters.push((v, f));
+            }
+        }
+        for (v, mut f) in setters {
+            f(&mut self.cfg, v);
+        }
+        let num = |v: &Value| v.as_float().or(v.as_integer().map(|i| i as f64));
+        self.cfg.sky.line = d.get("sky_line").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(num).collect::<Vec<f64>>()).filter(|a| a.len() == 4).map(|a| (a[0], a[1], a[2], a[3]));
+        self.cfg.sky.mask = match d.get("sky_mask") {
+            Some(m) => {
+                let size: Vec<i64> = m.get("size").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_integer()).collect()).unwrap_or_default();
+                let r: Vec<i64> = m.get("runs").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_integer()).collect()).unwrap_or_default();
+                if size.len() == 2 { unruns(&r, size[0] as usize, size[1] as usize) } else { Bits::new(0, 0) }
+            }
+            None => Bits::new(0, 0),
+        };
+        self.shown = None;
+        self.disp = None;
+        self.result = None;
+        self.raw_small = None;
+        self.post = None;
+        self.project = Some(path.to_string());
+        self.group = 0;
+        self.view = ViewKind::Base;
+        self.show_preview(self.base());
+        let counts: String = (2..7).filter(|&g| !self.files[g].is_empty()).map(|g| format!(", {} {}", self.files[g].len(), GROUPS[g].to_lowercase())).collect();
+        Ok(format!(
+            "Opened {}: {} star images{counts}.{}",
+            basename(path),
+            self.files[0].len(),
+            if missing.is_empty() { String::new() } else { format!(" Missing files: {}.", missing.join(", ")) }
+        ))
     }
 
     fn save_result(&mut self, p: String) {
@@ -388,8 +674,9 @@ impl StackTab {
                 ui.horizontal(|ui| {
                     ui.colored_label(dot, "●");
                     let t = if [0, 2, 3, 4, 5].contains(&g) && n > 0 { format!("{} ({n})", GROUPS[g]) } else { GROUPS[g].to_string() };
-                    if ui.selectable_label(self.group == g, egui::RichText::new(t).strong()).clicked() {
+                    if ui.selectable_label(self.group == g && self.setting.is_none(), egui::RichText::new(t).strong()).clicked() {
                         self.group = g;
+                        self.setting = None;
                     }
                 });
                 let rows: Vec<String> = match g {
@@ -408,6 +695,7 @@ impl StackTab {
                     let sel = self.shown.as_deref() == Some(f.as_str());
                     if ui.selectable_label(sel, t).clicked() {
                         self.group = g;
+                        self.setting = None;
                         if g < 7 && !f.starts_with("(auto)") {
                             clicked = Some(f.clone());
                         } else if g == 1 {
@@ -469,134 +757,227 @@ impl StackTab {
         });
         let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text("…or type a file/folder path + Enter").desired_width(370.0));
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.pathbox.trim().is_empty() {
-            let ps = if self.group == 7 { vec![self.pathbox.trim().to_string()] } else { dialogs::expand_paths(&self.pathbox) };
+            let t = self.pathbox.trim().to_string();
             self.pathbox.clear();
-            self.add(ps);
-        }
-        if self.group == 7 {
-            ui.horizontal(|ui| {
-                ui.label("Output");
-                ui.add(egui::TextEdit::singleline(&mut self.cfg.output).desired_width(300.0));
-            });
-            ui.weak("TIFF: 16-bit, as shown. JPEG: 8-bit. FITS / XISF: 32-bit float, linear (for Siril, PixInsight …).");
-        }
-        match self.group {
-            0 => {
-                ui.checkbox(&mut self.cfg.unify_exposure, "Unify exposure");
+            if t.to_lowercase().ends_with(PROJECT_EXT) {
+                self.open_project(&dialogs::expand_paths(&t)[0]);
+            } else {
+                let ps = if self.group == 7 { vec![t] } else { dialogs::expand_paths(&t) };
+                self.add(ps);
             }
-            4 => {
-                ui.checkbox(&mut self.cfg.homogenize_vignetting, "Homogenize vignetting");
-            }
-            6 => {
-                ui.checkbox(&mut self.cfg.foreground.match_brightness, "Match brightness to the stacked ground");
-                ui.add(egui::Slider::new(&mut self.cfg.foreground.ev, -3.0..=3.0).step_by(0.1).text("Exposure (EV)"));
-            }
-            _ => {}
         }
+        // The settings list: click an entry to see its options below.
         ui.separator();
-        let c = &mut self.cfg;
-        egui::CollapsingHeader::new("Composition").default_open(true).show(ui, |ui| {
-            egui::Grid::new("compo").num_columns(2).show(ui, |ui| {
-                combo(ui, "Composition", &mut c.composition, Composition::ALL, |v| v.name());
-                if c.composition == Composition::AlignStars {
-                    combo(ui, "Stacking", &mut c.align_mode, AlignMode::ALL, |v| v.name());
-                    combo(ui, "Model", &mut c.model, &[Model::Homography, Model::Similarity], |v| v.name());
-                    combo(ui, "Interpolation", &mut c.interpolation, Interpolation::ALL, |v| v.name());
-                    ui.label("");
-                    ui.checkbox(&mut c.selective, "Selective (sigma clipping in the sky)");
-                    ui.end_row();
+        let c = &self.cfg;
+        let onoff = |b: bool| if b { "On" } else { "Off" };
+        let mut rows: Vec<(usize, String, bool)> = vec![
+            (1, format!("Composition: {}", c.composition.name()), true),
+            (
+                1,
+                format!(
+                    "     {}",
+                    if c.composition == Composition::StarTrails {
+                        format!("{}{}", if c.trails.0 == Fade::Off { "Lighten" } else { c.trails.0.name() }, if c.trails.1 { ", gaps filled" } else { "" })
+                    } else {
+                        format!("{}{}", c.align_mode.name(), if c.selective { ", selective" } else { "" })
+                    }
+                ),
+                true,
+            ),
+            (2, format!("Sky region: {}", c.sky.mode.name()), c.sky.mode != SkyMode::None),
+            (3, format!("Sigma clipping: {} / {} σ, {}×", c.sigma.low, c.sigma.high, c.sigma.iters), true),
+            (4, format!("Frame rejection: {}", if c.reject.auto { "Auto" } else { "Off" }), c.reject.auto),
+            (
+                5,
+                format!(
+                    "RAW conversion: {} WB, {}{}",
+                    WB.iter().find(|w| w.0 == c.raw.wb).map(|w| w.1).unwrap_or("Camera"),
+                    DEM.iter().find(|d| d.0 == c.raw.quality).map(|d| d.1).unwrap_or("AHD"),
+                    if c.raw.half { ", half size" } else { "" }
+                ),
+                true,
+            ),
+            (6, format!("Reduce dynamic noises: {}", onoff(c.dynamic_noise)), c.dynamic_noise),
+            (7, format!("Reduce distor. effects: {}", c.distortion.name()), c.distortion != Distortion::Off),
+            (8, format!("Merge 4 pixels: {}", onoff(c.merge4)), c.merge4),
+            (9, format!("Time-lapse: {}", if c.timelapse.0 { format!("every {} frames", c.timelapse.1) } else { "Off".into() }), c.timelapse.0),
+        ];
+        if self.simple {
+            rows.retain(|r| r.0 <= 2); // simple mode: the essentials
+        }
+        let mut first = 0;
+        for (k, text, active) in &rows {
+            ui.horizontal(|ui| {
+                let dot = if *k != first {
+                    if *active { Color32::from_rgb(65, 105, 225) } else { Color32::GRAY }
                 } else {
-                    combo(ui, "Trail fade", &mut c.trails.0, Fade::ALL, |v| v.name());
-                    ui.label("");
-                    ui.checkbox(&mut c.trails.1, "Fill gaps between frames");
-                    ui.end_row();
+                    Color32::TRANSPARENT
+                };
+                ui.colored_label(dot, "●");
+                if ui.selectable_label(self.setting == Some(*k), text).clicked() {
+                    self.setting = Some(*k);
                 }
             });
-        });
-        egui::CollapsingHeader::new("Sky region").default_open(true).show(ui, |ui| {
-            egui::Grid::new("sky").num_columns(2).show(ui, |ui| {
-                combo(ui, "Sky region", &mut self.cfg.sky.mode, SkyMode::ALL, |v| v.name());
-                if self.cfg.sky.mode == SkyMode::Gradient {
+            first = *k;
+        }
+        ui.separator();
+        const TITLES: [&str; 10] = ["", "Composition", "Sky region", "Sigma clipping", "Frame rejection", "RAW conversion", "Reduce dynamic noises", "Reduce distor. effects", "Merge 4 pixels", "Time-lapse"];
+        let title = match self.setting {
+            Some(k) => TITLES[k],
+            None => GROUPS[self.group],
+        };
+        ui.label(egui::RichText::new(title).strong().size(16.0));
+        let note = |ui: &mut egui::Ui, n: &str| {
+            ui.label(egui::RichText::new(super::notes::note(n)).small().weak());
+        };
+        let nstars = self.files[0].len();
+        match self.setting {
+            None => {
+                match self.group {
+                    0 => {
+                        ui.checkbox(&mut self.cfg.unify_exposure, "Unify exposure");
+                    }
+                    4 => {
+                        ui.checkbox(&mut self.cfg.homogenize_vignetting, "Homogenize vignetting");
+                    }
+                    6 => {
+                        ui.checkbox(&mut self.cfg.foreground.match_brightness, "Match brightness to the stacked ground");
+                        ui.add(egui::Slider::new(&mut self.cfg.foreground.ev, -3.0..=3.0).step_by(0.1).text("Exposure (EV)"));
+                    }
+                    7 => {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text("output file (.tif / .jpg / .fits / .xisf)").desired_width(290.0));
+                            if ui.button("Browse…").clicked() && self.dialog.is_none() {
+                                let d = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
+                                self.dialog = Some((dialogs::pick_save("Output", &d), "output"));
+                            }
+                        });
+                    }
+                    _ => {}
+                }
+                note(ui, GROUPS[self.group]);
+            }
+            Some(1) => {
+                let c = &mut self.cfg;
+                egui::Grid::new("compo").num_columns(2).show(ui, |ui| {
+                    combo(ui, "Composition", &mut c.composition, Composition::ALL, |v| v.name());
+                    combo(ui, "Stacking", &mut c.align_mode, AlignMode::ALL, |v| v.name());
+                    if !self.simple {
+                        combo(ui, "Model", &mut c.model, &[Model::Homography, Model::Similarity], |v| v.name());
+                        combo(ui, "Interpolation", &mut c.interpolation, Interpolation::ALL, |v| v.name());
+                        ui.label("");
+                        ui.checkbox(&mut c.selective, "Selective (sigma clipping in the sky)");
+                        ui.end_row();
+                    }
+                    combo(ui, "Trail fade", &mut c.trails.0, Fade::ALL, |v| v.name());
+                    ui.label("");
+                    ui.checkbox(&mut c.trails.1, "Fill gaps between frames (star trails)");
+                    ui.end_row();
+                });
+                note(ui, "Composition");
+            }
+            Some(2) => {
+                egui::Grid::new("sky").num_columns(2).show(ui, |ui| {
+                    combo(ui, "Sky region", &mut self.cfg.sky.mode, SkyMode::ALL, |v| v.name());
                     let mut g = self.cfg.sky.gradient * 100.0;
                     if slider(ui, "Gradient (% height)", &mut g, 1.0..=50.0, 1.0) {
                         self.cfg.sky.gradient = g / 100.0;
                     }
-                }
-                if self.cfg.sky.mode == SkyMode::IrregularMask {
                     slider(ui, "Brush size (% width)", &mut self.brush, 0.5..=30.0, 0.5);
                     let mut f = self.cfg.sky.feather * 100.0;
                     if slider(ui, "Mask feather (% width)", &mut f, 0.0..=10.0, 0.5) {
                         self.cfg.sky.feather = f / 100.0;
                     }
+                });
+                if ui.checkbox(&mut self.aux, "Auxiliary highlight").changed() {
+                    self.disp_tex = None;
                 }
-            });
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.aux, "Auxiliary highlight");
-                ui.checkbox(&mut self.show_stars, "Show detected stars");
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Detect sky").clicked() {
-                    match (&self.disp, &self.shown) {
-                        (Some(img), Some(sh)) if !self.loading => {
-                            self.loading = true;
-                            let (img, sh, rows, tx) = (img.clone(), sh.clone(), self.mask_size().0, self.tx.clone());
-                            std::thread::spawn(move || {
-                                let (mask, _) = detect_sky(&img, MASK_COLS, Some(rows), 0.01);
-                                let pct = 100 * mask.count() / mask.len().max(1);
-                                let _ = tx.send(Msg::Sky(mask, format!("Sky detected in {}: {pct} % of the frame (hatched = foreground). Approximate: correct it with the brush – left button paints sky, right erases.", basename(&sh))));
-                            });
+                if ui.checkbox(&mut self.show_stars, "Show detected stars").changed() && self.show_stars && self.result.is_none() {
+                    self.status = "Stars are shown after a run (Quick preview or Start).".into();
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("◎ Detect sky").clicked() {
+                        match (&self.disp, &self.shown) {
+                            (Some(img), Some(sh)) if !self.loading => {
+                                self.loading = true;
+                                let (img, sh, rows, tx) = (img.clone(), sh.clone(), self.mask_size().0, self.tx.clone());
+                                std::thread::spawn(move || {
+                                    let (mask, _) = detect_sky(&img, MASK_COLS, Some(rows), 0.01);
+                                    let pct = 100 * mask.count() / mask.len().max(1);
+                                    let _ = tx.send(Msg::Sky(mask, format!("Sky detected in {}: {pct} % of the frame (hatched = foreground). Approximate: correct it with the brush – left button paints sky, right erases, wheel = brush size.", basename(&sh))));
+                                });
+                            }
+                            _ => self.status = "Add star images first: the sky is detected in the shown frame.".into(),
                         }
-                        _ => self.status = "Add star images first: the sky is detected in the shown frame.".into(),
                     }
-                }
-                if ui.button("Reset sky region").clicked() {
-                    self.cfg.sky.line = None;
-                    self.cfg.sky.mask = Bits::new(0, 0);
-                }
-            });
-        });
-        let c = &mut self.cfg;
-        egui::CollapsingHeader::new("Sigma clipping").show(ui, |ui| {
-            egui::Grid::new("sig").num_columns(2).show(ui, |ui| {
-                slider(ui, "Sigma low", &mut c.sigma.low, 1.0..=5.0, 0.1);
-                slider(ui, "Sigma high", &mut c.sigma.high, 1.0..=5.0, 0.1);
-                slider(ui, "Iterations", &mut c.sigma.iters, 1..=10, 1.0);
-            });
-        });
-        egui::CollapsingHeader::new("Frame rejection").show(ui, |ui| {
-            ui.checkbox(&mut c.reject.auto, "Reject bad frames automatically");
-            egui::Grid::new("rej").num_columns(2).show(ui, |ui| {
-                slider(ui, "Min. light (×)", &mut c.reject.min_light, 0.1..=0.95, 0.05);
-                slider(ui, "Min. stars (×)", &mut c.reject.min_stars, 0.1..=0.95, 0.05);
-                slider(ui, "Max. FWHM (×)", &mut c.reject.max_fwhm, 1.1..=3.0, 0.05);
-                slider(ui, "Max. elongation (×)", &mut c.reject.max_elong, 1.05..=2.0, 0.05);
-            });
-        });
-        egui::CollapsingHeader::new("RAW conversion").show(ui, |ui| {
-            egui::Grid::new("raw").num_columns(2).show(ui, |ui| {
-                combo(ui, "White balance", &mut c.raw.wb, &[io::WhiteBalance::Camera, io::WhiteBalance::Auto, io::WhiteBalance::Daylight], |w| w.name());
-                let mut decs = vec![io::RawDecoder::Auto];
-                decs.extend(io::available_raw_decoders());
-                combo(ui, "Decoder", &mut c.raw.decoder, &decs, |d| d.name());
-                const DEM: [(u32, &str); 7] = [(3, "AHD"), (11, "DHT"), (12, "AAHD"), (4, "DCB"), (2, "PPG"), (1, "VNG"), (0, "Bilinear")];
-                combo(ui, "Demosaicing (dcraw_emu)", &mut c.raw.quality, &DEM.map(|d| d.0), |q| DEM.iter().find(|d| d.0 == q).map(|d| d.1).unwrap_or("?"));
-                ui.label("");
-                ui.checkbox(&mut c.raw.half, "Half size");
-                ui.end_row();
-            });
-        });
-        egui::CollapsingHeader::new("More").show(ui, |ui| {
-            ui.checkbox(&mut c.dynamic_noise, "Reduce dynamic noises (hot pixels without darks)");
-            egui::Grid::new("more").num_columns(2).show(ui, |ui| {
-                combo(ui, "Reduce distortion", &mut c.distortion, Distortion::ALL, |v| v.name());
-            });
-            ui.checkbox(&mut c.merge4, "Merge 4 pixels");
-            ui.checkbox(&mut c.timelapse.0, "Time-lapse");
-            if c.timelapse.0 {
-                ui.add(egui::Slider::new(&mut c.timelapse.1, 2..=200).text("Frames per stack"));
-                ui.weak(format!("{} star images → {} frames", self.files[0].len(), (self.files[0].len() + 1).saturating_sub(c.timelapse.1)));
+                    if ui.button("Reset sky region").clicked() {
+                        self.cfg.sky.line = None;
+                        self.cfg.sky.mask = Bits::new(0, 0);
+                    }
+                });
+                note(ui, "Sky region");
             }
-        });
+            Some(3) => {
+                let c = &mut self.cfg;
+                egui::Grid::new("sig").num_columns(2).show(ui, |ui| {
+                    slider(ui, "Sigma low", &mut c.sigma.low, 1.0..=5.0, 0.1);
+                    slider(ui, "Sigma high", &mut c.sigma.high, 1.0..=5.0, 0.1);
+                    slider(ui, "Iterations", &mut c.sigma.iters, 1..=10, 1.0);
+                });
+                note(ui, "Sigma clipping");
+            }
+            Some(4) => {
+                let c = &mut self.cfg;
+                ui.checkbox(&mut c.reject.auto, "Reject bad frames automatically");
+                egui::Grid::new("rej").num_columns(2).show(ui, |ui| {
+                    let (mut l, mut st) = (c.reject.min_light * 100.0, c.reject.min_stars * 100.0);
+                    if slider(ui, "Min. light (%)", &mut l, 10.0..=95.0, 5.0) {
+                        c.reject.min_light = l / 100.0;
+                    }
+                    if slider(ui, "Min. stars (%)", &mut st, 10.0..=95.0, 5.0) {
+                        c.reject.min_stars = st / 100.0;
+                    }
+                    slider(ui, "Max. FWHM (×)", &mut c.reject.max_fwhm, 1.1..=3.0, 0.05);
+                    slider(ui, "Max. elongation (×)", &mut c.reject.max_elong, 1.05..=2.0, 0.05);
+                });
+                note(ui, "Frame rejection");
+            }
+            Some(5) => {
+                let c = &mut self.cfg;
+                egui::Grid::new("raw").num_columns(2).show(ui, |ui| {
+                    combo(ui, "White balance", &mut c.raw.wb, &WB.map(|w| w.0), |w| WB.iter().find(|x| x.0 == w).map(|x| x.1).unwrap_or("?"));
+                    let mut decs = vec![io::RawDecoder::Auto];
+                    decs.extend(io::available_raw_decoders());
+                    combo(ui, "Decoder", &mut c.raw.decoder, &decs, |d| d.name());
+                    combo(ui, "Demosaicing", &mut c.raw.quality, &DEM.map(|d| d.0), |q| DEM.iter().find(|d| d.0 == q).map(|d| d.1).unwrap_or("?"));
+                    ui.label("");
+                    ui.checkbox(&mut c.raw.half, "Half size");
+                    ui.end_row();
+                });
+                note(ui, "RAW conversion");
+            }
+            Some(6) => {
+                ui.checkbox(&mut self.cfg.dynamic_noise, "Reduce dynamic noises");
+                note(ui, "Reduce dynamic noises");
+            }
+            Some(7) => {
+                egui::Grid::new("dist").num_columns(2).show(ui, |ui| {
+                    combo(ui, "Correction", &mut self.cfg.distortion, Distortion::ALL, |v| v.name());
+                });
+                note(ui, "Reduce distor. effects");
+            }
+            Some(8) => {
+                ui.checkbox(&mut self.cfg.merge4, "Merge 4 pixels");
+                note(ui, "Merge 4 pixels");
+            }
+            Some(_) => {
+                let c = &mut self.cfg;
+                ui.checkbox(&mut c.timelapse.0, "Time-lapse");
+                ui.add(egui::Slider::new(&mut c.timelapse.1, 2..=200).text("Frames per stack"));
+                ui.label(format!("{nstars} star images → {} frames", (nstars + 1).saturating_sub(c.timelapse.1)));
+                note(ui, "Time-lapse");
+            }
+        }
         ui.separator();
         ui.horizontal(|ui| {
             let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(15.0)).min_size(egui::vec2(180.0, 36.0));
@@ -612,51 +993,86 @@ impl StackTab {
     fn right(&mut self, ui: &mut egui::Ui) {
         ui.heading("Post-processing");
         ui.weak("Applied to the result at once. Start saves with these settings; Save result… saves again.");
+        let simple = self.simple;
+        let mut changed: Option<&'static str> = None;
         let c = &mut self.cfg;
-        ui.checkbox(&mut c.bg_extraction.0, "Background extraction");
-        if c.bg_extraction.0 {
-            ui.add(egui::Slider::new(&mut c.bg_extraction.1, 1..=4).text("Degree"));
+        let mut ch = |r: egui::Response, n: &'static str| {
+            if r.changed() {
+                changed = Some(n);
+            }
+        };
+        if !simple {
+            ch(ui.checkbox(&mut c.bg_extraction.0, "Background extraction"), "Background extraction");
+            if c.bg_extraction.0 {
+                ch(ui.add(egui::Slider::new(&mut c.bg_extraction.1, 1..=4).text("Degree")), "Background extraction");
+            }
+            ch(ui.checkbox(&mut c.color_calibration, "Color calibration"), "Color calibration");
+            ch(ui.checkbox(&mut c.color_noise.0, "Reduce colour noise"), "Reduce colour noise");
+            if c.color_noise.0 {
+                ch(ui.add(egui::Slider::new(&mut c.color_noise.1, 5.0..=100.0).step_by(5.0).text("Strength")), "Reduce colour noise");
+            }
         }
-        ui.checkbox(&mut c.color_calibration, "Color calibration");
-        ui.checkbox(&mut c.color_noise.0, "Reduce colour noise");
-        if c.color_noise.0 {
-            ui.add(egui::Slider::new(&mut c.color_noise.1, 5.0..=100.0).step_by(5.0).text("Strength"));
-        }
+        let before = c.light_pollution.filter;
         egui::Grid::new("lp").num_columns(2).show(ui, |ui| {
             combo(ui, "Light pollution", &mut c.light_pollution.filter, Pollution::ALL, |v| v.name());
         });
-        if c.light_pollution.filter != Pollution::Off {
-            ui.add(egui::Slider::new(&mut c.light_pollution.strength, 0.0..=100.0).step_by(1.0).text("Strength"));
-            if c.light_pollution.filter == Pollution::DeepSky {
-                ui.add(egui::Slider::new(&mut c.light_pollution.degree, 1..=4).text("Degree"));
-            } else {
-                ui.add(egui::Slider::new(&mut c.light_pollution.tiles, 6..=48).text("Tiles"));
-                ui.checkbox(&mut c.light_pollution.iaa, "I.A.A. (also the foreground)");
+        if before != c.light_pollution.filter {
+            changed = Some("Reduce light pollution");
+        }
+        let mut ch = |r: egui::Response, n: &'static str| {
+            if r.changed() {
+                changed = Some(n);
             }
-            ui.checkbox(&mut self.show_bg, "Show removed background");
+        };
+        if c.light_pollution.filter != Pollution::Off {
+            ch(ui.add(egui::Slider::new(&mut c.light_pollution.strength, 0.0..=100.0).step_by(1.0).text("Strength")), "Reduce light pollution");
+            if !simple {
+                if c.light_pollution.filter == Pollution::DeepSky {
+                    ch(ui.add(egui::Slider::new(&mut c.light_pollution.degree, 1..=4).text("Degree (deep sky)")), "Reduce light pollution");
+                } else {
+                    ch(ui.add(egui::Slider::new(&mut c.light_pollution.tiles, 6..=48).text("Tiles (uneven)")), "Reduce light pollution");
+                    ch(ui.checkbox(&mut c.light_pollution.iaa, "I.A.A. (also the foreground)"), "Reduce light pollution");
+                }
+                ch(ui.checkbox(&mut self.show_bg, "Show removed background"), "Reduce light pollution");
+            }
         }
-        ui.checkbox(&mut c.enhance_stars.0, "Enhance star light");
-        if c.enhance_stars.0 {
-            ui.add(egui::Slider::new(&mut c.enhance_stars.1, 0.0..=100.0).step_by(1.0).text("Strength"));
+        if !simple {
+            ch(ui.checkbox(&mut c.enhance_stars.0, "Enhance star light"), "Enhance star light");
+            if c.enhance_stars.0 {
+                ch(ui.add(egui::Slider::new(&mut c.enhance_stars.1, 0.0..=100.0).step_by(1.0).text("Strength")), "Enhance star light");
+            }
         }
-        ui.checkbox(&mut c.auto_brightness, "Auto brightness");
-        ui.checkbox(&mut c.hdr, "High dynamic range");
+        ch(ui.checkbox(&mut c.auto_brightness, "Auto brightness"), "Auto brightness");
+        if !simple {
+            ch(ui.checkbox(&mut c.hdr, "High dynamic range"), "High dynamic range");
+        }
+        let (t0, c0) = (c.tone, c.color_space);
         egui::Grid::new("tone").num_columns(2).show(ui, |ui| {
             combo(ui, "Tone", &mut c.tone, Tone::ALL, |v| v.name());
             combo(ui, "Color space", &mut c.color_space, ColorSpace::ALL, |v| v.name());
         });
-        if c.tone == Tone::Stretch {
+        if t0 != c.tone {
+            changed = Some("Tone");
+        }
+        if c0 != c.color_space {
+            changed = Some("Color space");
+        }
+        if c.tone == Tone::Stretch && !simple {
             if let Some(p) = &self.post {
                 super::stitch::histogram(ui, &p.linear, Some((c.stretch.black, c.stretch.mid, c.stretch.white)));
             }
             ui.checkbox(&mut c.stretch.auto, "Automatic stretch");
-            let mut ch = false;
-            ch |= ui.add(egui::Slider::new(&mut c.stretch.black, 0.0..=0.5).step_by(0.0005).text("Black point")).changed();
-            ch |= ui.add(egui::Slider::new(&mut c.stretch.mid, 0.0005..=0.9995).step_by(0.0005).text("Midtones")).changed();
-            ch |= ui.add(egui::Slider::new(&mut c.stretch.white, 0.5..=1.0).step_by(0.0005).text("White point")).changed();
-            if ch {
+            let mut moved = false;
+            moved |= ui.add(egui::Slider::new(&mut c.stretch.black, 0.0..=0.5).step_by(0.0005).text("Black point")).changed();
+            moved |= ui.add(egui::Slider::new(&mut c.stretch.mid, 0.0005..=0.9995).step_by(0.0005).text("Midtones")).changed();
+            moved |= ui.add(egui::Slider::new(&mut c.stretch.white, 0.5..=1.0).step_by(0.0005).text("White point")).changed();
+            if moved {
                 c.stretch.auto = false; // moving a stretch slider: by hand from now on
+                changed = Some("Tone");
             }
+        }
+        if let Some(n) = changed {
+            self.post_note = super::notes::note(n);
         }
         ui.horizontal(|ui| {
             if ui.button("Linear (for processing)").clicked() {
@@ -667,7 +1083,8 @@ impl StackTab {
                 if !self.cfg.output.is_empty() && !io::is_astro(&self.cfg.output) {
                     self.cfg.output = std::path::Path::new(&self.cfg.output).with_extension("fits").to_string_lossy().to_string();
                 }
-                self.status = "Linear output: no post-processing, no brightness change, no tone curve; output as 32-bit FITS.".into();
+                self.post_note = super::notes::note("Linear");
+                self.status = format!("Linear output: no post-processing, no brightness change, no tone curve{}", if self.cfg.output.is_empty() { ".".to_string() } else { format!("; output {} (32-bit).", basename(&self.cfg.output)) });
             }
             if ui.button("⬇ Save result…").clicked() && self.dialog.is_none() {
                 match &self.result {
@@ -690,6 +1107,7 @@ impl StackTab {
                 _ => self.status = "Press Start first: the saved result goes to the Stitcher.".into(),
             }
         }
+        ui.label(egui::RichText::new(self.post_note).small().weak());
     }
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -702,6 +1120,17 @@ impl StackTab {
             }
             if ui.button("Fit").clicked() {
                 self.vstate.fit = true;
+            }
+            ui.add_space(30.0);
+            if ui.button("⇪ Open project…").clicked() && self.dialog.is_none() {
+                self.dialog = Some((dialogs::pick_open("Open project", "Stacking projects", PROJECT_EXT), "openproj"));
+            }
+            if ui.button("⬇ Save project…").clicked() && self.dialog.is_none() {
+                let default = self.project.clone().unwrap_or_else(|| match self.files[0].first() {
+                    Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join(format!("stacking{PROJECT_EXT}")).to_string_lossy().to_string(),
+                    None => format!("stacking{PROJECT_EXT}"),
+                });
+                self.dialog = Some((dialogs::pick_save("Save stacking project", &default), "saveproj"));
             }
         });
         let avail = ui.available_size();
@@ -754,6 +1183,14 @@ impl StackTab {
         let b = [0.5, w + 0.5, 0.5, h + 0.5];
         let mode = self.cfg.sky.mode;
         let drawing = matches!(mode, SkyMode::BoundaryLine | SkyMode::Gradient | SkyMode::IrregularMask);
+        // Irregular mask: the mouse wheel sets the brush size (instead of zooming).
+        if mode == SkyMode::IrregularMask && ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
+            let dy = ui.input(|i| i.smooth_scroll_delta.y);
+            if dy != 0.0 {
+                self.brush = (self.brush * 1.15f64.powf((dy / 50.0) as f64)).clamp(0.5, 30.0);
+                ui.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+            }
+        }
         let s = image_view(ui, &mut self.vstate, (w, h), &[(&bt, b), (&ot, b)], !drawing);
         let p = ui.painter().with_clip_rect(s.rect);
         let to_uv = |pos: Pos2| { let (x, y) = s.to_image(pos); ((x - 0.5) / w, (y - 0.5) / h) };
@@ -930,5 +1367,42 @@ impl StackTab {
                 ui.monospace(l);
             }
         });
+    }
+}
+
+/// Hooks for the headless window tests (tests/gui.rs).
+#[doc(hidden)]
+impl StackTab {
+    pub fn t_status(&self) -> &str {
+        &self.status
+    }
+    pub fn t_add(&mut self, group: usize, ps: Vec<String>) {
+        self.group = group;
+        self.setting = None;
+        self.add(ps);
+    }
+    pub fn t_cfg(&mut self) -> &mut StackConfig {
+        &mut self.cfg
+    }
+    pub fn t_files(&self) -> &[Vec<String>; 7] {
+        &self.files
+    }
+    pub fn t_run(&mut self, preview: bool) {
+        self.run(preview);
+    }
+    pub fn t_result(&self) -> Option<&StackResult> {
+        self.result.as_ref()
+    }
+    pub fn t_post_ready(&self) -> bool {
+        self.post.is_some() && !self.post_busy
+    }
+    pub fn t_exclude(&mut self, p: &str) {
+        self.toggle_exclude(p);
+    }
+    pub fn t_shown(&self) -> Option<&str> {
+        self.shown.as_deref()
+    }
+    pub fn t_brush(&self) -> f64 {
+        self.brush
     }
 }

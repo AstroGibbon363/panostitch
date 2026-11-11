@@ -2,6 +2,7 @@
 //! zoomable image view, and native file dialogs.
 
 pub mod dialogs;
+pub mod notes;
 pub mod stack;
 pub mod stitch;
 
@@ -124,20 +125,78 @@ enum Tab {
     Stack,
 }
 
+/// Appearance: light or dark colours, classic or modern look (rounder, roomier),
+/// full or simple layout (advanced controls left out, for beginners).
+#[derive(Clone, Copy, PartialEq)]
+pub struct Prefs {
+    pub dark: bool,
+    pub modern: bool,
+    pub simple: bool,
+}
+
+pub fn apply_style(ctx: &egui::Context, p: Prefs) {
+    ctx.set_visuals(if p.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+    ctx.all_styles_mut(|s| {
+        let r = if p.modern { 8 } else { 2 };
+        for w in [&mut s.visuals.widgets.noninteractive, &mut s.visuals.widgets.inactive, &mut s.visuals.widgets.hovered, &mut s.visuals.widgets.active, &mut s.visuals.widgets.open] {
+            w.corner_radius = egui::CornerRadius::same(r);
+        }
+        s.visuals.window_corner_radius = egui::CornerRadius::same(if p.modern { 10 } else { 6 });
+        if p.modern {
+            s.spacing.item_spacing = egui::vec2(8.0, 6.0);
+            s.spacing.button_padding = egui::vec2(9.0, 4.0);
+            s.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+            s.visuals.selection.bg_fill = egui::Color32::from_rgb(51, 120, 217);
+        } else {
+            s.spacing.item_spacing = egui::vec2(8.0, 3.0);
+            s.spacing.button_padding = egui::vec2(4.0, 1.0);
+        }
+    });
+}
+
+/// Path of `p` relative to the folder `dir` (for project files).
+pub fn relpath(p: &std::path::Path, dir: &std::path::Path) -> String {
+    let a: Vec<_> = p.components().collect();
+    let b: Vec<_> = dir.components().collect();
+    let k = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut out = std::path::PathBuf::new();
+    for _ in k..b.len() {
+        out.push("..");
+    }
+    for c in &a[k..] {
+        out.push(c);
+    }
+    out.to_string_lossy().to_string()
+}
+
 pub struct App {
     tab: Tab,
-    dark: bool,
-    stitch: stitch::StitchTab,
-    stack: stack::StackTab,
+    prefs: Prefs,
+    pub stitch: stitch::StitchTab,
+    pub stack: stack::StackTab,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext, paths: Vec<String>) -> Self {
-        let dark = load_ui_dark();
-        cc.egui_ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-        let mut app = Self { tab: Tab::Stitch, dark, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default() };
-        if !paths.is_empty() {
-            app.stitch.add_paths(paths);
+        Self::with_context(&cc.egui_ctx, paths)
+    }
+
+    /// The app on an egui context (also used by the headless tests).
+    pub fn with_context(ctx: &egui::Context, paths: Vec<String>) -> Self {
+        let prefs = load_prefs();
+        apply_style(ctx, prefs);
+        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default() };
+        // Project files open in their tab; images go to the stitcher.
+        let (stackp, rest): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| p.to_lowercase().ends_with(stack::PROJECT_EXT));
+        let (panop, imgs): (Vec<String>, Vec<String>) = rest.into_iter().partition(|p| p.to_lowercase().ends_with(stitch::PROJECT_EXT));
+        if let Some(p) = panop.first() {
+            app.stitch.open_project(p);
+        } else if !imgs.is_empty() {
+            app.stitch.add_paths(imgs);
+        }
+        if let Some(p) = stackp.first() {
+            app.stack.open_project(p);
+            app.tab = Tab::Stack;
         }
         app
     }
@@ -145,15 +204,38 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.frame(ui);
+    }
+}
+
+impl App {
+    pub fn busy(&self) -> bool {
+        self.stitch.busy() || self.stack.busy()
+    }
+    pub fn show_stack(&mut self, on: bool) {
+        self.tab = if on { Tab::Stack } else { Tab::Stitch };
+    }
+    pub fn set_simple(&mut self, ctx: &egui::Context, simple: bool, modern: bool) {
+        self.prefs.simple = simple;
+        self.prefs.modern = modern;
+        apply_style(ctx, self.prefs);
+    }
+
+    /// One frame of the window.
+    pub fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::Stitch, egui::RichText::new("Panorama stitcher").strong());
                 ui.selectable_value(&mut self.tab, Tab::Stack, egui::RichText::new("Star stacking (landscape / trails)").strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.checkbox(&mut self.dark, "Dark").changed() {
-                        ctx.set_visuals(if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-                        save_ui_dark(self.dark);
+                    let before = self.prefs;
+                    ui.checkbox(&mut self.prefs.simple, "✓ Simple").on_hover_text("Leave out the advanced controls");
+                    ui.checkbox(&mut self.prefs.modern, "◆ Modern");
+                    ui.checkbox(&mut self.prefs.dark, "☾ Dark");
+                    if self.prefs != before {
+                        apply_style(&ctx, self.prefs);
+                        save_prefs(self.prefs);
                     }
                 });
             });
@@ -164,6 +246,8 @@ impl eframe::App for App {
             self.stitch.add_paths(handed);
             self.tab = Tab::Stitch;
         }
+        self.stitch.simple = self.prefs.simple;
+        self.stack.simple = self.prefs.simple;
         match self.tab {
             Tab::Stitch => self.stitch.ui(ui, &ctx),
             Tab::Stack => self.stack.ui(ui, &ctx),
@@ -178,13 +262,15 @@ impl eframe::App for App {
 pub fn config_dir() -> std::path::PathBuf {
     dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("panostitch")
 }
-fn load_ui_dark() -> bool {
-    std::fs::read_to_string(config_dir().join("ui.toml")).map(|s| s.contains("dark = true")).unwrap_or(false)
+fn load_prefs() -> Prefs {
+    let t: toml::Table = std::fs::read_to_string(config_dir().join("ui.toml")).ok().and_then(|s| s.parse().ok()).unwrap_or_default();
+    let b = |k: &str| t.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    Prefs { dark: b("dark"), modern: b("modern"), simple: b("simple") }
 }
-fn save_ui_dark(d: bool) {
+fn save_prefs(p: Prefs) {
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("ui.toml"), format!("dark = {d}\n"));
+    let _ = std::fs::write(dir.join("ui.toml"), format!("dark = {}\nmodern = {}\nsimple = {}\n", p.dark, p.modern, p.simple));
 }
 
 /// Open the window with `paths` loaded into the stitcher.

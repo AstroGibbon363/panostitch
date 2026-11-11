@@ -168,3 +168,14 @@ pub fn expand_paths(s: &str) -> Vec<String> {
     v.sort();
     v
 }
+
+/// One project file to open, on a worker thread.
+pub fn pick_open(title: &str, what: &str, ext: &str) -> Receiver<Picked> {
+    let (tx, rx) = channel();
+    let (t, w, e) = (title.to_string(), what.to_string(), ext.to_string());
+    std::thread::spawn(move || {
+        let r = open_files(&t, false, Some((&w, vec![e])));
+        let _ = tx.send(r.map(Picked::Files).unwrap_or(Picked::NoTool));
+    });
+    rx
+}

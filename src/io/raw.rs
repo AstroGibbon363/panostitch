@@ -252,7 +252,17 @@ fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
     use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
     use rawler::rawimage::RawPhotometricInterpretation;
 
-    let mut raw = rawler::decode_file(path).map_err(|e| e.to_string())?;
+    let src = rawler::rawsource::RawSource::new(Path::new(path)).map_err(|e| e.to_string())?;
+    let dec = rawler::get_decoder(&src).map_err(|e| e.to_string())?;
+    let params = rawler::decoders::RawDecodeParams { image_index: 0 };
+    let mut raw = dec.raw_image(&src, &params, false).map_err(|e| e.to_string())?;
+    // The orientation may sit in the EXIF data rather than in the raw image itself.
+    let mut orientation = raw.orientation;
+    if matches!(orientation, Orientation::Normal | Orientation::Unknown) {
+        if let Some(o) = dec.raw_metadata(&src, &params).ok().and_then(|m| m.exif.orientation) {
+            orientation = Orientation::from_u16(o);
+        }
+    }
     raw.apply_scaling().map_err(|e| e.to_string())?;
     match opt.wb {
         WhiteBalance::Camera => {
@@ -307,7 +317,7 @@ fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
         }
     };
     img.map_inplace(|p| [p[0].max(0.0), p[1].max(0.0), p[2].max(0.0)]);
-    img = match raw.orientation {
+    img = match orientation {
         Orientation::Normal | Orientation::Unknown => img,
         Orientation::HorizontalFlip => img.flip_cols(),
         Orientation::Rotate180 => img.rotate180(),

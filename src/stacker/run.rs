@@ -4,7 +4,6 @@ use super::*;
 use crate::image::{median_f64, Bits, Gray, Img};
 use crate::io::{basename, is_astro, save_panorama};
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Instant;
 
 /// Everything a run returns.
@@ -200,7 +199,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         let pct = (100.0 * wt.px.iter().filter(|v| **v >= 0.5).count() as f64 / wt.len() as f64).round() as i64;
         note(&mut log, format!("Sky region ({}): {pct} % of the frame", cfg.sky.mode.name()));
     }
-    let store = Mutex::new(FrameStore::new(h, w, cand.len(), &dir)?);
+    let store = FrameStore::new(h, w, cand.len(), &dir)?;
     let measure = |fi: &mut FrameInfo, k: usize, img: Img| -> Result<(), String> {
         if (img.h, img.w) != (h, w) {
             return Err(format!("{} is {}×{}, the base image {}×{}.", basename(&fi.path), img.w, img.h, w, h));
@@ -222,7 +221,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         ];
         fi.background = crate::image::luminance(fi.level) as f64;
         fi.light = fi.detected.iter().take(20).map(|s| s.flux).sum(); // made relative below
-        store.lock().unwrap().store(k, &img);
+        store.store_shared(k, &img);
         Ok(())
     };
     measure(&mut infos[base_i], bi, img0)?;
@@ -390,7 +389,6 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         progress("Loading the foreground image…")?;
         fg = Some(load_foreground(&cfg, load, h, w)?);
     }
-    let store = store.into_inner().unwrap();
     let frames: Vec<&FrameInfo> = frames_idx.iter().map(|&(_, i)| &infos[i]).collect();
     let ks: Vec<usize> = frames_idx.iter().map(|&(k, _)| k).collect();
     let mut saved: Vec<String> = Vec::new();

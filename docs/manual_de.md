@@ -30,56 +30,60 @@ erscheinen.
 11. [Fehlerbehebung](#11-fehlerbehebung)
 12. [Tipps für gute Panoramen](#12-tipps-für-gute-panoramen)
 13. [Sterne stacken](#13-sterne-stacken)
-14. [Verwendung per Skript (ohne Fenster)](#14-verwendung-per-skript-ohne-fenster)
+14. [Verwendung ohne Fenster](#14-verwendung-ohne-fenster)
 15. [Dateien](#15-dateien)
 
 ---
 
 ## 1. Voraussetzungen
 
-- **Julia 1.13 oder neuer**
-- **Kamera-RAW-Dateien** brauchen nichts weiter: LibRaw ist im Programm
-  enthalten. Sind RawTherapee, darktable oder dcraw installiert, kann das
-  Programm sie ebenfalls nutzen (siehe [RAW-Dateien](#8-raw-dateien)).
-- **FITS-Dateien** brauchen nichts weiter.
+- **Nichts zu installieren.** Das Programm ist eine einzige Datei,
+  `panostitch` (`panostitch.exe` unter Windows), dazu `panostack` zum
+  Sterne-Stacken von der Kommandozeile. Unter Linux braucht es einen
+  Grafiktreiber mit OpenGL sowie X11 oder Wayland, wie jeder Desktop sie hat.
+- **Kamera-RAW-Dateien** brauchen nichts weiter: ein RAW-Decoder ist
+  eingebaut. Sind `dcraw_emu` (LibRaw), RawTherapee, darktable oder dcraw
+  installiert, kann das Programm sie ebenfalls nutzen (siehe
+  [RAW-Dateien](#8-raw-dateien)).
+- **FITS- und XISF-Dateien** brauchen nichts weiter.
 - **Dateiauswahl-Dialoge** brauchen unter Windows und macOS nichts weiter.
   Unter Linux verwenden sie `zenity`, `kdialog` oder `yad`, je nachdem, was
   installiert ist (die meisten Desktops haben eines davon). Ohne sie tippen
   Sie Pfade in das Pfadfeld.
 
-Die benötigten Julia-Pakete stehen in `app/Project.toml` und werden beim ersten
-Start automatisch installiert.
+Um das Programm aus dem Quellcode zu bauen, brauchen Sie Rust
+(<https://rustup.rs>): `cargo build --release` erzeugt
+`target/release/panostitch` und `target/release/panostack`.
 
 ---
 
 ## 2. Programm starten
 
-**Im Terminal:**
+Doppelklicken Sie auf `panostitch`, oder starten Sie es im Terminal:
 
 ```
-cd PanoStitch        # der Ordner, in dem das Programm liegt
-julia bin/panostitch.jl
+panostitch
 ```
 
-Bilder lassen sich auch direkt beim Start laden:
+Bilder oder eine Projektdatei lassen sich auch direkt beim Start öffnen:
 
 ```
-julia bin/panostitch.jl ~/Pictures/pano/*.NEF
+panostitch ~/Pictures/pano/*.NEF
+panostitch mein_pano.panoproj
+panostitch nacht.stackproj          # öffnet sich im Tab Sterne stacken
 ```
-
-**In VS Code:** `bin/panostitch.jl` öffnen und *Julia: Execute File in REPL* wählen
-(`Alt+Enter`).
 
 Hinweise:
 
-- **Lassen Sie das Terminal offen**, solange Sie arbeiten. Wenn Sie es
-  schließen, schließt sich auch das Programm.
-- Das Programm nutzt automatisch alle Prozessorkerne. Ohne `-t auto` gestartet,
-  startet es sich mit dieser Option neu. In VS Code erledigt das die
-  Projekteinstellung `"julia.NumThreads": "auto"`.
-- **Der erste Start** nach der Installation oder nach Codeänderungen bereitet
-  das Programm vor (Vorkompilierung). Das dauert einmalig bis zu einigen
-  Minuten; danach öffnet sich das Fenster in etwa 5 Sekunden.
+- Das Programm nutzt automatisch alle Prozessorkerne.
+- Das Fenster öffnet sich in ein bis zwei Sekunden; vorher muss nichts
+  vorbereitet werden.
+- Erscheint kein Fenster, starten Sie das Programm im Terminal: Dort stehen
+  die Fehlermeldungen.
+- Die Schalter für das Aussehen (Dark, Modern, Simple) stehen in `ui.toml` im
+  Einstellungsordner: `~/.config/panostitch` unter Linux,
+  `~/Library/Application Support/panostitch` unter macOS,
+  `%APPDATA%\panostitch` unter Windows.
 
 ---
 
@@ -113,7 +117,7 @@ Hinweise:
   Ergebnisse und Fehlermeldungen.
 
 Die Schalter oben rechts ändern das Aussehen: **Dark** (dunkel), **Modern**
-(flacher, mit Symbolen) und **Simple** (einfach). Der einfache Modus blendet
+(runder, luftiger) und **Simple** (einfach). Der einfache Modus blendet
 die Detaileinstellungen aus (Merkmalsuche und Zuordnung, Überblendung,
 Streckung, Verschieben) und behält, was die meisten Panoramen brauchen: die
 Bilder, eine Vorgabe, **Run all steps**, die Projektion mit Brennweite,
@@ -404,7 +408,7 @@ nennt, was rückgängig gemacht wurde, z. B. *„Undone: Pitch (°) 0 → 10“*
 Projektdatei mit der Endung **`.panoproj`**. **Open project…** lädt sie wieder.
 Sie können den Pfad einer `.panoproj`-Datei auch in das Pfadfeld tippen und
 Enter drücken oder das Programm damit starten:
-`julia bin/panostitch.jl mein_pano.panoproj`.
+`panostitch mein_pano.panoproj`.
 
 Ein Projekt speichert:
 
@@ -483,29 +487,31 @@ der Mitte liegt.
 
 Unterstützt: **Canon CR2 und CR3, Nikon NEF und NRW, Sony ARW und SRF, DNG,
 Fuji RAF, Olympus ORF, Panasonic RW2, Pentax PEF, Samsung SRW** und weitere.
-Die genaue Kameraunterstützung hängt von der Konverterversion ab; das im
-Programm enthaltene LibRaw 0.22 kennt etwa 1250 Kameras.
+Die genaue Kameraunterstützung hängt vom Decoder ab; der eingebaute kennt die
+meisten Kameras der letzten zwei Jahrzehnte, LibRaw (falls installiert) etwa
+1250 Kameras.
 
-**RAW via** wählt den Konverter:
+**RAW via** wählt den Decoder:
 
-| Option | Konverter | Eigenschaften |
+| Option | Decoder | Eigenschaften |
 |---|---|---|
-| **auto** | der erste verfügbare in der Reihenfolge unten; hat ein Foto eine `.pp3`-Datei, zuerst RawTherapee | empfohlen |
-| **libraw** | `dcraw_emu` (im Programm enthalten) | am schnellsten; neutrale, eher dunkle Umwandlung ohne automatisches Aufhellen, sodass alle Bilder dieselbe Belichtung behalten |
+| **auto** | der erste, der funktioniert, in der Reihenfolge unten; hat ein Foto eine `.pp3`-Datei, zuerst RawTherapee | empfohlen |
+| **built-in** | der eigene Decoder des Programms | immer verfügbar, schnell; neutrale Umwandlung mit den Farben und dem Weißabgleich der Kamera, ohne automatisches Aufhellen, sodass alle Bilder dieselbe Belichtung behalten |
+| **libraw** | `dcraw_emu` (LibRaw) | ähnlich wie built-in; für Kameras, die der eingebaute Decoder nicht kennt |
 | **rawtherapee** | `rawtherapee-cli` | **verwendet Ihre RawTherapee-Bearbeitungen** aus `foto.NEF.pp3`; sonst das Standard-Aussehen von RawTherapee |
 | **darktable** | `darktable-cli` | Standard-Umwandlung von darktable (einschließlich Objektivkorrektur, wo verfügbar); am langsamsten |
 | **dcraw** | `dcraw` | Notlösung; kann kein CR3 lesen |
 
-Nur libraw ist immer verfügbar; die anderen drei erscheinen, wenn das
-jeweilige Programm auf dem Computer installiert ist.
+Nur built-in ist immer verfügbar; die anderen erscheinen, wenn das jeweilige
+Programm auf dem Computer installiert ist. Das Sterne-Stacken braucht lineare
+Daten und verwendet daher nur built-in, libraw oder dcraw.
 
-Umgewandelte Bilder haben 16 Bit und werden in einen temporären Ordner
-geschrieben, der danach gelöscht wird. Neben Ihre Fotos wird nichts
-geschrieben.
+Die externen Decoder schreiben ein 16-Bit-Bild in einen temporären Ordner,
+der danach gelöscht wird. Neben Ihre Fotos wird nichts geschrieben.
 
 **Tipp:** Für einheitliche Farben im ganzen Panorama verwenden Sie für alle
 Bilder dieselben Bearbeitungen (dasselbe `.pp3`-Profil), oder nehmen Sie
-**libraw** und korrigieren Sie die Farben anschließend.
+**built-in** und korrigieren Sie die Farben anschließend.
 
 ---
 
@@ -569,7 +575,7 @@ ungeeignet ist; probieren Sie cylindrical oder spherical.
 
 | Problem | Lösungsansatz |
 |---|---|
-| **Kein Fenster erscheint** | Warten Sie: Der erste Start nach einer Codeänderung dauert länger. Achten Sie auf Fehler im Terminal. Prüfen Sie, dass Sie `bin/panostitch.jl` gestartet haben. |
+| **Kein Fenster erscheint** | Starten Sie das Programm im Terminal und lesen Sie dort die Fehlermeldung. Unter Linux braucht es OpenGL: Prüfen Sie, dass der Grafiktreiber installiert ist. |
 | **„Busy – wait…“** | Ein Schritt läuft noch; warten Sie, bis sich die Statuszeile ändert. |
 | **Ein Bild wird beim Laden übersprungen** | Die Statuszeile nennt Datei und Grund. Bei RAW einen anderen Konverter unter **RAW via** probieren. `.fz`-FITS-Dateien zuerst entpacken. |
 | **Panorama ist fast schwarz** | Fotos: **Auto exposure** klicken oder **Exposure (EV)** erhöhen (Nachtaufnahmen brauchen oft +1,5 bis +4), oder die Fotos in RawTherapee bearbeiten (deren `.pp3`-Dateien werden dann verwendet). FITS und andere lineare Daten: **Auto stretch** klicken. |
@@ -590,7 +596,7 @@ ungeeignet ist; probieren Sie cylindrical oder spherical.
 | **Auto crop lässt nur einen schmalen Streifen übrig** | Das Panorama ist gebogen. Zuerst mit **Pitch** und **Roll** begradigen (und eine passende Projektion wählen), dann erneut **Auto crop**. |
 | **Ein Projekt öffnet sich ohne einige Bilder** | Die Statuszeile listet die fehlenden Dateien auf. Sie wurden verschoben oder umbenannt, und nicht zusammen mit der Projektdatei. Zurücklegen oder erneut hinzufügen und zuordnen. |
 | **Rückgängig tut nichts** | Rückgängig wirkt auf abgeschlossene Änderungen; nach der letzten Änderung kurz warten. Während ein Schritt läuft (*Busy*), wartet es. |
-| **Alles ist langsam** | Prüfen, dass das Terminal nicht *„Running on one thread“* anzeigt. |
+| **Alles ist langsam** | Vor dem Laden **half size** einschalten (RAW und FITS von Farbkameras); **Preview size** verringern. Im Stacking-Tab **Half size** unter RAW conversion. |
 
 ---
 
@@ -737,8 +743,8 @@ Einstellungen, **Save result…** speichert erneut.
 ### 13.6 Projekte
 
 **Save project…** schreibt eine `.stackproj`-Datei mit den Dateilisten, der
-Himmelsregion und allen Einstellungen. **Open project…** (oder `julia
-bin/panostitch.jl nacht.stackproj`) lädt sie wieder. Dateien werden über ihren
+Himmelsregion und allen Einstellungen. **Open project…** (oder `panostitch
+nacht.stackproj`) lädt sie wieder. Dateien werden über ihren
 vollständigen Pfad gefunden, oder relativ zur Projektdatei, wenn der Ordner
 verschoben wurde.
 
@@ -772,54 +778,77 @@ Teilbilder hält Helligkeit und Farben gleich.
   **Select best pixels**.
 - Zur Weiterverarbeitung in anderen Programmen als `.fits` speichern und
   **Linear (for processing)** einschalten.
-- Im Terminal stackt `julia bin/panostack.jl` ohne Fenster; die Optionen
-  stehen am Anfang der Datei.
+- Im Terminal stackt `panostack` ohne Fenster; `panostack --help` zeigt die
+  Optionen (siehe [Verwendung ohne Fenster](#14-verwendung-ohne-fenster)).
 
 ---
 
-## 14. Verwendung per Skript (ohne Fenster)
+## 14. Verwendung ohne Fenster
 
-```julia
-include("examples/scripted_stitch.jl")
-pano = Stitcher.stitch(["a.NEF", "b.NEF", "c.NEF"];
-                       projection = :spherical, raw_half = true)
-Stitcher.save_panorama("pano.tif", pano)
+**Sterne stacken im Terminal:** `panostack` stackt genauso wie der Tab
+Sterne stacken. `panostack --help` zeigt alle Optionen. Beispiele:
+
+```
+panostack --mode freeze --horizon 0.62 --darks darks/ -o nacht.tif lights/
+panostack --mode trails --fade in --fill-gaps --auto-sky -o spuren.jpg lights/
+panostack --preview lights/            # schnelle Kontrolle, nichts wird gespeichert
 ```
 
-Optionen von `stitch` mit ihren Standardwerten:
+Am Ende werden der Bildbericht und das Ablaufprotokoll ausgegeben.
 
-| Option | Standard | Bedeutung |
+**Zusammenfügen aus einem eigenen Rust-Programm:** PanoStitch als Abhängigkeit
+eintragen (`panostitch = { path = "…/PanoStitch" }` in der `Cargo.toml`), dann:
+
+```rust
+use panostitch::io;
+use panostitch::stitcher::{self, Projection, StitchParams};
+
+fn main() -> Result<(), String> {
+    let paths = vec!["a.NEF".to_string(), "b.NEF".into(), "c.NEF".into()];
+    let p = StitchParams { projection: Projection::Spherical, ..Default::default() };
+    let pano = stitcher::stitch_files(&paths, &p, true, &mut |m| println!("{m}"))?;
+    io::save_panorama("pano.tif", &pano)
+}
+```
+
+Ein vollständiges Beispiel ist `examples/scripted.rs`
+(`cargo run --release --example scripted -- a.NEF b.NEF c.NEF`).
+`stitch_files(pfade, parameter, raw_half, log)` lädt die Bilder und fügt sie
+zusammen; `stitch(bilder, parameter, log)` fügt Bilder zusammen, die schon im
+Speicher sind. Die Felder von `StitchParams` mit ihren Standardwerten:
+
+| Feld | Standard | Bedeutung |
 |---|---|---|
-| `layout` | `:all` | welche Paare zugeordnet werden: `:all`, `:sequential`, `:grid` |
-| `cols`, `snake` | alle Bilder, `false` | Anordnung grid |
+| `layout` | Layout::All | welche Paare zugeordnet werden: `All`, `Sequential`, `Grid` |
+| `cols`, `snake` | 0 (all images), `false` | Gitteranordnung |
 | `refine` | `true` | globale Verfeinerung |
-| `feature_scale` | `0.5` | Maßstab der Erkennung |
-| `nkeypoints` | `5000` | |
-| `denoise` | `1.5` | |
-| `ratio` | `0.8` | |
-| `max_distance` | `0.35` | |
-| `model` | `:homography` | `:homography`, `:affine`, `:similarity`, `:translation` |
-| `ransac_thresh` | `5.0` | |
-| `min_inliers` | `20` | |
-| `projection` | `:cylindrical` | jeder Name aus [Projektionen](#7-projektionen) als Symbol, z. B. `:fisheye`, `:little_planet`, `:mollweide` |
-| `blend` | `:smart` | `:smart`, `:feather`, `:seam`, `:average` |
+| `feature_scale` | `0.5` | Maßstab der Merkmalsuche |
+| `nkeypoints` | `5000` |  |
+| `denoise` | `1.5` |  |
+| `ratio` | `0.8` |  |
+| `max_distance` | `0.35` |  |
+| `model` | `Model::Homography` | `Homography`, `Affine`, `Similarity`, `Translation` |
+| `ransac_thresh` | `5.0` |  |
+| `min_inliers` | `20` |  |
+| `projection` | `Projection::Cylindrical` | jede aus [Projektionen](#7-projektionen), z. B. `Fisheye`, `LittlePlanet`, `Mollweide` |
+| `blend` | `Blend::Smart` | `Smart`, `Feather`, `Seam`, `Average` |
 | `sharpness` | `3.0` | Modus feather: höher = schmalere Übergänge |
-| `raw_half` | `false` | halbe Größe für RAW und FITS von Farbkameras |
 
 **FITS-Mosaik mit gestrecktem TIFF und linearem FITS-Ergebnis:**
 
-```julia
-include("examples/scripted_stitch.jl")
-tiles = filter(f -> endswith(f, ".fits"), readdir("tiles"; join = true))
-mosaic = Stitcher.stitch(tiles; model = :similarity, refine = false,
-                         projection = :rectilinear, denoise = 0.75)
-Stitcher.save_panorama("mosaic.fits", mosaic)                         # linear
-black, mid, white = Stitcher.auto_stretch(mosaic)
-Stitcher.save_panorama("mosaic.tif", Stitcher.hist_stretch(mosaic, black, mid, white))
+```rust
+use panostitch::stitcher::{Model, Projection, StitchParams};
+
+let p = StitchParams { model: Model::Similarity, refine: false,
+                       projection: Projection::Rectilinear, denoise: 0.75, ..Default::default() };
+let mosaic = stitcher::stitch_files(&tiles, &p, false, &mut |_| {})?;
+io::save_panorama("mosaic.fits", &mosaic)?;                          // linear
+let (black, mid, white) = stitcher::auto_stretch(&mosaic, 0.25, 2.8);
+io::save_panorama("mosaic.tif", &stitcher::hist_stretch(&mosaic, black, mid, white))?;
 ```
 
-Weitere nützliche Funktionen: `Stitcher.read_fits(pfad; half)` und
-`Stitcher.write_fits(pfad, bild)`.
+Sterne stacken im Code: einen `stacker::StackConfig` füllen (ausgehend von
+`StackConfig::default()`) und `stacker::stack(&config, false, &progress, None)` aufrufen.
 
 ---
 
@@ -827,19 +856,22 @@ Weitere nützliche Funktionen: `Stitcher.read_fits(pfad; half)` und
 
 | Datei | Zweck |
 |---|---|
-| `bin/panostitch.jl` | Startet das Programm (das Fenster). |
-| `bin/panostack.jl` | Sterne stacken von der Kommandozeile (Optionen am Anfang der Datei). |
-| `examples/scripted_stitch.jl` | Lädt den Stitcher zur Verwendung in eigenen Skripten. |
-| `test/runtests.jl` | Tests des Sterne-Stackings an künstlichen Nachtszenen. |
-| `src/stitcher.jl` | Zusammenfügen: Laden (RAW, FITS), Merkmale, Zuordnung, Projektionen, Rendern, Streckung. |
-| `src/stacker.jl` | Sterne stacken. |
-| `src/PanoStitch.jl` | Einstiegspunkt des Pakets und Vorkompilierung (ohne Grafik). |
-| `ext/PanoStitchGUIExt/` | Das Programmfenster (wird zusammen mit GLMakie geladen). |
-| `app/` | Paketliste des Programms: PanoStitch und GLMakie (werden automatisch installiert). |
-| `Project.toml`, `Manifest.toml` | Paketliste nur des Stitching- und Stacking-Codes (für Skripte). |
-| `assets/fonts/` | Schriften des Fensters (DejaVu). |
-| `*.panoproj` | Ihre Projektdateien (wo immer Sie sie speichern). |
-| `docs/manual_en.md` | Handbuch auf Englisch. |
-| `docs/manual_cs.md`, `docs/manual_de.md` | Handbuch auf Tschechisch und Deutsch (dieses). |
-| `docs/manual_*.pdf`, `docs/make_pdf.jl` | Die Handbücher als PDF und das Skript, das sie erzeugt. |
-| `build/build_app.jl` | Baut das eigenständige Programm (läuft ohne installiertes Julia). |
+| `panostitch` (`panostitch.exe`) | Das Programm (das Fenster). |
+| `panostack` (`panostack.exe`) | Sterne stacken von der Kommandozeile (`panostack --help`). |
+| `*.panoproj`, `*.stackproj` | Ihre Projektdateien (wo immer Sie sie speichern). |
+| `ui.toml` im Einstellungsordner | Die Schalter für das Aussehen (siehe [Programm starten](#2-programm-starten)). |
+| `docs/manual_de.md` | Dieses Handbuch (Deutsch). |
+| `docs/manual_en.md`, `docs/manual_cs.md` | Das Handbuch auf Englisch und Tschechisch. |
+
+Quellcode (um das Programm selbst zu bauen):
+
+| Pfad | Inhalt |
+|---|---|
+| `Cargo.toml` | Das Projekt und die verwendeten Bibliotheken. |
+| `src/image.rs`, `src/io/` | Bilder; Laden und Speichern (JPEG, PNG, TIFF, BMP, RAW, FITS, XISF). |
+| `src/stitcher/` | Zusammenfügen: Merkmale, Zuordnung, Platzierung, Verfeinerung, Projektionen, Überblendung. |
+| `src/stacker/` | Sterne stacken. |
+| `src/gui/` | Das Fenster: beide Tabs und die Dateidialoge. |
+| `src/bin/` | Die beiden Programme, `panostitch` und `panostack`. |
+| `tests/` | Tests: Stacken mit künstlichen Nachtszenen, Zusammenfügen, Dateiformate und beide Tabs des Fensters. Ausführen mit `cargo test --release`. |
+| `examples/scripted.rs` | Das Zusammenfügen aus eigenem Rust-Code verwenden. |

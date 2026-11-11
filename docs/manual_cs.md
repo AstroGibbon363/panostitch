@@ -28,55 +28,59 @@ uvedeny **tučně v angličtině**, přesně tak, jak je uvidíte na obrazovce.
 11. [Řešení problémů](#11-řešení-problémů)
 12. [Tipy pro dobré panoramy](#12-tipy-pro-dobré-panoramy)
 13. [Skládání hvězd](#13-skládání-hvězd)
-14. [Použití ze skriptu (bez okna)](#14-použití-ze-skriptu-bez-okna)
+14. [Použití bez okna](#14-použití-bez-okna)
 15. [Soubory](#15-soubory)
 
 ---
 
 ## 1. Požadavky
 
-- **Julia 1.13 nebo novější**
-- **Soubory RAW z fotoaparátu** nepotřebují nic dalšího: LibRaw je součástí
-  programu. Pokud máte nainstalovaný RawTherapee, darktable nebo dcraw,
-  program je umí použít také (viz [Soubory RAW](#8-soubory-raw)).
-- **Soubory FITS** nepotřebují nic dalšího.
+- **Nic se neinstaluje.** Program je jediný soubor, `panostitch`
+  (`panostitch.exe` na Windows), a k tomu `panostack` pro skládání hvězd z
+  příkazové řádky. Na Linuxu potřebuje grafický ovladač s OpenGL a X11 nebo
+  Wayland, což má každé grafické prostředí.
+- **Soubory RAW z fotoaparátu** nepotřebují nic dalšího: dekodér RAW je
+  součástí programu. Pokud máte nainstalovaný `dcraw_emu` z LibRaw,
+  RawTherapee, darktable nebo dcraw, program je umí použít také (viz
+  [Soubory RAW](#8-soubory-raw)).
+- **Soubory FITS a XISF** nepotřebují nic dalšího.
 - **Dialogy výběru souborů** nepotřebují na Windows a macOS nic navíc. Na
   Linuxu používají `zenity`, `kdialog` nebo `yad`, podle toho, co je
   nainstalované (většina prostředí jeden z nich má). Bez nich zadáváte cesty
   do pole pro cestu.
 
-Potřebné balíčky Julie jsou uvedené v `app/Project.toml` a nainstalují se samy při
-prvním spuštění.
+Pro sestavení programu ze zdrojového kódu potřebujete Rust
+(<https://rustup.rs>): `cargo build --release` vytvoří
+`target/release/panostitch` a `target/release/panostack`.
 
 ---
 
 ## 2. Spuštění programu
 
-**Z terminálu:**
+Poklepejte na `panostitch`, nebo ho spusťte z terminálu:
 
 ```
-cd PanoStitch        # složka, ve které je program
-julia bin/panostitch.jl
+panostitch
 ```
 
-Snímky můžete rovnou předat k načtení:
+Snímky nebo soubor projektu můžete rovnou předat k otevření:
 
 ```
-julia bin/panostitch.jl ~/Pictures/pano/*.NEF
+panostitch ~/Pictures/pano/*.NEF
+panostitch moje_pano.panoproj
+panostitch noc.stackproj            # otevře se na kartě skládání hvězd
 ```
-
-**Z VS Code:** otevřete `bin/panostitch.jl` a zvolte *Julia: Execute File in REPL*
-(`Alt+Enter`).
 
 Poznámky:
 
-- **Nechte terminál otevřený**, dokud pracujete. Jeho zavřením se zavře i program.
-- Program automaticky využívá všechna jádra procesoru. Když ho spustíte bez
-  `-t auto`, sám se s touto volbou spustí znovu. Ve VS Code totéž zajišťuje
-  nastavení projektu `"julia.NumThreads": "auto"`.
-- **První spuštění** po instalaci nebo po změně kódu program připraví
-  (předkompiluje). Jednou to trvá až několik minut, potom se okno otevře asi
-  za 5 sekund.
+- Program automaticky využívá všechna jádra procesoru.
+- Okno se otevře do jedné až dvou sekund; nic se předem nepřipravuje.
+- Pokud se okno neobjeví, spusťte program z terminálu: vypíše tam chybová
+  hlášení.
+- Přepínače vzhledu (Dark, Modern, Simple) se ukládají do `ui.toml` ve složce
+  nastavení: `~/.config/panostitch` na Linuxu,
+  `~/Library/Application Support/panostitch` na macOS,
+  `%APPDATA%\panostitch` na Windows.
 
 ---
 
@@ -108,8 +112,8 @@ Poznámky:
 - **Červený stavový řádek** (pod náhledem): co program právě dělá, výsledky a
   chybová hlášení.
 
-Přepínače vpravo nahoře mění vzhled: **Dark** (tmavý), **Modern** (plošší
-vzhled s ikonami) a **Simple** (jednoduchý). Jednoduchý režim skryje podrobné
+Přepínače vpravo nahoře mění vzhled: **Dark** (tmavý), **Modern** (zaoblenější,
+vzdušnější ovládání) a **Simple** (jednoduchý). Jednoduchý režim skryje podrobné
 ovládání (nastavení hledání a párování bodů, prolínání, roztažení, posouvání)
 a ponechá, co potřebuje většina panoram: snímky, předvolbu, **Run all steps**,
 projekci s ohniskovou vzdáleností, natočením (yaw), sklonem (pitch) a
@@ -380,7 +384,7 @@ skoro černě. Roztažení histogramu je zviditelní.
 **Projekty:** **Save project…** (nahoře v levém sloupci) uloží soubor projektu
 s příponou **`.panoproj`**. **Open project…** ho znovu načte. Cestu k souboru
 `.panoproj` můžete také napsat do pole pro cestu a stisknout Enter, nebo s ním
-program spustit: `julia bin/panostitch.jl moje_pano.panoproj`.
+program spustit: `panostitch moje_pano.panoproj`.
 
 Projekt obsahuje:
 
@@ -454,27 +458,29 @@ tunelu určuje Pitch, co bude uprostřed.
 
 Podporováno: **Canon CR2 a CR3, Nikon NEF a NRW, Sony ARW a SRF, DNG, Fuji RAF,
 Olympus ORF, Panasonic RW2, Pentax PEF, Samsung SRW** a další. Přesná podpora
-fotoaparátů závisí na verzi převodníku; LibRaw 0.22, které je součástí
-programu, zná asi 1250 fotoaparátů.
+fotoaparátů závisí na dekodéru; vestavěný zná většinu fotoaparátů posledních
+dvou desetiletí, LibRaw (je-li nainstalované) asi 1250 fotoaparátů.
 
-**RAW via** volí převodník:
+**RAW via** volí dekodér:
 
-| Volba | Převodník | Charakter |
+| Volba | Dekodér | Charakter |
 |---|---|---|
-| **auto** | první dostupný v pořadí níže; má-li snímek soubor `.pp3`, nejdřív RawTherapee | doporučeno |
-| **libraw** | `dcraw_emu` (součást programu) | nejrychlejší; neutrální, spíše tmavý převod bez automatického zesvětlení, takže všechny snímky mají stejnou expozici |
+| **auto** | první, který uspěje, v pořadí níže; má-li snímek soubor `.pp3`, nejdřív RawTherapee | doporučeno |
+| **built-in** | vlastní dekodér programu | vždy k dispozici, rychlý; neutrální převod s barvami a vyvážením bílé fotoaparátu, bez automatického zesvětlení, takže všechny snímky mají stejnou expozici |
+| **libraw** | `dcraw_emu` (LibRaw) | podobný vestavěnému; pro fotoaparáty, které vestavěný dekodér nezná |
 | **rawtherapee** | `rawtherapee-cli` | **použije vaše úpravy z RawTherapee** uložené v `snimek.NEF.pp3`; jinak výchozí vzhled RawTherapee |
 | **darktable** | `darktable-cli` | výchozí převod darktable (včetně korekce objektivu, kde je dostupná); nejpomalejší |
 | **dcraw** | `dcraw` | záloha; neumí CR3 |
 
-Vždy je k dispozici jen libraw; ostatní tři se objeví, pokud je daný program
-nainstalovaný v počítači.
+Vždy je k dispozici jen built-in; ostatní se objeví, pokud je daný program
+nainstalovaný v počítači. Skládání hvězd potřebuje lineární data, proto
+používá jen built-in, libraw nebo dcraw.
 
-Převedené snímky jsou 16bitové a zapisují se do dočasné složky, která se potom
+Vnější dekodéry zapisují 16bitový obraz do dočasné složky, která se potom
 smaže. Vedle vašich fotografií se nic nezapisuje.
 
 **Tip:** pro jednotné barvy v celé panoramě použijte pro všechny snímky stejné
-úpravy (stejný profil `.pp3`), nebo použijte **libraw** a barvy opravte až
+úpravy (stejný profil `.pp3`), nebo použijte **built-in** a barvy opravte až
 nakonec.
 
 ---
@@ -537,7 +543,7 @@ cylindrical nebo spherical.
 
 | Problém | Co zkusit |
 |---|---|
-| **Okno se neobjeví** | Počkejte: první spuštění po změně kódu trvá déle. Sledujte chyby v terminálu. Ověřte, že jste spustili `bin/panostitch.jl`. |
+| **Okno se neobjeví** | Spusťte program z terminálu a přečtěte si tam chybové hlášení. Na Linuxu potřebuje OpenGL: ověřte, že je nainstalovaný grafický ovladač. |
 | **„Busy – wait…“** | Krok ještě běží; počkejte, až se stavový řádek změní. |
 | **Snímek se při načítání přeskočí** | Stavový řádek uvede soubor a důvod. U RAW zkuste jiný převodník v **RAW via**. Soubory FITS `.fz` nejdřív rozbalte. |
 | **Panorama je skoro černá** | Fotografie: klikněte na **Auto exposure** nebo zvyšte **Exposure (EV)** (noční záběry často potřebují +1,5 až +4), nebo snímky upravte v RawTherapee (jejich soubory `.pp3` se pak použijí). FITS a jiná lineární data: klikněte na **Auto stretch**. |
@@ -558,7 +564,7 @@ cylindrical nebo spherical.
 | **Auto crop ponechá jen úzký pruh** | Panorama je prohnutá. Nejdřív ji narovnejte pomocí **Pitch** a **Roll** (a zvolte vhodnou projekci), potom znovu **Auto crop**. |
 | **Projekt se otevře bez některých snímků** | Stavový řádek vypíše chybějící soubory. Byly přesunuty nebo přejmenovány, a ne spolu se souborem projektu. Vraťte je zpět, nebo je přidejte znovu a spárujte. |
 | **Zpět nic neudělá** | Zpět pracuje s ustálenými změnami; po poslední změně chvíli počkejte. Zatímco běží krok (*Busy*), čeká. |
-| **Všechno je pomalé** | Ověřte, že terminál neukazuje *„Running on one thread“*. |
+| **Všechno je pomalé** | Před načtením zapněte **half size** (RAW a FITS z barevných kamer); snižte **Preview size**. Na kartě skládání **Half size** v RAW conversion. |
 
 ---
 
@@ -695,7 +701,7 @@ result…** uloží znovu.
 ### 13.6 Projekty
 
 **Save project…** zapíše soubor `.stackproj` se seznamy souborů, oblastí
-oblohy a všemi nastaveními. **Open project…** (nebo `julia bin/panostitch.jl
+oblohy a všemi nastaveními. **Open project…** (nebo `panostitch
 noc.stackproj`) ho znovu otevře. Soubory se hledají podle plné cesty, nebo
 relativně k souboru projektu, pokud byla složka přesunuta.
 
@@ -724,54 +730,77 @@ udrží jejich jas a barvy stejné.
   pixels**.
 - Pro zpracování v jiných programech ukládejte do `.fits` a zapněte **Linear
   (for processing)**.
-- Z terminálu skládá bez okna `julia bin/panostack.jl`; jeho volby jsou na
-  začátku souboru.
+- Z terminálu skládá bez okna `panostack`; `panostack --help` vypíše jeho
+  volby (viz [Použití bez okna](#14-použití-bez-okna)).
 
 ---
 
-## 14. Použití ze skriptu (bez okna)
+## 14. Použití bez okna
 
-```julia
-include("examples/scripted_stitch.jl")
-pano = Stitcher.stitch(["a.NEF", "b.NEF", "c.NEF"];
-                       projection = :spherical, raw_half = true)
-Stitcher.save_panorama("pano.tif", pano)
+**Skládání hvězd z terminálu:** `panostack` skládá stejně jako karta skládání
+hvězd. `panostack --help` vypíše všechny volby. Příklady:
+
+```
+panostack --mode freeze --horizon 0.62 --darks darks/ -o noc.tif svetla/
+panostack --mode trails --fade in --fill-gaps --auto-sky -o stopy.jpg svetla/
+panostack --preview svetla/            # rychlá kontrola, nic se neukládá
 ```
 
-Volby funkce `stitch` a jejich výchozí hodnoty:
+Na konci se vypíše přehled snímků a záznam postupu.
 
-| Volba | Výchozí | Význam |
+**Spojování z vlastního programu v Rustu:** přidejte PanoStitch jako závislost
+(`panostitch = { path = "…/PanoStitch" }` v souboru `Cargo.toml`), potom:
+
+```rust
+use panostitch::io;
+use panostitch::stitcher::{self, Projection, StitchParams};
+
+fn main() -> Result<(), String> {
+    let paths = vec!["a.NEF".to_string(), "b.NEF".into(), "c.NEF".into()];
+    let p = StitchParams { projection: Projection::Spherical, ..Default::default() };
+    let pano = stitcher::stitch_files(&paths, &p, true, &mut |m| println!("{m}"))?;
+    io::save_panorama("pano.tif", &pano)
+}
+```
+
+Úplný příklad je v `examples/scripted.rs`
+(`cargo run --release --example scripted -- a.NEF b.NEF c.NEF`).
+`stitch_files(cesty, parametry, raw_half, log)` snímky načte a spojí;
+`stitch(snímky, parametry, log)` spojí snímky, které už jsou v paměti.
+Položky `StitchParams` a jejich výchozí hodnoty:
+
+| Položka | Výchozí | Význam |
 |---|---|---|
-| `layout` | `:all` | které dvojice párovat: `:all`, `:sequential`, `:grid` |
-| `cols`, `snake` | všechny snímky, `false` | rozložení grid |
+| `layout` | Layout::All | které dvojice párovat: `All`, `Sequential`, `Grid` |
+| `cols`, `snake` | 0 (all images), `false` | rozložení do mřížky |
 | `refine` | `true` | globální zpřesnění |
-| `feature_scale` | `0.5` | měřítko detekce |
-| `nkeypoints` | `5000` | |
-| `denoise` | `1.5` | |
-| `ratio` | `0.8` | |
-| `max_distance` | `0.35` | |
-| `model` | `:homography` | `:homography`, `:affine`, `:similarity`, `:translation` |
-| `ransac_thresh` | `5.0` | |
-| `min_inliers` | `20` | |
-| `projection` | `:cylindrical` | libovolný název z kapitoly [Projekce](#7-projekce) jako symbol, např. `:fisheye`, `:little_planet`, `:mollweide` |
-| `blend` | `:smart` | `:smart`, `:feather`, `:seam`, `:average` |
+| `feature_scale` | `0.5` | měřítko hledání bodů |
+| `nkeypoints` | `5000` |  |
+| `denoise` | `1.5` |  |
+| `ratio` | `0.8` |  |
+| `max_distance` | `0.35` |  |
+| `model` | `Model::Homography` | `Homography`, `Affine`, `Similarity`, `Translation` |
+| `ransac_thresh` | `5.0` |  |
+| `min_inliers` | `20` |  |
+| `projection` | `Projection::Cylindrical` | libovolná z kapitoly [Projekce](#7-projekce), např. `Fisheye`, `LittlePlanet`, `Mollweide` |
+| `blend` | `Blend::Smart` | `Smart`, `Feather`, `Seam`, `Average` |
 | `sharpness` | `3.0` | režim feather: vyšší = užší přechody |
-| `raw_half` | `false` | poloviční velikost pro RAW a FITS z barevných kamer |
 
-**Mozaika z FITS s roztaženým TIFF a lineárním výsledkem FITS:**
+**Mozaika FITS s roztaženým TIFF a lineárním výsledkem FITS:**
 
-```julia
-include("examples/scripted_stitch.jl")
-tiles = filter(f -> endswith(f, ".fits"), readdir("tiles"; join = true))
-mosaic = Stitcher.stitch(tiles; model = :similarity, refine = false,
-                         projection = :rectilinear, denoise = 0.75)
-Stitcher.save_panorama("mosaic.fits", mosaic)                         # lineárně
-black, mid, white = Stitcher.auto_stretch(mosaic)
-Stitcher.save_panorama("mosaic.tif", Stitcher.hist_stretch(mosaic, black, mid, white))
+```rust
+use panostitch::stitcher::{Model, Projection, StitchParams};
+
+let p = StitchParams { model: Model::Similarity, refine: false,
+                       projection: Projection::Rectilinear, denoise: 0.75, ..Default::default() };
+let mosaic = stitcher::stitch_files(&tiles, &p, false, &mut |_| {})?;
+io::save_panorama("mosaic.fits", &mosaic)?;                          // linear
+let (black, mid, white) = stitcher::auto_stretch(&mosaic, 0.25, 2.8);
+io::save_panorama("mosaic.tif", &stitcher::hist_stretch(&mosaic, black, mid, white))?;
 ```
 
-Další užitečné funkce: `Stitcher.read_fits(cesta; half)` a
-`Stitcher.write_fits(cesta, obrázek)`.
+Skládání hvězd z kódu: vyplňte `stacker::StackConfig` (začněte od
+`StackConfig::default()`) a zavolejte `stacker::stack(&config, false, &progress, None)`.
 
 ---
 
@@ -779,19 +808,22 @@ Další užitečné funkce: `Stitcher.read_fits(cesta; half)` a
 
 | Soubor | Účel |
 |---|---|
-| `bin/panostitch.jl` | Spouští program (okno). |
-| `bin/panostack.jl` | Skládání hvězd z příkazové řádky (volby jsou na začátku souboru). |
-| `examples/scripted_stitch.jl` | Načte skládací kód pro použití z vlastních skriptů. |
-| `test/runtests.jl` | Testy skládání hvězd na umělých nočních scénách. |
-| `src/stitcher.jl` | Skládání: načítání (RAW, FITS), body, párování, projekce, vykreslení, roztažení. |
-| `src/stacker.jl` | Skládání hvězd. |
-| `src/PanoStitch.jl` | Vstupní bod balíčku a předkompilace (bez grafiky). |
-| `ext/PanoStitchGUIExt/` | Okno programu (načte se spolu s GLMakie). |
-| `app/` | Seznam balíčků programu: PanoStitch a GLMakie (instalují se automaticky). |
-| `Project.toml`, `Manifest.toml` | Seznam balíčků samotného skládacího kódu (pro skripty). |
-| `assets/fonts/` | Písma okna (DejaVu). |
-| `*.panoproj` | Vaše soubory projektů (tam, kam je uložíte). |
-| `docs/manual_en.md` | Příručka v angličtině. |
-| `docs/manual_cs.md`, `docs/manual_de.md` | Příručka v češtině (tato) a v němčině. |
-| `docs/manual_*.pdf`, `docs/make_pdf.jl` | Příručky v PDF a skript, který je vytváří. |
-| `build/build_app.jl` | Sestaví samostatný program (běží i bez nainstalované Julie). |
+| `panostitch` (`panostitch.exe`) | Program (okno). |
+| `panostack` (`panostack.exe`) | Skládání hvězd z příkazové řádky (`panostack --help`). |
+| `*.panoproj`, `*.stackproj` | Vaše soubory projektů (kamkoli je uložíte). |
+| `ui.toml` ve složce nastavení | Přepínače vzhledu (viz [Spuštění programu](#2-spuštění-programu)). |
+| `docs/manual_cs.md` | Tato příručka (česky). |
+| `docs/manual_en.md`, `docs/manual_de.md` | Příručka v angličtině a němčině. |
+
+Zdrojový kód (pro vlastní sestavení programu):
+
+| Cesta | Obsah |
+|---|---|
+| `Cargo.toml` | Projekt a knihovny, které používá. |
+| `src/image.rs`, `src/io/` | Obrazy; načítání a ukládání (JPEG, PNG, TIFF, BMP, RAW, FITS, XISF). |
+| `src/stitcher/` | Spojování: body, párování, umístění, zpřesnění, projekce, prolínání. |
+| `src/stacker/` | Skládání hvězd. |
+| `src/gui/` | Okno: obě karty a dialogy souborů. |
+| `src/bin/` | Oba programy, `panostitch` a `panostack`. |
+| `tests/` | Testy: skládání na umělých nočních scénách, spojování, formáty souborů a obě karty okna. Spustíte je příkazem `cargo test --release`. |
+| `examples/scripted.rs` | Použití spojování z vlastního kódu v Rustu. |

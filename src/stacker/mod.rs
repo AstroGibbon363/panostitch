@@ -424,6 +424,8 @@ pub fn load_linear(path: &str, cfg: &StackConfig, preview: bool) -> Result<Img, 
 // Frame storage: 16-bit floats, (frames, rows, columns, 3), in RAM or memory-mapped
 // --------------------------------------------------------------------------
 
+// The fields own the memory that `FrameStore::ptr` points into.
+#[allow(dead_code)]
 enum Storage {
     Ram(Vec<u16>),
     Map(memmap2::MmapMut, Option<std::path::PathBuf>),
@@ -434,6 +436,9 @@ pub struct FrameStore {
     pub h: usize,
     pub k: usize,
     data: Storage,
+    // The pixel memory (inside `data`, which owns it; the heap / mapping does not move).
+    ptr: *mut u16,
+    len: usize,
 }
 
 unsafe impl Sync for FrameStore {}
@@ -446,7 +451,9 @@ impl FrameStore {
         let bytes = 2 * n;
         let avail = available_memory();
         if (bytes as f64) < 0.5 * avail {
-            return Ok(Self { w, h, k, data: Storage::Ram(vec![0u16; n]) });
+            let mut v = vec![0u16; n];
+            let ptr = v.as_mut_ptr();
+            return Ok(Self { w, h, k, data: Storage::Ram(v), ptr, len: n });
         }
         let dir = if dir.is_dir() { dir.to_path_buf() } else { std::env::temp_dir() };
         let path = dir.join(format!("panostitch-frames-{}-{:08x}.tmp", std::process::id(), rand::random::<u32>()));
@@ -458,7 +465,8 @@ impl FrameStore {
             .open(&path)
             .map_err(|e| format!("Cannot create the frame file {}: {e}", path.display()))?;
         file.set_len(bytes.max(2) as u64).map_err(|e| format!("Cannot size the frame file: {e}"))?;
-        let map = unsafe { memmap2::MmapMut::map_mut(&file) }.map_err(|e| format!("Cannot map the frame file: {e}"))?;
+        let mut map = unsafe { memmap2::MmapMut::map_mut(&file) }.map_err(|e| format!("Cannot map the frame file: {e}"))?;
+        let ptr = map.as_mut_ptr() as *mut u16;
         drop(file);
         // The mapping stays valid without the file on Unix; Windows deletes it when the store is dropped.
         let keep = if cfg!(windows) {
@@ -467,21 +475,11 @@ impl FrameStore {
             let _ = std::fs::remove_file(&path);
             None
         };
-        Ok(Self { w, h, k, data: Storage::Map(map, keep) })
+        Ok(Self { w, h, k, data: Storage::Map(map, keep), ptr, len: n })
     }
     #[inline]
     fn slice(&self) -> &[u16] {
-        match &self.data {
-            Storage::Ram(v) => v,
-            Storage::Map(m, _) => unsafe { std::slice::from_raw_parts(m.as_ptr() as *const u16, m.len() / 2) },
-        }
-    }
-    #[inline]
-    fn slice_mut(&mut self) -> &mut [u16] {
-        match &mut self.data {
-            Storage::Ram(v) => v,
-            Storage::Map(m, _) => unsafe { std::slice::from_raw_parts_mut(m.as_mut_ptr() as *mut u16, m.len() / 2) },
-        }
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
     /// Value of channel `c` of pixel (x, y) (0-based) of frame `k`.
     #[inline]
@@ -496,16 +494,24 @@ impl FrameStore {
     }
     /// Store `img` as frame `k`.
     pub fn store(&mut self, k: usize, img: &Img) {
+        self.store_shared(k, img);
+    }
+
+    /// Store `img` as frame `k` from any thread, without a lock: each frame is a
+    /// separate part of the memory. Callers write every frame from one thread
+    /// only and read frames only after all writing is done (as `stack` does).
+    /// Single-threaded on purpose: the callers already work in parallel.
+    pub fn store_shared(&self, k: usize, img: &Img) {
         let (w, h) = (self.w, self.h);
+        assert!(k < self.k && img.w == w && img.h == h, "frame {k} does not fit the store");
         let off = k * h * w * 3;
-        let dst = &mut self.slice_mut()[off..off + h * w * 3];
-        dst.par_chunks_mut(3 * w).zip(img.px.par_chunks(w)).for_each(|(row, src)| {
-            for (x, p) in src.iter().enumerate() {
-                row[3 * x] = f16::from_f32(p[0]).to_bits();
-                row[3 * x + 1] = f16::from_f32(p[1]).to_bits();
-                row[3 * x + 2] = f16::from_f32(p[2]).to_bits();
-            }
-        });
+        // SAFETY: the range of frame k lies inside the buffer and no other thread writes it.
+        let dst = unsafe { std::slice::from_raw_parts_mut(self.ptr.add(off), h * w * 3) };
+        for (q, p) in dst.chunks_exact_mut(3).zip(img.px.iter()) {
+            q[0] = f16::from_f32(p[0]).to_bits();
+            q[1] = f16::from_f32(p[1]).to_bits();
+            q[2] = f16::from_f32(p[2]).to_bits();
+        }
     }
     /// Bilinear sample of frame k at 1-based pixel position (x, y); None outside the frame.
     #[inline]

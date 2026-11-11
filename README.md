@@ -11,9 +11,11 @@ rewrite: one small native program, no runtime to install.
 ## Running
 
 ```
-panostitch [images …]                     # the window
+panostitch [images or project files …]   # the window
 panostack [options] STAR_IMAGES_OR_FOLDER # star stacking, no window (see --help)
 ```
+
+The user manual is in `docs/` (English, Czech, German).
 
 ## Building
 
@@ -22,7 +24,7 @@ development libraries (present on any desktop install).
 
 ```
 cargo build --release      # target/release/panostitch and panostack
-cargo test --release       # engine tests on synthetic night scenes, stitching, file formats
+cargo test --release       # engine, file formats, and both tabs of the window (headless)
 ```
 
 Build on each target system (Windows, macOS, Linux); the result is a single
@@ -38,8 +40,9 @@ executable of about 15 MB that needs nothing else.
 | `src/stacker/` | Calibration, star detection and alignment, combining, post-processing, the run |
 | `src/gui/` | The window (egui): stitcher tab, stacking tab, file dialogs |
 | `src/bin/` | `panostitch` (window) and `panostack` (command line) |
-| `tests/` | Integration tests |
-| `docs/` | User manual in English, Czech and German (written for the Julia version) |
+| `tests/` | Tests: stacking on synthetic night scenes, stitching, file formats, both tabs of the window |
+| `examples/` | Using the library from your own Rust code |
+| `docs/` | User manual in English, Czech and German (Markdown) |
 
 Camera RAW files are decoded by a built-in pure-Rust decoder (`rawler`).
 LibRaw's `dcraw_emu`, RawTherapee, darktable or dcraw are used too if installed
