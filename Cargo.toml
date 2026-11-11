@@ -1,6 +1,6 @@
 [package]
 name = "panostitch"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Panorama stitching and star stacking for landscape astrophotography"
 license = "GPL-3.0-or-later"
