@@ -895,6 +895,27 @@ impl StackTab {
                                 self.dialog = Some((dialogs::pick_save("Output", &d), "output"));
                             }
                         });
+                        // The format follows the file's extension; choosing one changes it.
+                        let ext = io::ext_of(&self.cfg.output);
+                        let cur = io::OUTPUT_FORMATS.iter().find(|f| f.0 == ext || (f.0 == "tif" && ext == "tiff") || (f.0 == "jpg" && ext == "jpeg")).map(|f| f.1).unwrap_or("choose…");
+                        ui.horizontal(|ui| {
+                            ui.label("Format");
+                            egui::ComboBox::from_id_salt("outfmt").selected_text(cur).width(230.0).show_ui(ui, |ui| {
+                                for (e, d) in io::OUTPUT_FORMATS {
+                                    if ui.selectable_label(cur == d, d).clicked() {
+                                        let base = if self.cfg.output.is_empty() {
+                                            match self.files[0].first() {
+                                                Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join("stacked").to_string_lossy().to_string(),
+                                                None => "stacked".to_string(),
+                                            }
+                                        } else {
+                                            self.cfg.output.clone()
+                                        };
+                                        self.cfg.output = io::with_ext(&base, e);
+                                    }
+                                }
+                            });
+                        });
                     }
                     _ => {}
                 }

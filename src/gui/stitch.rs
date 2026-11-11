@@ -186,6 +186,8 @@ pub struct StitchTab {
     tex_cache: HashMap<(String, u64), egui::TextureHandle>,
     drag: Option<(usize, (f64, f64), [f64; 2])>,
     pub simple: bool,
+    /// File type of “Save full resolution…” (None = automatic).
+    save_format: Option<&'static str>,
     /// Multi-selection in the image list (always contains `sel` when there are images).
     selected: std::collections::BTreeSet<usize>,
     /// The message to show when the preview being rendered arrives (instead of “Preview ready”).
@@ -322,7 +324,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: "Add images to begin (any order).".into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -1623,8 +1625,19 @@ impl StitchTab {
         if ui.add(big("◐ Preview panorama")).clicked() {
             self.request_preview();
         }
+        ui.horizontal(|ui| {
+            ui.label("Format");
+            let cur = self.save_format.and_then(|e| io::OUTPUT_FORMATS.iter().find(|f| f.0 == e)).map(|f| f.1).unwrap_or("automatic");
+            egui::ComboBox::from_id_salt("savefmt").selected_text(cur).width(240.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.save_format, None, "automatic").on_hover_text("TIFF; FITS or XISF when all images are");
+                for (e, d) in io::OUTPUT_FORMATS {
+                    ui.selectable_value(&mut self.save_format, Some(e), d);
+                }
+            });
+        });
         if ui.add(big("⬇ Save full resolution…")).clicked() && self.layout.is_some() && self.dialog.is_none() {
-            let ext = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
+            let auto = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
+            let ext = self.save_format.unwrap_or(auto);
             let dir = std::path::Path::new(&self.items[0].path).parent().map(|d| d.to_path_buf()).unwrap_or_default();
             let default = dir.join(format!("panorama.{ext}")).to_string_lossy().to_string();
             self.dialog = Some((dialogs::pick_save("Save panorama", &default), "save"));

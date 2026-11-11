@@ -48,6 +48,20 @@ pub fn image_exts() -> Vec<String> {
     v
 }
 
+/// Output formats offered in the window: (extension, description).
+pub const OUTPUT_FORMATS: [(&str, &str); 5] = [
+    ("tif", "TIFF, 16-bit (as shown)"),
+    ("png", "PNG, 16-bit (as shown)"),
+    ("jpg", "JPEG, 8-bit (as shown)"),
+    ("fits", "FITS, 32-bit float (linear)"),
+    ("xisf", "XISF, 32-bit float (linear)"),
+];
+
+/// `path` with its extension replaced by `ext`.
+pub fn with_ext(path: &str, ext: &str) -> String {
+    Path::new(path).with_extension(ext).to_string_lossy().to_string()
+}
+
 /// Options for loading a RAW file (ignored for the other formats).
 #[derive(Clone, Debug)]
 pub struct LoadOptions {
