@@ -154,6 +154,23 @@ pub fn apply_style(ctx: &egui::Context, p: Prefs) {
     });
 }
 
+/// The DejaVu fonts shipped with the program (assets/fonts, license included) as
+/// fallbacks: egui's own fonts lack the symbols on the buttons (▶ ◐ ⬇ ← ↶ ☾ …).
+pub fn install_fonts(ctx: &egui::Context) {
+    use std::sync::Arc;
+    let mut f = egui::FontDefinitions::default();
+    f.font_data.insert("dejavu".into(), Arc::new(egui::FontData::from_static(include_bytes!("../../assets/fonts/DejaVuSans.ttf"))));
+    f.font_data.insert("dejavu-mono".into(), Arc::new(egui::FontData::from_static(include_bytes!("../../assets/fonts/DejaVuSansMono.ttf"))));
+    if let Some(v) = f.families.get_mut(&egui::FontFamily::Proportional) {
+        v.push("dejavu".into());
+    }
+    if let Some(v) = f.families.get_mut(&egui::FontFamily::Monospace) {
+        v.push("dejavu-mono".into());
+        v.push("dejavu".into());
+    }
+    ctx.set_fonts(f);
+}
+
 /// Path of `p` relative to the folder `dir` (for project files).
 pub fn relpath(p: &std::path::Path, dir: &std::path::Path) -> String {
     let a: Vec<_> = p.components().collect();
@@ -183,6 +200,7 @@ impl App {
 
     /// The app on an egui context (also used by the headless tests).
     pub fn with_context(ctx: &egui::Context, paths: Vec<String>) -> Self {
+        install_fonts(ctx);
         let prefs = load_prefs();
         apply_style(ctx, prefs);
         let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default() };

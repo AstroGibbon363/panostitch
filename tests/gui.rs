@@ -289,3 +289,23 @@ fn stacking_tab_end_to_end() {
     w3.idle("reopen");
     assert_eq!(w3.app.stack.t_cfg().sky.mask, m);
 }
+
+/// Every symbol on the buttons and labels has a glyph (else egui draws an empty box).
+#[test]
+fn button_symbols_have_glyphs() {
+    let mut w = Win::new(vec![]);
+    w.frame();
+    w.frame();
+    let mut used: Vec<char> = Vec::new();
+    for f in ["src/gui/mod.rs", "src/gui/stitch.rs", "src/gui/stack.rs"] {
+        let s = std::fs::read_to_string(f).unwrap();
+        used.extend(s.chars().filter(|c| ('\u{2190}'..='\u{2BFF}').contains(c)));
+    }
+    used.sort();
+    used.dedup();
+    assert!(used.len() > 10);
+    for fam in [egui::FontId::proportional(14.0), egui::FontId::monospace(14.0)] {
+        let missing: String = w.ctx.fonts_mut(|f| used.iter().copied().filter(|c| !f.has_glyph(&fam, *c)).collect());
+        assert!(missing.is_empty(), "{fam:?}: no glyph for {missing}");
+    }
+}

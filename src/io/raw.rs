@@ -249,13 +249,11 @@ fn decode_builtin(path: &str, opt: &LoadOptions) -> Result<Img, String> {
 
 fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
     use rawler::decoders::Orientation;
-    use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
-    use rawler::rawimage::RawPhotometricInterpretation;
 
     let src = rawler::rawsource::RawSource::new(Path::new(path)).map_err(|e| e.to_string())?;
     let dec = rawler::get_decoder(&src).map_err(|e| e.to_string())?;
     let params = rawler::decoders::RawDecodeParams { image_index: 0 };
-    let mut raw = dec.raw_image(&src, &params, false).map_err(|e| e.to_string())?;
+    let raw = dec.raw_image(&src, &params, false).map_err(|e| e.to_string())?;
     // The orientation may sit in the EXIF data rather than in the raw image itself.
     let mut orientation = raw.orientation;
     if matches!(orientation, Orientation::Normal | Orientation::Unknown) {
@@ -263,6 +261,16 @@ fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
             orientation = Orientation::from_u16(o);
         }
     }
+    develop(raw, orientation, opt)
+}
+
+/// Sensor data → RGB image (black / white levels, white balance with clipped
+/// highlights, demosaicing, camera colours, orientation, half size, tone).
+#[doc(hidden)]
+pub fn develop(mut raw: rawler::RawImage, orientation: rawler::decoders::Orientation, opt: &LoadOptions) -> Result<Img, String> {
+    use rawler::decoders::Orientation;
+    use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
+    use rawler::rawimage::RawPhotometricInterpretation;
     raw.apply_scaling().map_err(|e| e.to_string())?;
     match opt.wb {
         WhiteBalance::Camera => {
@@ -299,12 +307,32 @@ fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
             }
         }
     }
+    // White balance on the sensor data, with highlights clipped (as dcraw / LibRaw
+    // do): the factors are scaled so the smallest is 1, and every channel is cut
+    // at the sensor's saturation. Otherwise blown areas (the sun, lamps) turn
+    // pink, since only the clipped channels get multiplied up.
+    {
+        let wb = raw.wb_coeffs;
+        let wb = if wb.iter().take(3).all(|v| v.is_finite() && *v > 0.0) { wb } else { [1.0; 4] };
+        let m = wb.iter().take(3).cloned().fold(f32::MAX, f32::min);
+        let k: Vec<f32> = (0..4).map(|c| if wb[c].is_finite() && wb[c] > 0.0 { wb[c] / m } else { 1.0 }).collect();
+        let (w, cpp) = (raw.width, raw.cpp);
+        let cfa = match &raw.photometric {
+            RawPhotometricInterpretation::Cfa(cfg) => Some(cfg.cfa.clone()),
+            _ => None,
+        };
+        let mut data = raw.data.as_f32().into_owned();
+        match (&cfa, cpp) {
+            (Some(cfa), 1) => data.iter_mut().enumerate().for_each(|(i, v)| *v = (*v * k[cfa.color_at(i / w, i % w).min(3)]).min(1.0)),
+            _ => data.iter_mut().enumerate().for_each(|(i, v)| *v = (*v * k[(i % cpp).min(3)]).min(1.0)),
+        }
+        raw.data = rawler::RawImageData::Float(data);
+        raw.wb_coeffs = [1.0; 4];
+    }
     let dev = RawDevelop::new_with(&[
-        ProcessingStep::Rescale,
         ProcessingStep::Demosaic,
         ProcessingStep::FujiRotate,
         ProcessingStep::CropActiveArea,
-        ProcessingStep::WhiteBalance,
         ProcessingStep::Calibrate,
         ProcessingStep::CropDefault,
     ]);
