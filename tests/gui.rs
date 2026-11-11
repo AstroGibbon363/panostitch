@@ -61,6 +61,11 @@ impl Win {
     }
 }
 
+/// `dir/name` with the system's path separator.
+fn pj(dir: &str, name: &str) -> String {
+    std::path::Path::new(dir).join(name).to_string_lossy().to_string()
+}
+
 fn scene(h: usize, w: usize, seed: u64) -> Img {
     let mut r = ChaCha8Rng::seed_from_u64(seed);
     blur(&Img::from_vec(h, w, (0..h * w).map(|_| [r.gen(), r.gen(), r.gen()]).collect()), 2.0)
@@ -73,7 +78,7 @@ fn stitcher_tab_end_to_end() {
     let sc = scene(500, 1300, 5);
     let paths: Vec<String> = (0..3)
         .map(|k| {
-            let p = format!("{d}/frame{k}.png");
+            let p = pj(&d, &format!("frame{k}.png"));
             panostitch::io::save_panorama(&p, &sc.crop(0, 500, k * 400, k * 400 + 500)).unwrap();
             p
         })
@@ -138,7 +143,7 @@ fn stitcher_tab_end_to_end() {
 
     // Save the full-resolution panorama (TIFF and FITS).
     for ext in ["tif", "fits"] {
-        let out = format!("{d}/pano.{ext}");
+        let out = pj(&d, &format!("pano.{ext}"));
         w.app.stitch.t_save(&out);
         w.idle("save");
         let img = panostitch::io::load_any(&out, &Default::default()).unwrap();
@@ -146,7 +151,7 @@ fn stitcher_tab_end_to_end() {
     }
 
     // Save the project and open it in a new window: same images, pairs, moves, crop.
-    let proj = w.app.stitch.save_project(&format!("{d}/test")).unwrap();
+    let proj = w.app.stitch.save_project(&pj(&d, &format!("test"))).unwrap();
     assert!(proj.ends_with(".panoproj"));
     let mut w2 = Win::new(vec![proj]);
     w2.idle("open project");
@@ -227,7 +232,7 @@ fn stacking_tab_end_to_end() {
         .iter()
         .enumerate()
         .map(|(k, img)| {
-            let p = format!("{d}/star{k:02}.fits"); // linear, as stacking needs
+            let p = pj(&d, &format!("star{k:02}.fits")); // linear, as stacking needs
             panostitch::io::save_panorama(&p, img).unwrap();
             p
         })
@@ -251,7 +256,7 @@ fn stacking_tab_end_to_end() {
     let r = w.app.stack.t_result().unwrap_or_else(|| panic!("no preview: {}", w.app.stack.t_status()));
     assert!(r.preview && r.saved.is_empty());
     w.until("post-processing", 60, |a| a.stack.t_post_ready());
-    let out = format!("{d}/stacked.tif");
+    let out = pj(&d, &format!("stacked.tif"));
     w.app.stack.t_cfg().output = out.clone();
     w.app.stack.t_exclude(&paths[0]);
     w.app.stack.t_run(false);
@@ -263,7 +268,7 @@ fn stacking_tab_end_to_end() {
     assert!(std::path::Path::new(&out).is_file());
 
     // The project keeps files, exclusions, the sky line and the settings.
-    let proj = w.app.stack.save_project(&format!("{d}/stack")).unwrap();
+    let proj = w.app.stack.save_project(&pj(&d, &format!("stack"))).unwrap();
     let mut w2 = Win::new(vec![proj.clone()]);
     w2.idle("open stacking project");
     assert_eq!(w2.app.stack.t_files()[0].len(), 6, "{}", w2.app.stack.t_status());
