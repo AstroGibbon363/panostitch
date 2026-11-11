@@ -23,6 +23,8 @@ pub const PROJECT_EXT: &str = ".stackproj";
 const GROUP_KEYS: [&str; 7] = ["stars", "base", "darks", "bias", "flats", "flatdarks", "foreground"];
 const DEM: [(u32, &str); 7] = [(3, "AHD"), (11, "DHT"), (12, "AAHD"), (4, "DCB"), (2, "PPG"), (1, "VNG"), (0, "Bilinear")];
 const WB: [(io::WhiteBalance, &str); 3] = [(io::WhiteBalance::Camera, "Camera"), (io::WhiteBalance::Auto, "Average of image"), (io::WhiteBalance::Daylight, "Daylight")];
+const STACK_PRESETS: [&str; 3] = ["Milky Way landscape", "Star trails", "Deep sky (telescope)"];
+
 /// Sequator's names for the input groups (simple mode; also the keys of the explanations).
 const GROUPS: [&str; 8] = ["Star images", "Base image", "Noise images", "Bias images", "Vignetting images", "Flat-dark images", "Foreground image", "Output"];
 /// The usual names (normal mode).
@@ -34,6 +36,15 @@ fn group_name(g: usize, simple: bool) -> &'static str {
 const MASK_COLS: usize = 400;
 const PREVIEW_MAX: usize = 1600;
 const RESULT_MAX: usize = 3000;
+
+/// How far a run is (for the progress bar): work units done of total.
+#[derive(Clone, Default)]
+struct Progress {
+    msg: String,
+    done: f64,
+    total: f64,
+    start: Option<std::time::Instant>,
+}
 
 enum Msg {
     Preview(String, Arc<Img>),
@@ -75,13 +86,15 @@ pub struct StackTab {
     running: bool,
     loading: bool,
     cancel: Arc<AtomicBool>,
-    progress: Arc<Mutex<String>>,
+    progress: Arc<Mutex<Progress>>,
     status: String,
     pathbox: String,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     dialog: Option<(Receiver<Picked>, &'static str)>,
     pub simple: bool,
+    autorun_done: bool,
+    running_preview: bool,
     /// The highlighted settings entry (None: the options of the highlighted file group).
     setting: Option<usize>,
     project: Option<String>,
@@ -130,9 +143,9 @@ impl Default for StackTab {
             to_stitcher: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, disp_tex: None, overlay_tex: None,
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
             post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
-            cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(String::new())),
+            cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
             status: "Add light frames to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), tx, rx, dialog: None,
-            simple: false, setting: None, project: None, post_note: super::notes::note("Tone"),
+            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, post_note: super::notes::note("Tone"),
         }
     }
 }
@@ -253,16 +266,51 @@ impl StackTab {
         }
         let cfg = self.settings();
         self.running = true;
+        self.running_preview = preview;
         self.cancel.store(false, Ordering::Relaxed);
         let (tx, cancel, prog) = (self.tx.clone(), self.cancel.clone(), self.progress.clone());
-        *prog.lock().unwrap() = "Starting…".into();
+        // Work units for the progress bar: one per frame loaded (calibration
+        // frames, light frames), and combining about a third of loading.
+        let pick = |n: usize, cap: usize| if preview { n.min(cap) } else { n };
+        let lights = pick(self.files[0].iter().filter(|p| !cfg.excluded.contains(p)).count(), PREVIEW_FRAMES);
+        let kinds = [("bias", pick(cfg.bias.len(), PREVIEW_CALIB)), ("dark", pick(cfg.darks.len(), PREVIEW_CALIB)), ("flat", pick(cfg.flats.len(), PREVIEW_CALIB)), ("flat dark", pick(cfg.flatdarks.len(), PREVIEW_CALIB))];
+        let ncal: usize = kinds.iter().map(|k| k.1).sum();
+        let combine_units = 0.35 * lights as f64;
+        let total = ncal as f64 + lights as f64 + combine_units;
+        *prog.lock().unwrap() = Progress { msg: "Starting…".into(), done: 0.0, total, start: Some(std::time::Instant::now()) };
         std::thread::spawn(move || {
             let t0 = std::time::Instant::now();
             let progress = |m: &str| -> Result<(), String> {
                 if cancel.load(Ordering::Relaxed) {
                     return Err("Cancelled.".into());
                 }
-                *prog.lock().unwrap() = m.to_string();
+                let mut p = prog.lock().unwrap();
+                // Where in the run this message is.
+                let frac = |s: &str| -> Option<(f64, f64)> {
+                    let t = s.split(':').nth(1)?.split_whitespace().next()?;
+                    let (a, b) = t.split_once('/')?;
+                    Some((a.parse().ok()?, b.parse().ok()?))
+                };
+                let done = if let Some(kind) = m.strip_prefix("Master ").and_then(|r| r.split(':').next()) {
+                    let before: usize = kinds.iter().take_while(|k| k.0 != kind).map(|k| k.1).sum();
+                    frac(m).map(|(a, _)| before as f64 + a)
+                } else if m.starts_with("Loading, calibrating, aligning") {
+                    frac(m).map(|(a, _)| ncal as f64 + a)
+                } else if m.starts_with("Loading the base") {
+                    Some(ncal as f64)
+                } else if let Some(r) = m.strip_prefix("Combining: ") {
+                    r.trim_end_matches(" %").parse::<f64>().ok().map(|pc| ncal as f64 + lights as f64 + combine_units * pc / 100.0)
+                } else if m.starts_with("Time-lapse frame") {
+                    frac(m).map(|(a, b)| ncal as f64 + lights as f64 + combine_units * (a - 1.0) / b.max(1.0))
+                } else if m.starts_with("Post-processing") || m.starts_with("Saving") {
+                    Some(p.total)
+                } else {
+                    None
+                };
+                if let Some(d) = done {
+                    p.done = d.max(p.done).min(p.total);
+                }
+                p.msg = m.to_string();
                 Ok(())
             };
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stack(&cfg, preview, &progress, None))).unwrap_or_else(|_| Err("internal error (panic)".into()));
@@ -291,6 +339,58 @@ impl StackTab {
             };
             let _ = tx.send(msg);
         });
+    }
+
+/// Starting points for typical subjects; every setting can still be changed.
+    fn apply_preset(&mut self, name: &str) -> &'static str {
+        let c = &mut self.cfg;
+        // Common: sigma clipping, automatic frame rejection, auto brightness, no extras.
+        c.composition = Composition::AlignStars;
+        c.align_mode = AlignMode::Best;
+        c.selective = false;
+        c.trails = (Fade::Off, false);
+        c.reject.auto = true;
+        c.auto_brightness = true;
+        c.hdr = false;
+        c.bg_extraction.0 = false;
+        c.color_calibration = false;
+        c.enhance_stars.0 = false;
+        c.light_pollution.filter = Pollution::Off;
+        c.tone = Tone::SrgbCurve;
+        c.stretch.auto = true;
+        c.timelapse.0 = false;
+        c.model = Model::Homography;
+        c.distortion = Distortion::Off;
+        match name {
+            "Milky Way landscape" => {
+                c.align_mode = AlignMode::Freeze;
+                if matches!(c.sky.mode, SkyMode::None | SkyMode::All) {
+                    c.sky.mode = SkyMode::Automatic;
+                }
+                c.distortion = Distortion::Auto;
+                c.light_pollution.filter = Pollution::Uneven;
+                c.light_pollution.strength = 50.0;
+                "the sky is aligned, the foreground stays sharp; sky region detected automatically (or draw it), wide-angle distortion corrected, uneven light pollution reduced."
+            }
+            "Star trails" => {
+                c.composition = Composition::StarTrails;
+                c.trails = (Fade::Off, true);
+                c.reject.auto = false;
+                if matches!(c.sky.mode, SkyMode::None | SkyMode::All) {
+                    c.sky.mode = SkyMode::Automatic;
+                }
+                "no alignment, the brightest value per pixel, the gaps between frames filled; sky region detected automatically (or draw it). Try Trail fade for a comet look."
+            }
+            _ => {
+                // Deep sky (telescope)
+                c.sky.mode = SkyMode::All;
+                c.model = Model::Similarity;
+                c.bg_extraction = (true, 2);
+                c.color_calibration = true;
+                c.tone = Tone::Stretch;
+                "the whole frame is sky; frames only shift and turn; gradients removed, colours calibrated, automatic stretch. Save as .fits for further processing."
+            }
+        }
     }
 
     fn post_fingerprint(&self) -> u64 {
@@ -356,7 +456,7 @@ impl StackTab {
             }
         }
         if self.running {
-            self.status = self.progress.lock().unwrap().clone();
+            self.status = self.progress.lock().unwrap().msg.clone();
         }
         // Live post-processing of the screen-size stack.
         if let Some((raw, w, fw)) = &self.raw_small {
@@ -661,6 +761,24 @@ impl StackTab {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         self.poll();
+        // Development aid (screenshots without clicking): PANOSTITCH_AUTORUN=preview presses
+        // Quick preview once the files are in; PANOSTITCH_VIEW=result|report then shows that view.
+        if !self.autorun_done && !self.busy() && !self.files[0].is_empty() {
+            self.autorun_done = true;
+            if std::env::var("PANOSTITCH_AUTORUN").as_deref() == Ok("preview") {
+                self.run(true);
+            }
+        }
+        if self.result.is_some() && !self.running {
+            match std::env::var("PANOSTITCH_VIEW").as_deref() {
+                Ok("report") if self.view != ViewKind::Report => {
+                    self.view = ViewKind::Report;
+                    std::env::remove_var("PANOSTITCH_VIEW");
+                }
+                Ok("result") => std::env::remove_var("PANOSTITCH_VIEW"),
+                _ => {}
+            }
+        }
         egui::Panel::left("stack_left").exact_size(390.0).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("kl").show(ui, |ui| self.left(ui));
         });
@@ -811,6 +929,17 @@ impl StackTab {
         }
         // The settings list: click an entry to see its options below.
         ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Preset").strong());
+            egui::ComboBox::from_id_salt("stackpreset").selected_text("choose…").width(220.0).show_ui(ui, |ui| {
+                for name in STACK_PRESETS {
+                    if ui.selectable_label(false, name).clicked() {
+                        let note = self.apply_preset(name);
+                        self.status = format!("Preset “{name}”: {note}");
+                    }
+                }
+            });
+        });
         let c = &self.cfg;
         let onoff = |b: bool| if b { "On" } else { "Off" };
         let mut rows: Vec<(usize, String, bool)> = vec![
@@ -871,7 +1000,7 @@ impl StackTab {
         };
         ui.label(egui::RichText::new(title).strong().size(16.0));
         let note = |ui: &mut egui::Ui, n: &str| {
-            ui.label(egui::RichText::new(super::notes::note(n)).small().weak());
+            ui.label(egui::RichText::new(super::notes::note(n)).weak().size(12.5));
         };
         let nstars = self.files[0].len();
         match self.setting {
@@ -1045,10 +1174,12 @@ impl StackTab {
         ui.separator();
         ui.horizontal(|ui| {
             let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(15.0)).min_size(egui::vec2(180.0, 36.0));
-            if ui.add(big(if self.running { "Cancel" } else { "◐ Quick preview" })).clicked() {
+            // While a run is going, its own button cancels it; the other one waits.
+            let (rp, rs) = (self.running && self.running_preview, self.running && !self.running_preview);
+            if ui.add_enabled(!rs, big(if rp { "Cancel" } else { "◐ Quick preview" })).clicked() {
                 self.run(true);
             }
-            if ui.add(big(if self.running { "Cancel" } else { "▶ Start" })).clicked() {
+            if ui.add_enabled(!rp, big(if rs { "Cancel" } else { "▶ Start" })).clicked() {
                 self.run(false);
             }
         });
@@ -1171,12 +1302,12 @@ impl StackTab {
                 _ => self.status = "Press Start first: the saved result goes to the Stitcher.".into(),
             }
         }
-        ui.label(egui::RichText::new(self.post_note).small().weak());
+        ui.label(egui::RichText::new(self.post_note).weak().size(12.5));
     }
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
-            for (k, l) in [(ViewKind::Base, "Base image"), (ViewKind::Result, "Result"), (ViewKind::Report, "Frame report")] {
+            for (k, l) in [(ViewKind::Base, group_name(1, self.simple)), (ViewKind::Result, "Result"), (ViewKind::Report, "Frame report")] {
                 if ui.selectable_label(self.view == k, l).clicked() {
                     self.view = k;
                     self.vstate.fit = true;
@@ -1204,7 +1335,20 @@ impl StackTab {
             ViewKind::Report => self.show_report(ui),
         });
         let col = if ui.visuals().dark_mode { Color32::from_rgb(255, 160, 128) } else { Color32::from_rgb(140, 0, 0) };
-        egui::ScrollArea::vertical().id_salt("kstatus").show(ui, |ui| ui.colored_label(col, &self.status));
+        if self.running {
+            let p = self.progress.lock().unwrap().clone();
+            let f = if p.total > 0.0 { (p.done / p.total) as f32 } else { 0.0 };
+            let left = match p.start {
+                Some(t) if f > 0.03 && f < 1.0 => {
+                    let s = t.elapsed().as_secs_f64() * (1.0 - f as f64) / f as f64;
+                    if s < 60.0 { format!(" – about {:.0} s left", s.max(1.0)) } else { format!(" – about {} min {:02} s left", (s / 60.0) as u64, (s % 60.0) as u64) }
+                }
+                _ => String::new(),
+            };
+            ui.add(egui::ProgressBar::new(f).show_percentage().text(format!("{}{left}", p.msg)));
+        } else {
+            egui::ScrollArea::vertical().id_salt("kstatus").show(ui, |ui| ui.colored_label(col, &self.status));
+        }
     }
 
     fn show_base(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1346,7 +1490,12 @@ impl StackTab {
         };
         ui.label("Frame report – click a frame (chart or table) to exclude / include it in the next run");
         // Chart: every measure ÷ its median over the frames used; left-out frames shaded.
-        let infos = &r.report;
+        // Frames left out of a quick preview were not measured: they are only counted.
+        let shown: Vec<FrameInfo> = r.report.iter().filter(|f| f.status != Status::Skipped).cloned().collect();
+        let skipped = r.report.len() - shown.len();
+        let infos = &shown;
+        // Not measured (excluded by you, or not loadable): no points in the chart.
+        let measured = |f: &FrameInfo| !(matches!(f.status, Status::Excluded | Status::Skipped) || (f.status == Status::Failed && f.stars == 0));
         let n = infos.len().max(1);
         let (resp, p) = ui.allocate_painter(egui::vec2(ui.available_width(), (ui.available_height() * 0.34).max(120.0)), egui::Sense::click());
         let rect = resp.rect;
@@ -1385,7 +1534,7 @@ impl StackTab {
             if m <= 0.0 {
                 continue;
             }
-            let pts: Vec<Pos2> = infos.iter().enumerate().filter_map(|(k, f)| { let v = get(f); v.is_finite().then(|| Pos2::new(xat(k), yat(v / m))) }).collect();
+            let pts: Vec<Pos2> = infos.iter().enumerate().filter(|(_, f)| measured(f)).filter_map(|(k, f)| { let v = get(f); v.is_finite().then(|| Pos2::new(xat(k), yat(v / m))) }).collect();
             p.line(pts.clone(), Stroke::new(1.5, col));
             for q in pts {
                 p.circle_filled(q, 3.0, col);
@@ -1424,6 +1573,9 @@ impl StackTab {
                     let path = fi.path.clone();
                     self.toggle_exclude(&path);
                 }
+            }
+            if skipped > 0 {
+                ui.weak(format!("{skipped} more light frames were not in the quick preview (it uses up to {PREVIEW_FRAMES})."));
             }
             ui.add_space(8.0);
             ui.label("Process log (time per step):");
@@ -1465,6 +1617,9 @@ impl StackTab {
     }
     pub fn t_shown(&self) -> Option<&str> {
         self.shown.as_deref()
+    }
+    pub fn t_base(&self) -> Option<String> {
+        self.base()
     }
     pub fn t_brush(&self) -> f64 {
         self.brush

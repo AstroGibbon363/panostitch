@@ -166,7 +166,7 @@ dál měnit.
 | Předvolba | Pro | Hlavní nastavení |
 |---|---|---|
 | **day landscape** | denní panoramy, fotoaparát otáčený na místě | slabé odšumění, homografie, cylindrická projekce |
-| **astro / night landscape** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, +2 EV (pak **Auto exposure**) |
+| **astro / night landscape** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, +1 EV (pak **Auto exposure**), vyšší práh rohů (méně falešných rohů v šumu) |
 | **deep-sky mosaic** | mozaiky hvězdných polí z dalekohledu, např. FITS | málo odšumění (hvězdy jsou malé), model podobnosti (posun + rotace pole), bez zpřesnění, přímočará projekce; použijte **Auto stretch** |
 | **macro / microscope** | preparát nebo stolek posouvaný pod pevným fotoaparátem | model posunu (snímky se jen posouvají), bez zpřesnění, přímočará projekce |
 | **scan / flat document** | mapy, obrazy, dokumenty fotografované po částech | afinní model, bez zpřesnění, přímočará projekce |
@@ -618,6 +618,14 @@ jak dlouho trval.
 
 **Klikněte na položku** v seznamu vstupů nebo v seznamu nastavení: pod
 seznamy se objeví její volby a vysvětlení.
+
+**Předvolby** (nad seznamem nastavení) nastaví vše pro typický námět jedním
+kliknutím: **Milky Way landscape** (zmrazené popředí, oblast oblohy
+detekovaná automaticky, korekce zkreslení, světelné znečištění), **Star
+trails** (vyplněné mezery) a **Deep sky (telescope)** (celý snímek je obloha,
+extrakce pozadí, kalibrace barev, automatické roztažení). Každé nastavení lze
+dál měnit. Během skládání ukazuje ukazatel průběhu pod náhledem krok a
+odhadovaný zbývající čas.
 
 ### 13.1 Rychlý start
 

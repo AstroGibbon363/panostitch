@@ -160,7 +160,7 @@ changed afterwards.
 | Preset | For | Main settings |
 |---|---|---|
 | **day landscape** | daylight panoramas, camera rotated in place | light denoising, homography, cylindrical |
-| **astro / night landscape** | night skies, Milky Way over a landscape | strong denoising, looser matching, spherical, +2 EV (then **Auto exposure**) |
+| **astro / night landscape** | night skies, Milky Way over a landscape | strong denoising, looser matching, spherical, +1 EV (then **Auto exposure**), higher corner threshold (fewer false corners in the noise) |
 | **deep-sky mosaic** | telescope mosaics of star fields, e.g. FITS | little denoising (stars are tiny), similarity model (shift + field rotation), no refinement, rectilinear; use **Auto stretch** |
 | **macro / microscope** | a slide or stage moved under a fixed camera | translation model (frames only shift), no refinement, rectilinear |
 | **scan / flat document** | maps, paintings, documents photographed in parts | affine model, no refinement, rectilinear |
@@ -610,6 +610,14 @@ long it took.
 
 **Click an entry** in the input list or the settings list: its options and an
 explanation appear below the lists.
+
+**Presets** (above the settings list) set everything for a typical subject in
+one click: **Milky Way landscape** (freeze ground, sky detected
+automatically, distortion correction, light pollution), **Star trails** (gaps
+filled) and **Deep sky (telescope)** (all sky, background extraction, colour
+calibration, automatic stretch). Every setting can still be changed. While a
+run is going, a progress bar under the view shows the step and the estimated
+time left.
 
 ### 13.1 Quick start
 

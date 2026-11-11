@@ -294,7 +294,7 @@ fn save_prefs(p: Prefs) {
 /// Open the window with `paths` loaded into the stitcher.
 pub fn run(paths: Vec<String>) -> eframe::Result {
     let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1700.0, 1000.0]).with_title("PanoStitch"),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1700.0, 1000.0]).with_title(concat!("PanoStitch ", env!("CARGO_PKG_VERSION"))),
         ..Default::default()
     };
     eframe::run_native("PanoStitch", opts, Box::new(move |cc| Ok(Box::new(App::new(cc, paths)))))

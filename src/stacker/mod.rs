@@ -844,7 +844,7 @@ pub fn denoise_flat(f: Img) -> (Img, Option<String>) {
     (
         out,
         Some(format!(
-            "The flat frames are noisy ({}; now {:.2} / {:.2} / {:.2} %) – brighter or more flats help",
+            "the flat frames are noisy ({}; now {:.2} / {:.2} / {:.2} %) – brighter or more flats help",
             done.join(", "),
             100.0 * after[0],
             100.0 * after[1],

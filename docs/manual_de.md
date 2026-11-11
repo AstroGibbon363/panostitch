@@ -174,7 +174,7 @@ sich danach weiter ändern.
 | Voreinstellung | Für | Wichtigste Einstellungen |
 |---|---|---|
 | **day landscape** | Tageslicht-Panoramen, Kamera auf der Stelle gedreht | leichtes Entrauschen, Homographie, zylindrische Projektion |
-| **astro / night landscape** | Nachthimmel, Milchstraße über einer Landschaft | starkes Entrauschen, lockerere Zuordnung, sphärische Projektion, +2 EV (dann **Auto exposure**) |
+| **astro / night landscape** | Nachthimmel, Milchstraße über einer Landschaft | starkes Entrauschen, lockerere Zuordnung, sphärische Projektion, +1 EV (dann **Auto exposure**), höhere Eckenschwelle (weniger falsche Ecken im Rauschen) |
 | **deep-sky mosaic** | Teleskop-Mosaike von Sternfeldern, z. B. FITS | wenig Entrauschen (Sterne sind klein), Ähnlichkeitsmodell (Verschiebung + Bildfeldrotation), keine Verfeinerung, geradlinige Projektion; **Auto stretch** verwenden |
 | **macro / microscope** | Objektträger oder Tisch unter einer festen Kamera verschoben | Verschiebungsmodell (Bilder verschieben sich nur), keine Verfeinerung, geradlinige Projektion |
 | **scan / flat document** | Karten, Gemälde, Dokumente in Teilen fotografiert | affines Modell, keine Verfeinerung, geradlinige Projektion |
@@ -653,6 +653,15 @@ Dauer.
 
 **Klicken Sie auf einen Eintrag** in der Eingabeliste oder der
 Einstellungsliste: Darunter erscheinen seine Optionen und eine Erklärung.
+
+**Vorgaben** (über der Einstellungsliste) stellen alles für ein typisches
+Motiv mit einem Klick ein: **Milky Way landscape** (Vordergrund eingefroren,
+Himmelsregion automatisch erkannt, Verzeichnungskorrektur,
+Lichtverschmutzung), **Star trails** (Lücken gefüllt) und **Deep sky
+(telescope)** (das ganze Bild ist Himmel, Hintergrundextraktion,
+Farbkalibrierung, automatische Streckung). Jede Einstellung lässt sich
+weiterhin ändern. Während eines Laufs zeigt ein Fortschrittsbalken unter der
+Ansicht den Schritt und die geschätzte Restzeit.
 
 ### 13.1 Schnellstart
 

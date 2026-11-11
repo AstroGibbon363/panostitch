@@ -272,6 +272,9 @@ fn stacking_tab_end_to_end() {
     let mut w2 = Win::new(vec![proj.clone()]);
     w2.idle("open stacking project");
     assert_eq!(w2.app.stack.t_files()[0].len(), 6, "{}", w2.app.stack.t_status());
+    // The preview shows the base frame after opening a project.
+    w2.until("base preview", 30, |a| a.stack.t_shown().is_some());
+    assert_eq!(w2.app.stack.t_shown().map(|s| s.to_string()), w2.app.stack.t_base());
     let c = w2.app.stack.t_cfg().clone();
     assert_eq!(c.excluded, vec![paths[0].clone()]);
     assert_eq!(c.sky.line, Some((0.0, 0.55, 1.0, 0.55)));
