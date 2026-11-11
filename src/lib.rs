@@ -6,5 +6,6 @@ pub mod image;
 pub mod io;
 pub mod stitcher;
 pub mod stacker;
+pub mod gui;
 
 pub use image::{Gray, Img, Rgb};

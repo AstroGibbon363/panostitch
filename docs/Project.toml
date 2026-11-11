@@ -1,7 +1,0 @@
-[deps]
-Typst_jll = "eb4b1da6-20f6-5c66-9826-fdb8ad410d0e"
-pandoc_jll = "c5432543-76ad-5c9d-82bf-db097047a5e2"
-
-[compat]
-Typst_jll = "0.15.0"
-pandoc_jll = "3.10.1"
