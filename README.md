@@ -49,3 +49,9 @@ LibRaw's `dcraw_emu`, RawTherapee, darktable or dcraw are used too if installed
 (choose under "RAW via" / "RAW conversion"). File dialogs use zenity, kdialog
 or yad on Linux, AppleScript on macOS and PowerShell on Windows; without them,
 type paths into the path box.
+
+## License
+
+PanoStitch is free software under the GNU General Public License, version 3
+or later (see `LICENSE`). The DejaVu fonts in `assets/fonts` have their own
+free license (`assets/fonts/LICENSE-DejaVu.txt`).

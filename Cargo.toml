@@ -3,7 +3,7 @@ name = "panostitch"
 version = "0.3.0"
 edition = "2021"
 description = "Panorama stitching and star stacking for landscape astrophotography"
-license = "MIT"
+license = "GPL-3.0-or-later"
 default-run = "panostitch"
 
 [lib]

@@ -1,0 +1,85 @@
+# Tests and builds PanoStitch on Linux, Windows and macOS.
+# Pushing a tag such as v0.3.1 also publishes a GitHub release with one zip
+# per system (the two programs, the manuals and the licenses).
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+          - os: windows-latest
+            name: windows-x86_64
+          - os: macos-latest
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux libraries for the window
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev zip
+
+      - name: Rust
+        run: rustup update stable && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release --bins
+
+      - name: Package
+        run: |
+          dir=panostitch-${GITHUB_REF_NAME//\//-}-${{ matrix.name }}
+          mkdir -p "$dir/docs"
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          cp target/release/panostitch$ext target/release/panostack$ext "$dir/"
+          cp README.md LICENSE "$dir/"
+          cp docs/manual_*.md "$dir/docs/"
+          cp assets/fonts/LICENSE-DejaVu.txt "$dir/docs/"
+          if [ "$RUNNER_OS" = "Windows" ]; then 7z a "$dir.zip" "$dir" > /dev/null; else zip -qr "$dir.zip" "$dir"; fi
+          echo "PKG=$dir.zip" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.PKG }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --repo "$GITHUB_REPOSITORY" \
+            --title "PanoStitch $GITHUB_REF_NAME" \
+            --notes "Downloads for Linux, Windows and macOS (Apple Silicon). Unzip and start panostitch; panostack stacks star images from the command line. The manual is in docs/."
