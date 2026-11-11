@@ -613,7 +613,7 @@ explanation appear below the lists.
 
 ### 13.1 Quick start
 
-1. Highlight **Star images**, click **Add…** and choose the star shots (or
+1. Highlight **Light frames**, click **Add…** and choose the star shots (or
    type a file or folder path into the path box and press Enter).
 2. Highlight **Sky region**, choose **Boundary line** and drag a line along the
    horizon in the base image view, or click **Detect sky** and correct the
@@ -629,28 +629,46 @@ explanation appear below the lists.
 
 | Entry | What to shoot |
 |---|---|
-| **Star images** | The shots of the sky: same focal length, aperture and exposure. RAW is best; TIFF, FITS or XISF only if the data is still linear (not edited). **Unify exposure** evens out frames taken under different conditions. |
-| **Base image** | The frame the others are aligned to. Empty = the middle star image. Highlight a star image and click **Use as base** to choose another. |
-| **Noise images** | Dark frames: lens cap on, same ISO and exposure time, taken just before or after the star images. Removes thermal noise and hot pixels. |
-| **Bias images** | Shortest exposure, lens cap on, same ISO. |
-| **Vignetting images** | Flat frames: an evenly lit white surface, same focal length and aperture. Corrects darker corners and dust shadows. |
-| **Flat-dark images** | Darks for the flats: same ISO and exposure time as the vignetting images. |
+| **Light frames** (*Star images* in simple mode) | The shots of the sky: same focal length, aperture and exposure. RAW is best; TIFF, FITS or XISF only if the data is still linear (not edited). **Unify exposure** evens out frames taken under different conditions. |
+| **Base frame** (*Base image* in simple mode) | The frame the others are aligned to. Empty = the middle light frame. Choose another in the dropdown next to **Base frame**, or pick a light frame in its dropdown and click **Use as base**. |
+| **Dark frames** (*Noise images* in simple mode) | Dark frames: lens cap on, same ISO and exposure time, taken just before or after the star images. Removes thermal noise and hot pixels. |
+| **Bias frames** (*Bias images* in simple mode) | Shortest exposure, lens cap on, same ISO. |
+| **Flat field frames** (*Vignetting images* in simple mode) | Flat frames: an evenly lit white surface, same focal length and aperture. Corrects darker corners and dust shadows. |
+| **Flat-dark frames** (*Flat-dark images* in simple mode) | Darks for the flats: same ISO and exposure time as the vignetting images. |
 | **Foreground image** | Optional: one shot of the ground from the same tripod position – at blue hour, a long exposure or low ISO. It replaces the (noisy, dark) stacked foreground below the sky region. **Match brightness** scales it to the stacked ground; **Exposure (EV)** brightens or darkens it from there. Needs a sky region. |
 | **Output** | `.tif` (16-bit), `.jpg` (8-bit), or `.fits` / `.xisf` (32-bit float, linear, for further processing in Siril, PixInsight etc.). |
 
-All calibration frames are optional. Even a few noise images help a lot at
+All calibration frames are optional. Even a few dark frames help a lot at
 high ISO.
+
+**The file lists:** each group shows its files in a dropdown next to its
+name, so hundreds of light frames need no scrolling. Choose a file there to
+see it in the preview; **Remove** and **Use as base** act on that file,
+**Clear** empties the whole group.
+
+**Noisy flats** (too few, or too dark in one colour, e.g. a blue light source)
+are smoothed automatically; the process log says so, and how noisy they were.
+Otherwise their noise would be stamped onto every frame and turn into fine
+streaks as the stars drift.
+
+**Temporary files:** none are written for intermediate images. The frames are
+kept in memory, or, if they take more than half of the free memory, in one
+temporary file in the output folder, which is deleted as soon as the run ends
+(it is not even visible while it runs). The process log says which. If there
+is not enough room for it, the run stops with a message before it starts:
+switch on **Half size** (a quarter of the space) or save the output on a disk
+with more free space. Masters (dark, bias, flat) are not saved either.
 
 ### 13.3 Settings
 
 | Setting | What it does |
 |---|---|
 | **Composition** | **Align stars**: the frames are aligned on the stars and combined. **Accumulation** averages them; **Select best pixels** (default) drops outliers (planes, satellites); **Freeze ground** aligns only the sky, so sky and foreground both stay sharp (needs a sky region); **Align only** just writes the aligned frames. **Star trails**: no alignment, the sky keeps the brightest value of every pixel. **Trail fade**: **Fade in** (the trails start faint, Sequator's motion effect), **Fade out**, or **Both ends** (a comet-like taper). **Fill gaps between frames**: the short breaks of the camera's interval are filled along the measured star motion, so the trails are continuous lines instead of dashes. |
-| **Sky region** | Where the sky is. **Boundary line**: drag a line along the horizon. **Gradient**: the line plus a soft transition. **Irregular mask**: paint the sky with the left mouse button, erase with the right one; **Brush size** (slider or mouse wheel). **Detect sky** paints a first mask from the brightness and the stars – approximate, so check it and correct it with the brush. **Mask feather** softens the mask's edge, inside the sky only, so the foreground gets none of the sky (no halos along the horizon). **Show detected stars** circles the stars the last run found in the shown frame. |
+| **Sky region** | Where the sky is. **All sky**: the whole frame is sky (no foreground, e.g. telescope or deep-sky shots). **Boundary line**: drag a line along the horizon. **Gradient**: the line plus a soft transition. **Irregular mask**: paint the sky with the left mouse button, erase with the right one; **Brush size** (slider or mouse wheel). **Detect sky** paints a first mask from the brightness and the stars – approximate, so check it and correct it with the brush. **Mask feather** softens the mask's edge, inside the sky only, so the foreground gets none of the sky (no halos along the horizon). **Show detected stars** circles the stars the last run found in the shown frame. |
 | **Sigma clipping** | How strictly outliers are removed (low / high × σ). 2–3 is usual; lower removes more but leaves more noise. Needs at least 4 frames, works best with 10+. |
 | **Frame rejection** | Leaves out frames clearly worse than the typical one: clouds or dew (dimmer stars), few stars, blurred or elongated stars (focus, wind, a bumped tripod). |
 | **RAW conversion** | White balance (camera, image average, daylight), demosaicing (AHD by default; DHT or AAHD often give less colour noise at high ISO) and **half size** (4× fewer pixels, much faster). |
-| **Reduce dynamic noises** | Finds and removes hot pixels without noise images. |
+| **Reduce dynamic noises** | Finds and removes hot pixels without dark frames. |
 | **Reduce distor. effects** | Corrects lens distortion that leaves short trails in the corners of long sequences: **Lens**, **Complex** (ultra wide-angle lenses, refraction near the horizon) or **Auto**. |
 | **Merge 4 pixels** | Adds up 2×2 pixels: brighter and less noisy, half the width and height. |
 | **Time-lapse** | Stacks every N consecutive frames into one, giving a numbered sequence of low-noise frames in a folder next to the output. |
@@ -658,7 +676,7 @@ high ISO.
 ### 13.4 The views
 
 - **Base image**: the frame the others are aligned to; the sky region is drawn
-  here. Click a file in the input list to see it.
+  here. Choose a file in a group's dropdown to see it.
 - **Result**: the stack after post-processing. Drag to pan, mouse wheel to
   zoom, **Fit** to see all of it.
 - **Frame report**: a chart of every measure per frame, each divided by its

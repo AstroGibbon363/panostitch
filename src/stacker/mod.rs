@@ -56,7 +56,7 @@ macro_rules! named_enum {
 named_enum!(Composition { AlignStars => "Align stars", StarTrails => "Star trails" });
 named_enum!(AlignMode { Accumulation => "Accumulation", Best => "Select best pixels", Freeze => "Freeze ground", AlignOnly => "Align only" });
 named_enum!(Interpolation { Lanczos => "Lanczos", Bilinear => "Bilinear" });
-named_enum!(SkyMode { None => "None", BoundaryLine => "Boundary line", Gradient => "Gradient", IrregularMask => "Irregular mask", Automatic => "Automatic" });
+named_enum!(SkyMode { None => "None", All => "All sky", BoundaryLine => "Boundary line", Gradient => "Gradient", IrregularMask => "Irregular mask", Automatic => "Automatic" });
 named_enum!(Distortion { Off => "Off", Auto => "Auto", Lens => "Lens", Complex => "Complex" });
 named_enum!(Pollution { Off => "Off", DeepSky => "Deep sky", Uneven => "Uneven" });
 named_enum!(ColorSpace { Srgb => "sRGB", AdobeRgb => "Adobe RGB" });
@@ -406,6 +406,7 @@ pub fn load_linear(path: &str, cfg: &StackConfig, preview: bool) -> Result<Img, 
         linear: true,
         wb: cfg.raw.wb,
         quality: Some(cfg.raw.quality),
+        orient: false,
     };
     let mut img = crate::io::load_any(path, &opt)?;
     if ["jpg", "jpeg", "png", "bmp"].contains(&ext.as_str()) {
@@ -439,6 +440,7 @@ pub struct FrameStore {
     // The pixel memory (inside `data`, which owns it; the heap / mapping does not move).
     ptr: *mut u16,
     len: usize,
+    place: String,
 }
 
 unsafe impl Sync for FrameStore {}
@@ -446,6 +448,12 @@ unsafe impl Send for FrameStore {}
 
 impl FrameStore {
     /// A store for `k` frames of `h`×`w`; in RAM if it fits comfortably, else in a temporary file in `dir`.
+    /// A store for `k` frames of `h`×`w` (16-bit floats, 6 bytes per pixel).
+    /// In RAM if they take less than half of the free memory; otherwise in one
+    /// temporary file in `dir` (the output folder), which is deleted at once on
+    /// Linux / macOS (the space comes back when the store is dropped) and when
+    /// the store is dropped on Windows. The disk space is checked first, and
+    /// reserved on Linux, so a full disk gives a message instead of a crash.
     pub fn new(h: usize, w: usize, k: usize, dir: &std::path::Path) -> Result<Self, String> {
         let n = 3 * w * h * k;
         let bytes = 2 * n;
@@ -453,9 +461,24 @@ impl FrameStore {
         if (bytes as f64) < 0.5 * avail {
             let mut v = vec![0u16; n];
             let ptr = v.as_mut_ptr();
-            return Ok(Self { w, h, k, data: Storage::Ram(v), ptr, len: n });
+            return Ok(Self { w, h, k, data: Storage::Ram(v), ptr, len: n, place: format!("in memory ({})", gb(bytes as f64)) });
         }
         let dir = if dir.is_dir() { dir.to_path_buf() } else { std::env::temp_dir() };
+        let free = available_disk(&dir);
+        // Leave room for the output files and the rest of the system.
+        let margin = 2e9_f64.max(0.02 * bytes as f64);
+        if let Some(free) = free {
+            if (bytes as f64) + margin > free as f64 {
+                return Err(format!(
+                    "Not enough memory or disk space for {k} frames of {w}×{h}: they need {}, but only {} of memory and {} of disk space in {} are free. \
+                     Switch on Half size (needs a quarter), use fewer frames, or save the output on a disk with more free space.",
+                    gb(bytes as f64),
+                    gb(avail),
+                    gb(free as f64),
+                    dir.display()
+                ));
+            }
+        }
         let path = dir.join(format!("panostitch-frames-{}-{:08x}.tmp", std::process::id(), rand::random::<u32>()));
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -464,8 +487,13 @@ impl FrameStore {
             .truncate(true)
             .open(&path)
             .map_err(|e| format!("Cannot create the frame file {}: {e}", path.display()))?;
-        file.set_len(bytes.max(2) as u64).map_err(|e| format!("Cannot size the frame file: {e}"))?;
-        let mut map = unsafe { memmap2::MmapMut::map_mut(&file) }.map_err(|e| format!("Cannot map the frame file: {e}"))?;
+        let fail = |what: String| {
+            let _ = std::fs::remove_file(&path);
+            what
+        };
+        file.set_len(bytes.max(2) as u64).map_err(|e| fail(format!("Cannot size the frame file: {e}")))?;
+        reserve(&file, bytes as u64).map_err(|e| fail(format!("Cannot reserve {} of disk space in {}: {e}", gb(bytes as f64), dir.display())))?;
+        let mut map = unsafe { memmap2::MmapMut::map_mut(&file) }.map_err(|e| fail(format!("Cannot map the frame file: {e}")))?;
         let ptr = map.as_mut_ptr() as *mut u16;
         drop(file);
         // The mapping stays valid without the file on Unix; Windows deletes it when the store is dropped.
@@ -475,7 +503,13 @@ impl FrameStore {
             let _ = std::fs::remove_file(&path);
             None
         };
-        Ok(Self { w, h, k, data: Storage::Map(map, keep), ptr, len: n })
+        let place = format!("in a temporary file in {} ({}, deleted when done)", dir.display(), gb(bytes as f64));
+        Ok(Self { w, h, k, data: Storage::Map(map, keep), ptr, len: n, place })
+    }
+
+    /// Where the frames are kept (for the log).
+    pub fn place(&self) -> &str {
+        &self.place
     }
     #[inline]
     fn slice(&self) -> &[u16] {
@@ -611,6 +645,35 @@ impl Drop for FrameStore {
     }
 }
 
+fn gb(bytes: f64) -> String {
+    format!("{:.1} GB", bytes / 1e9)
+}
+
+/// Free space (bytes) of the disk holding `dir`, if known.
+pub fn available_disk(dir: &std::path::Path) -> Option<u64> {
+    let dir = std::fs::canonicalize(dir).ok()?;
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks.list().iter().filter(|d| dir.starts_with(d.mount_point())).max_by_key(|d| d.mount_point().as_os_str().len()).map(|d| d.available_space())
+}
+
+/// Allocate the file's blocks now (Linux), so writing into the mapping later
+/// cannot fail on a full disk (which would end the program with SIGBUS).
+#[cfg(target_os = "linux")]
+fn reserve(file: &std::fs::File, len: u64) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
+    let r = unsafe { libc::posix_fallocate(file.as_raw_fd(), 0, len as libc::off_t) };
+    // EOPNOTSUPP / EINVAL: the file system cannot reserve; the free-space check has to do.
+    if r == 0 || r == libc::EOPNOTSUPP || r == libc::EINVAL {
+        Ok(())
+    } else {
+        Err(std::io::Error::from_raw_os_error(r).to_string())
+    }
+}
+#[cfg(not(target_os = "linux"))]
+fn reserve(_file: &std::fs::File, _len: u64) -> Result<(), String> {
+    Ok(())
+}
+
 /// Memory available for frames (bytes).
 pub fn available_memory() -> f64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
@@ -681,9 +744,12 @@ pub struct Calibration {
     pub dark: Option<Img>, // subtracted from star images (dark, or bias without darks)
     pub flat: Option<Img>, // star images are divided by it (mean 1)
     pub hot: Vec<(usize, usize)>, // hot pixels (y, x) found in the master dark
+    /// What was noticed or done while making the masters (for the log).
+    pub notes: Vec<String>,
 }
 
 pub fn calibration(cfg: &StackConfig, load: Loader, dir: &std::path::Path, progress: Progress) -> Result<Calibration, String> {
+    let mut notes = Vec::new();
     let bias = master(&cfg.bias, load, dir, progress, "bias")?;
     let mut dark = master(&cfg.darks, load, dir, progress, "dark")?;
     let mut flat = master(&cfg.flats, load, dir, progress, "flat")?;
@@ -711,7 +777,10 @@ pub fn calibration(cfg: &StackConfig, load: Loader, dir: &std::path::Path, progr
             }
         }
         m.iter_mut().for_each(|v| *v /= n);
-        flat = Some(f.map(move |c| [(c[0] / m[0]).max(0.05), (c[1] / m[1]).max(0.05), (c[2] / m[2]).max(0.05)]));
+        let f = f.map(move |c| [(c[0] / m[0]).max(0.05), (c[1] / m[1]).max(0.05), (c[2] / m[2]).max(0.05)]);
+        let (f, note) = denoise_flat(f);
+        notes.extend(note);
+        flat = Some(f);
     }
     let mut hot = Vec::new();
     if !cfg.darks.is_empty() {
@@ -729,7 +798,59 @@ pub fn calibration(cfg: &StackConfig, load: Loader, dir: &std::path::Path, progr
             }
         }
     }
-    Ok(Calibration { dark, flat, hot })
+    Ok(Calibration { dark, flat, hot, notes })
+}
+
+/// Largest pixel-to-pixel noise left in a normalized master flat (fraction).
+/// Above this, the flat would stamp its own noise onto every star image (and,
+/// as the frames drift, into streaks across the stack).
+pub const FLAT_NOISE_MAX: f64 = 0.004;
+
+/// Pixel-to-pixel noise of each channel of a normalized flat (robust: MAD of the fine detail).
+pub fn flat_noise(f: &Img) -> [f64; 3] {
+    let hp = crate::image::sub(f, &blur(f, 2.0));
+    let step = hp.step_for(200_000);
+    let mut out = [0.0; 3];
+    for (c, o) in out.iter_mut().enumerate() {
+        let v: Vec<f32> = hp.subsample(step).map(|p| p[c]).collect();
+        *o = median_mad(&v).1 as f64;
+    }
+    out
+}
+
+/// A noisy master flat (too few or too dark flats, e.g. a channel the light
+/// source hardly has) is smoothed per channel until its pixel noise is below
+/// FLAT_NOISE_MAX. Vignetting and dust shadows are much wider than the
+/// smoothing, so they stay. Returns the flat and a log note (if it was smoothed).
+pub fn denoise_flat(f: Img) -> (Img, Option<String>) {
+    let noise = flat_noise(&f);
+    const NAMES: [&str; 3] = ["red", "green", "blue"];
+    let mut planes: Vec<Gray> = (0..3).map(|c| f.channel(c)).collect();
+    let mut done = Vec::new();
+    for c in 0..3 {
+        if noise[c] <= FLAT_NOISE_MAX {
+            continue;
+        }
+        // A Gaussian of σ px lowers white noise by about 2·√π·σ.
+        let sigma = (noise[c] / FLAT_NOISE_MAX / (2.0 * std::f64::consts::PI.sqrt())).clamp(1.0, 8.0);
+        planes[c] = blur(&planes[c], sigma);
+        done.push(format!("{} {:.1} % → smoothed over {:.1} px", NAMES[c], 100.0 * noise[c], sigma));
+    }
+    if done.is_empty() {
+        return (f, None);
+    }
+    let out = Img::from_fn(f.h, f.w, |y, x| [planes[0].at(y, x), planes[1].at(y, x), planes[2].at(y, x)]);
+    let after = flat_noise(&out);
+    (
+        out,
+        Some(format!(
+            "The flat frames are noisy ({}; now {:.2} / {:.2} / {:.2} %) – brighter or more flats help",
+            done.join(", "),
+            100.0 * after[0],
+            100.0 * after[1],
+            100.0 * after[2]
+        )),
+    )
 }
 
 /// Vignetting averaged over the four mirrored quadrants and smoothed (for uneven flats).
@@ -748,13 +869,13 @@ pub fn homogenize(f: &Img) -> Img {
 pub fn calibrate(mut img: Img, cal: &Calibration) -> Result<Img, String> {
     if let Some(d) = &cal.dark {
         if (d.h, d.w) != (img.h, img.w) {
-            return Err("The noise / bias images do not have the size of the star images.".into());
+            return Err("The dark / bias frames do not have the size of the light frames.".into());
         }
         img = crate::image::sub(&img, d);
     }
     if let Some(f) = &cal.flat {
         if (f.h, f.w) != (img.h, img.w) {
-            return Err("The vignetting images do not have the size of the star images.".into());
+            return Err("The flat frames do not have the size of the light frames.".into());
         }
         img = img.zip_map(f, |c, f| [c[0] / f[0], c[1] / f[1], c[2] / f[2]]);
     }

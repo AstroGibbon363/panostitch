@@ -621,7 +621,7 @@ seznamy se objeví její volby a vysvětlení.
 
 ### 13.1 Rychlý start
 
-1. Zvýrazněte **Star images**, klikněte na **Add…** a vyberte snímky oblohy
+1. Zvýrazněte **Light frames**, klikněte na **Add…** a vyberte snímky oblohy
    (nebo zadejte cestu k souboru či složce do pole pro cestu a stiskněte Enter).
 2. Zvýrazněte **Sky region**, zvolte **Boundary line** a v náhledu základního
    snímku táhněte čáru podél horizontu, nebo klikněte na **Detect sky** a
@@ -637,24 +637,42 @@ seznamy se objeví její volby a vysvětlení.
 
 | Položka | Co nafotit |
 |---|---|
-| **Star images** | Snímky oblohy: stejná ohnisková vzdálenost, clona a expozice. Nejlepší je RAW; TIFF, FITS nebo XISF jen pokud jsou data stále lineární (neupravená). **Unify exposure** vyrovná snímky pořízené za různých podmínek. |
-| **Base image** | Snímek, ke kterému se ostatní zarovnají. Prázdné = prostřední snímek oblohy. Jiný zvolíte tak, že zvýrazníte snímek oblohy a kliknete na **Use as base**. |
-| **Noise images** | Tmavé snímky (darky): krytka na objektivu, stejné ISO a čas, pořízené těsně před snímky oblohy nebo po nich. Odstraní tepelný šum a horké pixely. |
-| **Bias images** | Nejkratší čas, krytka na objektivu, stejné ISO. |
-| **Vignetting images** | Flaty: rovnoměrně osvětlená bílá plocha, stejná ohnisková vzdálenost a clona. Opraví tmavší rohy a stíny prachu. |
-| **Flat-dark images** | Darky k flatům: stejné ISO a čas jako vinětační snímky. |
+| **Light frames** (*Star images* v jednoduchém režimu) | Snímky oblohy: stejná ohnisková vzdálenost, clona a expozice. Nejlepší je RAW; TIFF, FITS nebo XISF jen pokud jsou data stále lineární (neupravená). **Unify exposure** vyrovná snímky pořízené za různých podmínek. |
+| **Base frame** (*Base image* v jednoduchém režimu) | Snímek, ke kterému se ostatní zarovnají. Prázdné = prostřední světlý snímek. Jiný zvolíte v rozbalovacím seznamu vedle **Base frame**, nebo vyberte snímek v seznamu světlých snímků a klikněte na **Use as base**. |
+| **Dark frames** (*Noise images* v jednoduchém režimu) | Tmavé snímky (darky): krytka na objektivu, stejné ISO a čas, pořízené těsně před snímky oblohy nebo po nich. Odstraní tepelný šum a horké pixely. |
+| **Bias frames** (*Bias images* v jednoduchém režimu) | Nejkratší čas, krytka na objektivu, stejné ISO. |
+| **Flat field frames** (*Vignetting images* v jednoduchém režimu) | Flaty: rovnoměrně osvětlená bílá plocha, stejná ohnisková vzdálenost a clona. Opraví tmavší rohy a stíny prachu. |
+| **Flat-dark frames** (*Flat-dark images* v jednoduchém režimu) | Darky k flatům: stejné ISO a čas jako vinětační snímky. |
 | **Foreground image** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Match brightness** ho přizpůsobí jasu složeného popředí; **Exposure (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
 | **Output** | `.tif` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
 
 Všechny kalibrační snímky jsou nepovinné. Při vysokém ISO hodně pomůže i
 několik tmavých snímků.
 
+**Seznamy souborů:** každá skupina má své soubory v rozbalovacím seznamu
+vedle svého názvu, takže ani stovky světlých snímků není třeba procházet.
+Vyberte v něm soubor a uvidíte ho v náhledu; **Remove** a **Use as base**
+pracují s tímto souborem, **Clear** vyprázdní celou skupinu.
+
+**Zašuměné flaty** (málo snímků, nebo příliš tmavé v jedné barvě, např. při
+modrém zdroji světla) se automaticky vyhladí; záznam postupu to uvede i s
+tím, jak byly zašuměné. Jinak by se jejich šum otiskl do každého snímku a při
+posunu hvězd by z něj vznikly jemné pruhy.
+
+**Dočasné soubory:** mezivýsledky se na disk neukládají. Snímky se drží v
+paměti, nebo – zabírají-li víc než polovinu volné paměti – v jednom dočasném
+souboru ve složce výstupu, který se smaže hned po skončení (za běhu není ani
+vidět). Záznam postupu uvede, co platí. Pokud na něj není místo, běh se
+ještě před začátkem zastaví se zprávou: zapněte **Half size** (čtvrtina
+místa) nebo ukládejte výstup na disk s víc volného místa. Ani mastery (dark,
+bias, flat) se neukládají.
+
 ### 13.3 Nastavení
 
 | Nastavení | Co dělá |
 |---|---|
 | **Composition** | **Align stars**: snímky se zarovnají podle hvězd a spojí. **Accumulation** je průměruje; **Select best pixels** (výchozí) vynechá odlehlé hodnoty (letadla, satelity); **Freeze ground** zarovná jen oblohu, takže obloha i popředí zůstanou ostré (potřebuje oblast oblohy); **Align only** jen zapíše zarovnané snímky. **Star trails**: bez zarovnání, obloha si ponechá nejjasnější hodnotu každého pixelu. **Trail fade**: **Fade in** (stopy začínají slabě, efekt pohybu ze Sequatoru), **Fade out** nebo **Both ends** (zúžení na obou koncích jako u komety). **Fill gaps between frames**: krátké přestávky intervalu fotoaparátu se vyplní podle změřeného pohybu hvězd, takže stopy jsou souvislé čáry, ne čárkované. |
-| **Sky region** | Kde je obloha. **Boundary line**: táhněte čáru podél horizontu. **Gradient**: čára s plynulým přechodem. **Irregular mask**: oblohu malujte levým tlačítkem myši, mažte pravým; **Brush size** (posuvník nebo kolečko myši). **Detect sky** namaluje první masku podle jasu a hvězd – přibližně, proto ji zkontrolujte a opravte štětcem. **Mask feather** změkčí okraj masky, jen směrem do oblohy, takže popředí nedostane nic z oblohy (žádné svatozáře podél horizontu). **Show detected stars** zakroužkuje hvězdy, které poslední běh našel v zobrazeném snímku. |
+| **Sky region** | Kde je obloha. **All sky**: celý snímek je obloha (bez popředí, např. snímky dalekohledem). **Boundary line**: táhněte čáru podél horizontu. **Gradient**: čára s plynulým přechodem. **Irregular mask**: oblohu malujte levým tlačítkem myši, mažte pravým; **Brush size** (posuvník nebo kolečko myši). **Detect sky** namaluje první masku podle jasu a hvězd – přibližně, proto ji zkontrolujte a opravte štětcem. **Mask feather** změkčí okraj masky, jen směrem do oblohy, takže popředí nedostane nic z oblohy (žádné svatozáře podél horizontu). **Show detected stars** zakroužkuje hvězdy, které poslední běh našel v zobrazeném snímku. |
 | **Sigma clipping** | Jak přísně se odstraňují odlehlé hodnoty (dolní / horní × σ). Obvykle 2–3; nižší odstraní víc, ale nechá víc šumu. Potřebuje aspoň 4 snímky, nejlépe 10 a více. |
 | **Frame rejection** | Vynechá snímky zřetelně horší než typický: mraky nebo rosa (slabší hvězdy), málo hvězd, rozmazané nebo protáhlé hvězdy (zaostření, vítr, ťuknutí do stativu). |
 | **RAW conversion** | Vyvážení bílé (fotoaparát, průměr snímku, denní světlo), demozaikování (výchozí AHD; DHT nebo AAHD mají při vysokém ISO často méně barevného šumu) a **half size** (4× méně pixelů, mnohem rychlejší). |

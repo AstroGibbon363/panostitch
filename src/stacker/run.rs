@@ -118,7 +118,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         stars.iter().map(|p| FrameInfo::new(p, if cfg.excluded.contains(p) { Status::Excluded } else { Status::Pending })).collect();
     let mut cand: Vec<usize> = (0..infos.len()).filter(|&i| infos[i].status == Status::Pending).collect();
     if cand.is_empty() {
-        return Err("No star images to stack.".into());
+        return Err("No light frames to stack.".into());
     }
     let mut bi = cfg.base.as_ref().and_then(|b| cand.iter().position(|&i| &infos[i].path == b)).unwrap_or(cand.len().div_ceil(2) - 1);
     if preview && cand.len() > PREVIEW_FRAMES {
@@ -140,14 +140,17 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     let mode = mode_of(&cfg);
     let aligned = mode != Mode::Trails;
     if matches!(mode, Mode::Best | Mode::Freeze) && cand.len() < 4 {
-        return Err("Select best pixels and Freeze ground need at least 4 star images.".into());
+        return Err("Select best pixels and Freeze ground need at least 4 light frames.".into());
     }
     if mode == Mode::Freeze && cfg.sky.mode == SkyMode::None {
         return Err("Freeze ground needs a sky region (boundary line, gradient or irregular mask).".into());
     }
+    if mode == Mode::Freeze && cfg.sky.mode == SkyMode::All {
+        return Err("Freeze ground keeps the foreground still, but the sky region is All sky (no foreground): use Select best pixels.".into());
+    }
     let usefg = !cfg.foreground.path.is_empty();
-    if usefg && cfg.sky.mode == SkyMode::None {
-        return Err("A foreground image needs a sky region (boundary line, gradient, irregular mask or automatic).".into());
+    if usefg && matches!(cfg.sky.mode, SkyMode::None | SkyMode::All) {
+        return Err("A foreground image needs a sky region with a foreground (boundary line, gradient, irregular mask or automatic).".into());
     }
     let gapfill = mode == Mode::Trails && cfg.trails.1;
     let dir: std::path::PathBuf = if cfg.output.is_empty() {
@@ -158,7 +161,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     let pick = |ps: &[String]| -> Vec<String> { if preview { ps.iter().take(PREVIEW_CALIB).cloned().collect() } else { ps.to_vec() } };
     let calcfg = StackConfig { darks: pick(&cfg.darks), bias: pick(&cfg.bias), flats: pick(&cfg.flats), flatdarks: pick(&cfg.flatdarks), ..cfg.clone() };
     let cal = calibration(&calcfg, load, &dir, progress)?;
-    let ncal = [(calcfg.darks.len(), "noise"), (calcfg.bias.len(), "bias"), (calcfg.flats.len(), "vignetting"), (calcfg.flatdarks.len(), "flat-dark")];
+    let ncal = [(calcfg.darks.len(), "dark"), (calcfg.bias.len(), "bias"), (calcfg.flats.len(), "flat"), (calcfg.flatdarks.len(), "flat-dark")];
     note(
         &mut log,
         format!(
@@ -167,7 +170,8 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
                 "none".to_string()
             } else {
                 ncal.iter().filter(|c| c.0 > 0).map(|c| format!("master {} of {} frames", c.1, c.0)).collect::<Vec<_>>().join(", ")
-                    + &if cfg.darks.is_empty() { String::new() } else { format!("; {} hot pixels found in the noise images", cal.hot.len()) }
+                    + &if cfg.darks.is_empty() { String::new() } else { format!("; {} hot pixels found in the dark frames", cal.hot.len()) }
+                    + &cal.notes.iter().map(|n| format!("; {n}")).collect::<String>()
             }
         ),
     );
@@ -283,10 +287,11 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     note(
         &mut log,
         format!(
-            "Loaded, calibrated and measured {ncand} frames{}{}{}; {h}×{w} px; base: {bstars} stars, FWHM {bfwhm:.1} px",
+            "Loaded, calibrated and measured {ncand} frames{}{}{}; {h}×{w} px; base: {bstars} stars, FWHM {bfwhm:.1} px; frames kept {}",
             if aligned { format!(", aligned to {}", basename(&infos[base_i].path)) } else { String::new() },
             if cfg.dynamic_noise { ", dynamic hot pixels replaced" } else { "" },
-            if cfg.merge4 { ", 2×2 pixels merged" } else { "" }
+            if cfg.merge4 { ", 2×2 pixels merged" } else { "" },
+            store.place()
         ),
     );
     {

@@ -1,6 +1,6 @@
 //! Star stacking from the command line (the same engine as the "Star stacking" tab).
 //!
-//!   panostack [options] STAR_IMAGES_OR_FOLDER...
+//!   panostack [options] LIGHT_FRAMES_OR_FOLDER...
 //!
 //! Run `panostack --help` for the options. The frame report is printed at the end.
 
@@ -10,19 +10,20 @@ use std::process::exit;
 
 const HELP: &str = "Star stacking from the command line (the same engine as the window's \"Star stacking\" tab).
 
-  panostack [options] STAR_IMAGES_OR_FOLDER...
+  panostack [options] LIGHT_FRAMES_OR_FOLDER...
 
   -o FILE             output: .tif (16-bit), .jpg, .fits / .xisf (32-bit float, linear);
-                      default stacked.tif next to the first star image
-  --base FILE         base image (default: the middle one)
-  --darks X           noise images: a folder or comma-separated files
-  --bias X, --flats X, --flatdarks X   the other calibration frames, the same way
+                      default stacked.tif next to the first light frame
+  --base FILE         base frame the others are aligned to (default: the middle one)
+  --darks X           dark frames: a folder or comma-separated files
+  --bias X, --flats X, --flatdarks X   bias, flat and flat-dark frames, the same way
   --mode M            accumulation | best (default) | freeze | alignonly | trails | trails-motion
   --fade F            star trails: in | out | both (fade the trails)
   --fill-gaps         star trails: fill the gaps between frames along the star motion
   --horizon V         sky region: horizontal line at V (0 = top, 1 = bottom) …
   --gradient G        … with a transition zone of G (fraction of the height)
   --auto-sky          sky region: detected automatically in the base image
+  --all-sky           sky region: the whole frame (no foreground, e.g. telescope or deep-sky shots)
   --foreground FILE   the ground from this image (same framing) instead of the stack; needs a sky region
   --fg-ev EV          … brighter / darker by EV (after matching it to the stacked ground)
   --fg-no-match       … without matching its brightness
@@ -119,6 +120,7 @@ fn main() {
             }
             "--fill-gaps" => cfg.trails.1 = true,
             "--auto-sky" => sky.mode = sk::SkyMode::Automatic,
+            "--all-sky" => sky.mode = sk::SkyMode::All,
             "--foreground" => cfg.foreground.path = abs(&next(&mut i)),
             "--fg-ev" => cfg.foreground.ev = next(&mut i).parse().unwrap_or_else(|_| fail("--fg-ev needs a number".into())),
             "--fg-no-match" => cfg.foreground.match_brightness = false,
@@ -188,7 +190,7 @@ fn main() {
         i += 1;
     }
     if stars.is_empty() {
-        fail("No star images given.".into());
+        fail("No light frames given.".into());
     }
     cfg.output = output.unwrap_or_else(|| {
         std::path::Path::new(&stars[0]).parent().map(|d| d.join("stacked.tif").to_string_lossy().to_string()).unwrap_or_else(|| "stacked.tif".into())

@@ -195,6 +195,9 @@ fn raw_cmd(d: RawDecoder, path: &str, out: &Path, dir: &Path, opt: &LoadOptions)
     if opt.half {
         opts.push("-h".into());
     }
+    if !opt.orient {
+        opts.extend(["-t".into(), "0".into()]); // no rotation
+    }
     match d {
         RawDecoder::LibRaw => {
             let mut c = Command::new("dcraw_emu");
@@ -345,6 +348,7 @@ pub fn develop(mut raw: rawler::RawImage, orientation: rawler::decoders::Orienta
         }
     };
     img.map_inplace(|p| [p[0].max(0.0), p[1].max(0.0), p[2].max(0.0)]);
+    let orientation = if opt.orient { orientation } else { Orientation::Normal };
     img = match orientation {
         Orientation::Normal | Orientation::Unknown => img,
         Orientation::HorizontalFlip => img.flip_cols(),

@@ -2209,6 +2209,7 @@ dependencies = [
  "flate2",
  "half",
  "image",
+ "libc",
  "memmap2",
  "nalgebra",
  "rand",

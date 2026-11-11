@@ -12,7 +12,7 @@ Rust rewrite (`v0.3`): one small native program, no runtime to install.
 
 ```
 panostitch [images or project files …]   # the window
-panostack [options] STAR_IMAGES_OR_FOLDER # star stacking, no window (see --help)
+panostack [options] LIGHT_FRAMES_OR_FOLDER # star stacking, no window (see --help)
 ```
 
 The user manual is in `docs/` (English, Czech, German).

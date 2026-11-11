@@ -23,7 +23,14 @@ pub const PROJECT_EXT: &str = ".stackproj";
 const GROUP_KEYS: [&str; 7] = ["stars", "base", "darks", "bias", "flats", "flatdarks", "foreground"];
 const DEM: [(u32, &str); 7] = [(3, "AHD"), (11, "DHT"), (12, "AAHD"), (4, "DCB"), (2, "PPG"), (1, "VNG"), (0, "Bilinear")];
 const WB: [(io::WhiteBalance, &str); 3] = [(io::WhiteBalance::Camera, "Camera"), (io::WhiteBalance::Auto, "Average of image"), (io::WhiteBalance::Daylight, "Daylight")];
+/// Sequator's names for the input groups (simple mode; also the keys of the explanations).
 const GROUPS: [&str; 8] = ["Star images", "Base image", "Noise images", "Bias images", "Vignetting images", "Flat-dark images", "Foreground image", "Output"];
+/// The usual names (normal mode).
+const GROUPS_STD: [&str; 8] = ["Light frames", "Base frame", "Dark frames", "Bias frames", "Flat field frames", "Flat-dark frames", "Foreground image", "Output"];
+
+fn group_name(g: usize, simple: bool) -> &'static str {
+    if simple { GROUPS[g] } else { GROUPS_STD[g] }
+}
 const MASK_COLS: usize = 400;
 const PREVIEW_MAX: usize = 1600;
 const RESULT_MAX: usize = 3000;
@@ -124,7 +131,7 @@ impl Default for StackTab {
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
             post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(String::new())),
-            status: "Add star images to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), tx, rx, dialog: None,
+            status: "Add light frames to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), tx, rx, dialog: None,
             simple: false, setting: None, project: None, post_note: super::notes::note("Tone"),
         }
     }
@@ -192,7 +199,7 @@ impl StackTab {
                 self.cfg.output = std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join("stacked.tif").to_string_lossy().to_string();
             }
         }
-        self.status = format!("Added {n} file(s) to {}.", GROUPS[g]);
+        self.status = format!("Added {n} file(s) to {}.", group_name(g, self.simple));
         self.cfg.excluded.retain(|p| self.files[0].contains(p));
         self.show_preview(self.base());
     }
@@ -214,7 +221,7 @@ impl StackTab {
         let tx = self.tx.clone();
         self.status = format!("Loading preview of {}…", basename(&p));
         std::thread::spawn(move || {
-            let r = io::load_any(&p, &io::LoadOptions { half: true, ..Default::default() }).map(|a| {
+            let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| {
                 let f = PREVIEW_MAX as f64 / a.w.max(a.h) as f64;
                 if f < 1.0 { resize(&a, f) } else { a }
             });
@@ -237,7 +244,7 @@ impl StackTab {
             return;
         }
         if self.files[0].is_empty() {
-            self.status = "Add star images first.".into();
+            self.status = "Add light frames first.".into();
             return;
         }
         if !preview && self.cfg.output.is_empty() {
@@ -615,9 +622,9 @@ impl StackTab {
         self.group = 0;
         self.view = ViewKind::Base;
         self.show_preview(self.base());
-        let counts: String = (2..7).filter(|&g| !self.files[g].is_empty()).map(|g| format!(", {} {}", self.files[g].len(), GROUPS[g].to_lowercase())).collect();
+        let counts: String = (2..7).filter(|&g| !self.files[g].is_empty()).map(|g| format!(", {} {}", self.files[g].len(), group_name(g, self.simple).to_lowercase())).collect();
         Ok(format!(
-            "Opened {}: {} star images{counts}.{}",
+            "Opened {}: {} light frames{counts}.{}",
             basename(path),
             self.files[0].len(),
             if missing.is_empty() { String::new() } else { format!(" Missing files: {}.", missing.join(", ")) }
@@ -640,7 +647,7 @@ impl StackTab {
 
     fn toggle_exclude(&mut self, path: &str) {
         if Some(path.to_string()) == self.base() || self.result.as_ref().is_some_and(|r| r.base == path) {
-            self.status = "The base image cannot be excluded (choose another base first).".into();
+            self.status = "The base frame cannot be excluded (choose another base first).".into();
             return;
         }
         if let Some(k) = self.cfg.excluded.iter().position(|p| p == path) {
@@ -665,50 +672,86 @@ impl StackTab {
 
     fn left(&mut self, ui: &mut egui::Ui) {
         ui.heading("Input");
-        egui::ScrollArea::vertical().id_salt("tree").max_height(200.0).show(ui, |ui| {
-            let base = self.base();
-            let mut clicked: Option<String> = None;
+        // One row per group: status dot, name, and a dropdown with its files
+        // (hundreds of light frames do not fit in a list).
+        let base = self.base();
+        let mut show: Option<String> = None;
+        let mut new_base: Option<Option<String>> = None;
+        egui::Grid::new("inputs").num_columns(3).spacing([6.0, 4.0]).show(ui, |ui| {
             for g in 0..8 {
                 let n = if g < 7 { self.files[g].len() } else { usize::from(!self.cfg.output.is_empty()) };
-                let dot = if (g == 0 || g == 7) && n == 0 { Color32::RED } else if n > 0 { Color32::from_rgb(0, 170, 0) } else { Color32::GRAY };
-                ui.horizontal(|ui| {
-                    ui.colored_label(dot, "●");
-                    let t = if [0, 2, 3, 4, 5].contains(&g) && n > 0 { format!("{} ({n})", GROUPS[g]) } else { GROUPS[g].to_string() };
-                    if ui.selectable_label(self.group == g && self.setting.is_none(), egui::RichText::new(t).strong()).clicked() {
-                        self.group = g;
-                        self.setting = None;
+                let dot = if (g == 0 || g == 7) && n == 0 { Color32::RED } else if n > 0 || (g == 1 && base.is_some()) { Color32::from_rgb(0, 170, 0) } else { Color32::GRAY };
+                ui.colored_label(dot, "●");
+                let name = group_name(g, self.simple);
+                let t = if [0, 2, 3, 4, 5].contains(&g) && n > 0 { format!("{name} ({n})") } else { name.to_string() };
+                if ui.selectable_label(self.group == g && self.setting.is_none(), egui::RichText::new(t).strong()).clicked() {
+                    self.group = g;
+                    self.setting = None;
+                }
+                let w = 175.0;
+                match g {
+                    1 => {
+                        // The base frame: automatic (the middle one) or any light frame.
+                        let cur = match self.files[1].first() {
+                            Some(b) => basename(b),
+                            None => base.as_ref().map(|b| format!("(auto) {}", basename(b))).unwrap_or_else(|| "–".into()),
+                        };
+                        egui::ComboBox::from_id_salt("pick1").selected_text(cur).width(w).height(400.0).show_ui(ui, |ui| {
+                            if ui.selectable_label(self.files[1].is_empty(), "(auto: the middle one)").clicked() {
+                                new_base = Some(None);
+                            }
+                            for f in &self.files[0] {
+                                if ui.selectable_label(self.files[1].contains(f), basename(f)).clicked() {
+                                    new_base = Some(Some(f.clone()));
+                                }
+                            }
+                        });
                     }
-                });
-                let rows: Vec<String> = match g {
-                    7 => if self.cfg.output.is_empty() { vec![] } else { vec![self.cfg.output.clone()] },
-                    1 if self.files[1].is_empty() => base.iter().map(|b| format!("(auto) {}", basename(b))).collect(),
-                    _ => self.files[g].clone(),
-                };
-                for f in rows {
-                    let mut t = format!("      {}", if f.starts_with("(auto)") { f.clone() } else { basename(&f) });
-                    if g == 0 && self.files[1].contains(&f) {
-                        t += "  ← base";
+                    7 => {
+                        ui.label(if self.cfg.output.is_empty() { "–".to_string() } else { basename(&self.cfg.output) });
                     }
-                    if g == 0 && self.cfg.excluded.contains(&f) {
-                        t += "  ✗ excluded";
+                    _ if n == 0 => {
+                        ui.weak("–");
                     }
-                    let sel = self.shown.as_deref() == Some(f.as_str());
-                    if ui.selectable_label(sel, t).clicked() {
-                        self.group = g;
-                        self.setting = None;
-                        if g < 7 && !f.starts_with("(auto)") {
-                            clicked = Some(f.clone());
-                        } else if g == 1 {
-                            clicked = base.clone();
-                        }
+                    _ => {
+                        let cur = self.shown.as_ref().filter(|s| self.files[g].contains(s)).map(|s| basename(s)).unwrap_or_else(|| if n == 1 { basename(&self.files[g][0]) } else { format!("{n} files") });
+                        egui::ComboBox::from_id_salt(("pick", g)).selected_text(cur).width(w).height(400.0).show_ui(ui, |ui| {
+                            for f in &self.files[g] {
+                                let mut t = basename(f);
+                                if g == 0 && self.files[1].contains(f) {
+                                    t += "  ← base";
+                                }
+                                if g == 0 && self.cfg.excluded.contains(f) {
+                                    t += "  ✗ excluded";
+                                }
+                                if ui.selectable_label(self.shown.as_deref() == Some(f.as_str()), t).clicked() {
+                                    show = Some(f.clone());
+                                    self.group = g;
+                                    self.setting = None;
+                                }
+                            }
+                        });
                     }
                 }
-            }
-            if let Some(f) = clicked {
-                self.view = ViewKind::Base;
-                self.show_preview(Some(f));
+                ui.end_row();
             }
         });
+        if let Some(b) = new_base {
+            self.files[1] = b.iter().cloned().collect();
+            if let Some(b) = &b {
+                self.cfg.excluded.retain(|p| p != b);
+                self.status = format!("Base frame: {}.", basename(b));
+            } else {
+                self.status = "Base frame: automatic (the middle light frame).".into();
+            }
+            self.group = 1;
+            self.setting = None;
+            show = self.base();
+        }
+        if let Some(f) = show {
+            self.view = ViewKind::Base;
+            self.show_preview(Some(f));
+        }
         ui.horizontal(|ui| {
             if ui.button("Add…").clicked() && self.dialog.is_none() {
                 if self.group == 7 {
@@ -729,7 +772,7 @@ impl StackTab {
                     }
                     self.show_preview(self.base());
                 } else {
-                    self.status = "Click a file of the chosen group first (Clear removes the whole group).".into();
+                    self.status = "Choose a file in the group's dropdown first (Clear removes the whole group).".into();
                 }
             }
             if ui.button("Clear").clicked() {
@@ -749,9 +792,9 @@ impl StackTab {
                     Some(s) => {
                         self.files[1] = vec![s.clone()];
                         self.cfg.excluded.retain(|p| *p != s);
-                        self.status = format!("Base image: {}.", basename(&s));
+                        self.status = format!("{}: {}.", group_name(1, self.simple), basename(&s));
                     }
-                    None => self.status = "Click one of the star images first.".into(),
+                    None => self.status = format!("Choose one of the {} in its dropdown first.", group_name(0, self.simple).to_lowercase()),
                 }
             }
         });
@@ -824,7 +867,7 @@ impl StackTab {
         const TITLES: [&str; 10] = ["", "Composition", "Sky region", "Sigma clipping", "Frame rejection", "RAW conversion", "Reduce dynamic noises", "Reduce distor. effects", "Merge 4 pixels", "Time-lapse"];
         let title = match self.setting {
             Some(k) => TITLES[k],
-            None => GROUPS[self.group],
+            None => group_name(self.group, self.simple),
         };
         ui.label(egui::RichText::new(title).strong().size(16.0));
         let note = |ui: &mut egui::Ui, n: &str| {
@@ -907,7 +950,7 @@ impl StackTab {
                                     let _ = tx.send(Msg::Sky(mask, format!("Sky detected in {}: {pct} % of the frame (hatched = foreground). Approximate: correct it with the brush – left button paints sky, right erases, wheel = brush size.", basename(&sh))));
                                 });
                             }
-                            _ => self.status = "Add star images first: the sky is detected in the shown frame.".into(),
+                            _ => self.status = "Add light frames first: the sky is detected in the shown frame.".into(),
                         }
                     }
                     if ui.button("Reset sky region").clicked() {
@@ -974,7 +1017,7 @@ impl StackTab {
                 let c = &mut self.cfg;
                 ui.checkbox(&mut c.timelapse.0, "Time-lapse");
                 ui.add(egui::Slider::new(&mut c.timelapse.1, 2..=200).text("Frames per stack"));
-                ui.label(format!("{nstars} star images → {} frames", (nstars + 1).saturating_sub(c.timelapse.1)));
+                ui.label(format!("{nstars} light frames → {} frames", (nstars + 1).saturating_sub(c.timelapse.1)));
                 note(ui, "Time-lapse");
             }
         }
@@ -1145,10 +1188,10 @@ impl StackTab {
 
     fn show_base(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(disp) = self.disp.clone() else {
-            ui.centered_and_justified(|ui| ui.weak("Base image preview: add star images."));
+            ui.centered_and_justified(|ui| ui.weak("Base frame preview: add light frames."));
             return;
         };
-        ui.label(format!("{}{}", if self.shown == self.base() { "Base image preview: " } else { "Preview: " }, self.shown.as_deref().map(basename).unwrap_or_default()));
+        ui.label(format!("{}{}", if self.shown == self.base() { "Base frame: " } else { "Preview: " }, self.shown.as_deref().map(basename).unwrap_or_default()));
         if self.disp_tex.is_none() {
             let img = if self.aux { disp.map(|c| [(3.0 * c[0].max(0.0).powf(0.7)).min(1.0), (3.0 * c[1].max(0.0).powf(0.7)).min(1.0), (3.0 * c[2].max(0.0).powf(0.7)).min(1.0)]) } else { (*disp).clone() };
             self.disp_tex = Some(texture(ctx, "base", &img));

@@ -656,7 +656,7 @@ Einstellungsliste: Darunter erscheinen seine Optionen und eine Erklärung.
 
 ### 13.1 Schnellstart
 
-1. Markieren Sie **Star images**, klicken Sie auf **Add…** und wählen Sie die
+1. Markieren Sie **Light frames**, klicken Sie auf **Add…** und wählen Sie die
    Himmelsaufnahmen (oder tippen Sie einen Datei- oder Ordnerpfad in das
    Pfadfeld und drücken Sie Enter).
 2. Markieren Sie **Sky region**, wählen Sie **Boundary line** und ziehen Sie in
@@ -676,24 +676,44 @@ Einstellungsliste: Darunter erscheinen seine Optionen und eine Erklärung.
 
 | Eintrag | Was aufnehmen |
 |---|---|
-| **Star images** | Die Himmelsaufnahmen: gleiche Brennweite, Blende und Belichtung. RAW ist am besten; TIFF, FITS oder XISF nur, wenn die Daten noch linear (unbearbeitet) sind. **Unify exposure** gleicht Aufnahmen unter verschiedenen Bedingungen an. |
-| **Base image** | Das Bild, an dem die anderen ausgerichtet werden. Leer = die mittlere Himmelsaufnahme. Markieren Sie eine Himmelsaufnahme und klicken Sie auf **Use as base**, um eine andere zu wählen. |
-| **Noise images** | Dunkelbilder (Darks): Objektivdeckel drauf, gleiche ISO und Belichtungszeit, direkt vor oder nach den Himmelsaufnahmen. Entfernen thermisches Rauschen und Hotpixel. |
-| **Bias images** | Kürzeste Belichtung, Objektivdeckel drauf, gleiche ISO. |
-| **Vignetting images** | Flats: eine gleichmäßig beleuchtete weiße Fläche, gleiche Brennweite und Blende. Korrigieren dunklere Ecken und Staubschatten. |
-| **Flat-dark images** | Darks für die Flats: gleiche ISO und Belichtungszeit wie die Vignettierungsbilder. |
+| **Light frames** (*Star images* im einfachen Modus) | Die Himmelsaufnahmen: gleiche Brennweite, Blende und Belichtung. RAW ist am besten; TIFF, FITS oder XISF nur, wenn die Daten noch linear (unbearbeitet) sind. **Unify exposure** gleicht Aufnahmen unter verschiedenen Bedingungen an. |
+| **Base frame** (*Base image* im einfachen Modus) | Das Bild, an dem die anderen ausgerichtet werden. Leer = das mittlere Light-Bild. Ein anderes wählen Sie in der Auswahlliste neben **Base frame**, oder wählen Sie ein Light-Bild in dessen Liste und klicken Sie auf **Use as base**. |
+| **Dark frames** (*Noise images* im einfachen Modus) | Dunkelbilder (Darks): Objektivdeckel drauf, gleiche ISO und Belichtungszeit, direkt vor oder nach den Himmelsaufnahmen. Entfernen thermisches Rauschen und Hotpixel. |
+| **Bias frames** (*Bias images* im einfachen Modus) | Kürzeste Belichtung, Objektivdeckel drauf, gleiche ISO. |
+| **Flat field frames** (*Vignetting images* im einfachen Modus) | Flats: eine gleichmäßig beleuchtete weiße Fläche, gleiche Brennweite und Blende. Korrigieren dunklere Ecken und Staubschatten. |
+| **Flat-dark frames** (*Flat-dark images* im einfachen Modus) | Darks für die Flats: gleiche ISO und Belichtungszeit wie die Vignettierungsbilder. |
 | **Foreground image** | Freiwillig: eine Aufnahme des Bodens vom selben Stativstandort – zur blauen Stunde, lang belichtet oder mit niedriger ISO. Sie ersetzt unterhalb der Himmelsregion den (verrauschten, dunklen) gestackten Vordergrund. **Match brightness** passt sie an die Helligkeit des gestackten Vordergrunds an; **Exposure (EV)** macht sie von dort aus heller oder dunkler. Braucht eine Himmelsregion. |
 | **Output** | `.tif` (16 Bit), `.jpg` (8 Bit) oder `.fits` / `.xisf` (32-Bit-Gleitkomma, linear, zur Weiterverarbeitung in Siril, PixInsight usw.). |
 
 Alle Kalibrierungsbilder sind freiwillig. Bei hoher ISO helfen schon wenige
 Dunkelbilder viel.
 
+**Die Dateilisten:** Jede Gruppe zeigt ihre Dateien in einer Auswahlliste
+neben ihrem Namen, sodass auch Hunderte von Light-Bildern kein Scrollen
+brauchen. Wählen Sie dort eine Datei, um sie in der Vorschau zu sehen;
+**Remove** und **Use as base** wirken auf diese Datei, **Clear** leert die
+ganze Gruppe.
+
+**Verrauschte Flats** (zu wenige, oder in einer Farbe zu dunkel, z. B. bei
+einer blauen Lichtquelle) werden automatisch geglättet; das Ablaufprotokoll
+meldet das, auch wie verrauscht sie waren. Sonst würde ihr Rauschen jedem Bild
+aufgeprägt und beim Wandern der Sterne zu feinen Streifen.
+
+**Temporäre Dateien:** Zwischenbilder werden nicht gespeichert. Die Bilder
+liegen im Arbeitsspeicher oder – wenn sie mehr als die Hälfte des freien
+Speichers brauchen – in einer temporären Datei im Ausgabeordner, die sofort
+nach dem Lauf gelöscht wird (sie ist währenddessen nicht einmal sichtbar).
+Das Ablaufprotokoll nennt, was zutrifft. Reicht der Platz nicht, hält der
+Lauf schon vor dem Start mit einer Meldung an: **Half size** einschalten (ein
+Viertel des Platzes) oder die Ausgabe auf einem Laufwerk mit mehr freiem
+Platz speichern. Auch Master (Dark, Bias, Flat) werden nicht gespeichert.
+
 ### 13.3 Einstellungen
 
 | Einstellung | Wirkung |
 |---|---|
 | **Composition** | **Align stars**: Die Aufnahmen werden an den Sternen ausgerichtet und vereint. **Accumulation** mittelt sie; **Select best pixels** (Vorgabe) lässt Ausreißer weg (Flugzeuge, Satelliten); **Freeze ground** richtet nur den Himmel aus, sodass Himmel und Vordergrund scharf bleiben (braucht eine Himmelsregion); **Align only** schreibt nur die ausgerichteten Aufnahmen. **Star trails**: keine Ausrichtung, der Himmel behält den hellsten Wert jedes Pixels. **Trail fade**: **Fade in** (die Spuren beginnen schwach, Sequators Bewegungseffekt), **Fade out** oder **Both ends** (kometenartig an beiden Enden). **Fill gaps between frames**: Die kurzen Pausen des Kamera-Intervalls werden entlang der gemessenen Sternbewegung gefüllt, sodass die Spuren durchgehende Linien statt Striche sind. |
-| **Sky region** | Wo der Himmel ist. **Boundary line**: eine Linie entlang des Horizonts ziehen. **Gradient**: die Linie mit weichem Übergang. **Irregular mask**: den Himmel mit der linken Maustaste malen, mit der rechten radieren; **Brush size** (Schieberegler oder Mausrad). **Detect sky** malt eine erste Maske aus Helligkeit und Sternen – ungefähr, also prüfen und mit dem Pinsel korrigieren. **Mask feather** macht den Rand der Maske weich, nur zum Himmel hin, sodass der Vordergrund nichts vom Himmel abbekommt (keine Säume am Horizont). **Show detected stars** kreist die Sterne ein, die der letzte Lauf in der gezeigten Aufnahme gefunden hat. |
+| **Sky region** | Wo der Himmel ist. **All sky**: das ganze Bild ist Himmel (kein Vordergrund, z. B. Teleskopaufnahmen). **Boundary line**: eine Linie entlang des Horizonts ziehen. **Gradient**: die Linie mit weichem Übergang. **Irregular mask**: den Himmel mit der linken Maustaste malen, mit der rechten radieren; **Brush size** (Schieberegler oder Mausrad). **Detect sky** malt eine erste Maske aus Helligkeit und Sternen – ungefähr, also prüfen und mit dem Pinsel korrigieren. **Mask feather** macht den Rand der Maske weich, nur zum Himmel hin, sodass der Vordergrund nichts vom Himmel abbekommt (keine Säume am Horizont). **Show detected stars** kreist die Sterne ein, die der letzte Lauf in der gezeigten Aufnahme gefunden hat. |
 | **Sigma clipping** | Wie streng Ausreißer entfernt werden (unten / oben × σ). Üblich sind 2–3; kleinere Werte entfernen mehr, lassen aber mehr Rauschen. Braucht mindestens 4 Aufnahmen, am besten 10 und mehr. |
 | **Frame rejection** | Lässt Aufnahmen weg, die deutlich schlechter als die typische sind: Wolken oder Tau (schwächere Sterne), wenige Sterne, unscharfe oder längliche Sterne (Fokus, Wind, angestoßenes Stativ). |
 | **RAW conversion** | Weißabgleich (Kamera, Bilddurchschnitt, Tageslicht), Demosaicing (Vorgabe AHD; DHT oder AAHD haben bei hoher ISO oft weniger Farbrauschen) und **half size** (4× weniger Pixel, viel schneller). |

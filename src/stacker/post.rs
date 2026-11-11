@@ -24,7 +24,7 @@ pub fn load_foreground(cfg: &StackConfig, load: super::Loader, h: usize, w: usiz
     }
     let ar = w as f64 / h as f64;
     if (fw as f64 / fh as f64 - ar).abs() >= 0.01 * ar {
-        return Err(format!("The foreground image is {fw}×{fh}, not the shape of the star images ({w}×{h})."));
+        return Err(format!("The foreground image is {fw}×{fh}, not the shape of the light frames ({w}×{h})."));
     }
     let r = resize(&img, h as f64 / fh as f64);
     Ok(Img::from_fn(h, w, |y, x| r.at(y.min(r.h - 1), x.min(r.w - 1))))
@@ -255,7 +255,7 @@ pub fn remove_pollution(img: &Img, wt: &Gray, cfg: &StackConfig) -> (Img, Option
     let Some(b) = b else { return (img.clone(), None) };
     let s = (lp.strength / 100.0) as f32;
     let ped = 0.4 * median_of(b.subsample(b.step_for(100_000)).map(luminance));
-    let iaa = lp.iaa && lp.filter == Pollution::Uneven && cfg.sky.mode != super::SkyMode::None;
+    let iaa = lp.iaa && lp.filter == Pollution::Uneven && !matches!(cfg.sky.mode, super::SkyMode::None | super::SkyMode::All);
     let px: Vec<Rgb> = (0..img.len())
         .into_par_iter()
         .map(|i| {

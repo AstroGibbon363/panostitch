@@ -59,11 +59,15 @@ pub struct LoadOptions {
     pub wb: WhiteBalance,
     /// Demosaicing for dcraw-style decoders (0 bilinear, 1 VNG, 2 PPG, 3 AHD, …); None = default.
     pub quality: Option<u32>,
+    /// Turn camera RAW images upright by their orientation tag. Off for stacking:
+    /// calibration needs every frame as the sensor recorded it, and cameras tag
+    /// darks and flats inconsistently (e.g. shot pointing up).
+    pub orient: bool,
 }
 
 impl Default for LoadOptions {
     fn default() -> Self {
-        Self { decoder: RawDecoder::Auto, half: false, linear: false, wb: WhiteBalance::Camera, quality: None }
+        Self { decoder: RawDecoder::Auto, half: false, linear: false, wb: WhiteBalance::Camera, quality: None, orient: true }
     }
 }
 
