@@ -32,6 +32,9 @@ Stability, ease of use, and testing on real data.
 - After a crash, `crash.log` in the settings folder has the details and the next start says where it is.
 - Windows: no extra console window; a message box explains what to do when OpenGL is missing.
 
+### Downloads
+- Ready-made downloads for Linux and Windows only. macOS users build from source (see the README); GitHub's Mac build machines were too often unavailable.
+
 ## v0.3.0
 
 Rust version: one native program, no Julia runtime. GPL-3.0 license. Builds for Linux, Windows and macOS.

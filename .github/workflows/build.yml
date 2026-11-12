@@ -1,4 +1,5 @@
-# Tests and builds PanoStitch on Linux, Windows and macOS.
+# Tests and builds PanoStitch on Linux and Windows. (No macOS builds: GitHub's
+# Mac runners were often unavailable and held up releases; build from source.)
 # Pushing a tag such as v0.3.1 also publishes a GitHub release with one zip
 # per system (the two programs, the manuals and the licenses).
 name: build
@@ -23,8 +24,6 @@ jobs:
             name: linux-x86_64
           - os: windows-latest
             name: windows-x86_64
-          - os: macos-latest
-            name: macos-arm64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -82,7 +81,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "Downloads for Linux, Windows and macOS (Apple Silicon). Unzip and start panostitch; panostack stacks star images from the command line. The manual is in docs/."
+            echo "Downloads for Linux and Windows (macOS: build from source, see the README). Unzip and start panostitch; panostack stacks star images from the command line. The manual is in docs/."
             echo
             # This version's section of CHANGELOG.md, without its heading
             awk -v v="## $GITHUB_REF_NAME" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md

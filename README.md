@@ -6,8 +6,8 @@ panorama or mosaic, and stacks star images (aligned stars or star trails) with
 calibration frames and sky/ground separation.
 
 The Julia version is on the `main` branch. This branch (`v0.3`) is the Rust
-rewrite: one small native program, no runtime to install. Downloads for Linux,
-Windows and macOS are on the Releases page; `CHANGELOG.md` lists what changed.
+rewrite: one small native program, no runtime to install. Downloads for Linux
+and Windows are on the Releases page (on macOS, build from source as below); `CHANGELOG.md` lists what changed.
 
 ## Running
 
