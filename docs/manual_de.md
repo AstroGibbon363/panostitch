@@ -144,7 +144,7 @@ Werte der Vorgabe. Das Programm merkt sich die Schalter.
    oder unten reichen. Ist das Ergebnis zu dunkel, klicken Sie auf **Auto
    exposure**; ist der Horizont gebogen, passen Sie **Pitch** an. Mit **Auto
    crop** schneiden Sie die ausgefransten Ränder ab.
-6. Klicken Sie auf **Save full resolution…**. Wenn Sie später weiterarbeiten
+6. Klicken Sie auf **Save panorama…**. Wenn Sie später weiterarbeiten
    möchten, klicken Sie auch auf **Save project…**.
 
 **Deep-Sky-Mosaik aus FITS-Dateien:**
@@ -191,7 +191,7 @@ sich danach weiter ändern.
 | **▲ / ▼** | Verschiebt die ausgewählten Bilder in der Liste nach oben oder unten. Nur die Paar-Modi *sequential* und *grid* achten auf die Reihenfolge. |
 | **Reference** | Das Bild, um das herum die anderen platziert werden; es bleibt unverzerrt. **auto (centre)** wählt das Bild in der Mitte der Gruppe, was meist das gleichmäßigste Ergebnis gibt. |
 | **RAW via** | Welcher RAW-Konverter verwendet wird, siehe [RAW-Dateien](#8-raw-dateien). Gilt für danach hinzugefügte Bilder. |
-| **half size** | Lädt RAW-Dateien und FITS-Dateien von Farbkameras in halber Auflösung: etwa 4× schneller, ¼ des Speichers. Gilt für danach hinzugefügte Bilder. Für ein Ergebnis in voller Auflösung vor dem Laden ausschalten. |
+| **half size** | Lädt RAW-Dateien und FITS-Dateien von Farbkameras in halber Auflösung: etwa 4× schneller, ¼ des Speichers. Gilt für danach hinzugefügte Bilder. Beim Speichern mit einer **Output size** über 50 % werden RAW-Dateien erneut in voller Größe gelesen. |
 
 Markierungen in der Liste:
 
@@ -317,6 +317,7 @@ Wie die einzelnen Projektionen aussehen, beschreibt das Kapitel
 | **Yaw (°)** | Dreht das ganze Panorama nach links oder rechts: bestimmt, welche Richtung in der Mitte liegt. Nützlich bei 360°-Panoramen (z. B. damit das Zentrum der Milchstraße in der Mitte statt am Rand liegt). |
 | **Pitch (°)** | Neigt das ganze Panorama nach oben oder unten. Damit **begradigen Sie einen gebogenen Horizont** (etwa wenn die Kamera nach unten zeigte). |
 | **Roll (°)** | Dreht das ganze Panorama. Damit richten Sie einen schiefen Horizont aus. |
+| *Feineinstellung* | Yaw, Pitch und Roll haben je einen Regler, ein Zahlenfeld und **◀ ▶**. Die Regler für Pitch und Roll sind nahe 0° fein (wo Korrekturen meist liegen) und weiter außen grob. Langsames Ziehen am Zahlenfeld ergibt 0,02° pro Pixel; per Doppelklick lässt sich der Wert eintippen. **◀ ▶** gehen in Schritten von 0,1° (mit Umschalt 1°). |
 | **Reset focal / yaw / pitch / roll** | Setzt diese vier Regler zurück. |
 
 Der Titel der Ansicht zeigt Panoramagröße, Brennweite in Pixeln, Bildwinkel des
@@ -337,7 +338,7 @@ existiert).
 | **Auto exposure** | Setzt **Exposure** anhand der aktuellen Vorschau: typische Helligkeit auf Mittelgrau, ohne mehr als die hellsten 0,5 % (Sterne, Lampen) zu beschneiden. |
 | **Even out** | Berechnet Helligkeitsfaktoren je Bild, damit die Überlappungen zusammenpassen. |
 | **Reset moves** | Macht alle manuellen Verschiebungen rückgängig. |
-| **Auto crop** | Beschneidet das Panorama auf das größte Rechteck, das vollständig von Bildern bedeckt ist, sodass die schwarzen, ausgefransten Ränder verschwinden. Die Vorschau zeigt dann das beschnittene Ergebnis, und **Save full resolution…** speichert es. Die Statuszeile nennt, wie viel vom Panorama erhalten bleibt. Richten Sie zuerst den Horizont aus (Pitch, Roll); von einem gebogenen Panorama bleibt nur ein schmaler Streifen. |
+| **Auto crop** | Beschneidet das Panorama auf das größte Rechteck, das vollständig von Bildern bedeckt ist, sodass die schwarzen, ausgefransten Ränder verschwinden. Die Vorschau zeigt dann das beschnittene Ergebnis, und **Save panorama…** speichert es. Die Statuszeile nennt, wie viel vom Panorama erhalten bleibt. Richten Sie zuerst den Horizont aus (Pitch, Roll); von einem gebogenen Panorama bleibt nur ein schmaler Streifen. |
 | **Uncrop** | Hebt den Beschnitt auf. Der Beschnitt wird auch automatisch aufgehoben, wenn Sie etwas ändern, das die Bilder verschiebt (Projektion, Brennweite, Yaw, Pitch, Roll, Verschiebungen, Zuordnung). |
 | **Nudge ← ↑ ↓ →** | Verschiebt das aktuelle Bild um ein Vorschau-Pixel (siehe unten). |
 
@@ -436,7 +437,7 @@ den gespeicherten Zuordnungspunkten: etwa 50 kB pro Bild.
 | Verschieben | mit der **linken** Taste ziehen | Pfeiltasten (Ansichten Image und Pair) | |
 | Hineinzoomen | Mausrad nach oben | `+` | **Zoom +** |
 | Herauszoomen | Mausrad nach unten | `-` | **Zoom -** |
-| Zoom zurücksetzen | | `0` oder `Pos1` | **Fit** |
+| Zoom zurücksetzen | | `F`, `0` oder `Pos1` | **Fit** |
 | Bild auswählen (Ansicht Panorama) | in seinen Umriss klicken | | |
 | Umrisse, Nummern, Verbindungen ein/aus | | | Schalter **overlays** |
 | Bild verschieben (Ansicht Panorama) | **Strg + Ziehen** | Pfeiltasten (`Umschalt` = 10 Schritte) | **← ↑ ↓ →** |
@@ -445,6 +446,24 @@ den gespeicherten Zuordnungspunkten: etwa 50 kB pro Bild.
 
 Die Schaltflächen **Image + keypoints**, **Pair matches** und **Panorama**
 wechseln zwischen den drei Ansichten.
+
+**Weitere Tastenkürzel** (zeigt der Tooltip einer Schaltfläche):
+
+| Tasten | Panorama stitcher | Star stacking |
+|---|---|---|
+| `Strg+Enter` | **Run all steps** | **Start** |
+| `P` / `Strg+P` | `P`: **Preview panorama** | `Strg+P`: **Quick preview** |
+| `Strg+S` | Projekt speichern (in die offene Projektdatei sofort; beim ersten Mal mit Namensabfrage) | ebenso |
+| `Strg+Umschalt+S` | **Save panorama…** | |
+| `Strg+O` | **Open project…** | ebenso |
+| `Esc` | | laufendes Stacking abbrechen |
+| `F` | Bild in die Ansicht einpassen | ebenso |
+
+Unter macOS `Cmd` statt `Strg`.
+
+**Beim Schließen des Fensters** wird zuerst gefragt, wenn ein Stacking läuft
+oder die Arbeit in einem Tab nicht in einer Projektdatei gespeichert ist. Sie
+können dann das Projekt speichern, trotzdem beenden oder abbrechen.
 
 **Scharfer Zoom:** Die Vorschau ist ein verkleinertes Bild. Wenn Sie in das
 Panorama hineinzoomen und kurz warten, wird der sichtbare Bereich in
@@ -549,7 +568,7 @@ ICC-Profile) werden ignoriert; verwendet wird das erste Bild.
 
 ## 10. Speichern
 
-Klicken Sie auf **Save full resolution…** und wählen Sie einen Dateinamen. Der
+Klicken Sie auf **Save panorama…** und wählen Sie einen Dateinamen. Der
 Dateityp richtet sich nach der Endung:
 
 | Endung | Ergebnis |
@@ -562,10 +581,22 @@ Dateityp richtet sich nach der Endung:
 Sind alle geladenen Bilder FITS, endet der vorgeschlagene Dateiname auf
 `.fits`.
 
-Das Panorama wird aus den geladenen Bildern in deren voller Größe berechnet:
-in halber Kameraauflösung, wenn beim Laden **half size** eingeschaltet war.
+**Output size** (über der Speichern-Schaltfläche) legt die Größe des
+gespeicherten Panoramas fest, in % der vollen Kameraauflösung; die Zeile
+darunter zeigt die Größe in Pixeln (nach einer Vorschau). ¼, ½, full und 2×
+sind Schnellwahlen. 100 % behält alle Details; mit **half size** geladene
+RAW-Dateien werden beim Speichern erneut in voller Größe gelesen, das braucht
+mehr Zeit und Speicher. 50 % oder 25 % ergeben schnell eine kleinere Datei,
+über 100 % wird vergrößert (ohne neue Details).
 
-Panoramen, die breiter oder höher als 40 000 px würden, werden abgelehnt. Das
+Darunter zeigt eine Schätzung, wie viel Speicher das Speichern braucht und wie
+groß die Datei werden kann, neben dem freien Platz. Passt es nicht, wird sie
+orange (⚠); der Tooltip sagt, was zu tun ist. Das Speichern lehnt dann mit
+demselben Rat ab, statt den Speicher zu füllen, wodurch der ganze Computer
+nicht mehr reagieren würde. Das Laden hält bei fast vollem Speicher früher an
+und meldet es.
+
+Panoramen, die breiter oder höher als 60 000 px würden, werden abgelehnt. Das
 bedeutet fast immer, dass ein Paar falsch zugeordnet ist oder die Projektion
 ungeeignet ist; probieren Sie cylindrical oder spherical.
 
@@ -575,7 +606,9 @@ ungeeignet ist; probieren Sie cylindrical oder spherical.
 
 | Problem | Lösungsansatz |
 |---|---|
-| **Kein Fenster erscheint** | Starten Sie das Programm im Terminal und lesen Sie dort die Fehlermeldung. Unter Linux braucht es OpenGL: Prüfen Sie, dass der Grafiktreiber installiert ist. |
+| **Kein Fenster erscheint** | Unter Windows nennt eine Meldung den Grund; unter Linux und macOS das Programm im Terminal starten und die Fehlermeldung dort lesen. Das Fenster braucht OpenGL 2.0 oder neuer: Grafiktreiber aktualisieren (bei alten PCs den des Grafikchip-Herstellers). |
+| **Das Programm wurde unerwartet beendet** | Beim nächsten Start meldet es die Statuszeile. Die Details stehen in `crash.log` im Einstellungsordner (Linux `~/.config/panostitch`, Windows `%APPDATA%\panostitch`, macOS `~/Library/Application Support/panostitch`); bitte beim Melden des Problems anhängen. |
+| **Bedienelemente am Rand abgeschnitten** | Den Rand zwischen Seitenleiste und Bild breiter ziehen. |
 | **„Busy – wait…“** | Ein Schritt läuft noch; warten Sie, bis sich die Statuszeile ändert. |
 | **Ein Bild wird beim Laden übersprungen** | Die Statuszeile nennt Datei und Grund. Bei RAW einen anderen Konverter unter **RAW via** probieren. `.fz`-FITS-Dateien zuerst entpacken. |
 | **Panorama ist fast schwarz** | Fotos: **Auto exposure** klicken oder **Exposure (EV)** erhöhen (Nachtaufnahmen brauchen oft +1,5 bis +4), oder die Fotos in RawTherapee bearbeiten (deren `.pp3`-Dateien werden dann verwendet). FITS und andere lineare Daten: **Auto stretch** klicken. |
@@ -675,8 +708,14 @@ Ansicht den Schritt und die geschätzte Restzeit.
 3. Klicken Sie auf **Quick preview**: ein kleines, schnelles Ergebnis aus
    höchstens 10 Aufnahmen, um die Einstellungen zu prüfen. Es wird nichts
    gespeichert.
-4. Markieren Sie **Output** und wählen Sie den Speicherort (Vorgabe:
-   `stacked.tif` neben der ersten Himmelsaufnahme), dann klicken Sie auf
+4. Prüfen Sie die Zeile **Save as** unter der Eingabeliste: Dateinamen
+   eintippen oder einen vorgeschlagenen Namen in der Liste daneben wählen, in
+   der zweiten Liste den Dateityp, mit **Folder…** den Ordner (Vorgabe:
+   `stacked.tif` neben der ersten Himmelsaufnahme). Existiert die Datei schon,
+   sagt die Zeile das; **next free name** hängt eine Nummer an. Darunter zeigt
+   eine Schätzung, wie viel Platz die Aufnahmen beim Stacken brauchen (nach
+   Anzahl und Größe) und ob sie im Speicher oder auf der Festplatte liegen;
+   reicht der Platz nicht, wird sie orange (⚠). Dann klicken Sie auf
    **Start**.
 5. Passen Sie rechts die Nachbearbeitung an; das Ergebnis ändert sich sofort.
    **Save result…** speichert es erneut mit den neuen Einstellungen.
@@ -692,7 +731,7 @@ Ansicht den Schritt und die geschätzte Restzeit.
 | **Flat field frames** (*Vignetting images* im einfachen Modus) | Flats: eine gleichmäßig beleuchtete weiße Fläche, gleiche Brennweite und Blende. Korrigieren dunklere Ecken und Staubschatten. |
 | **Flat-dark frames** (*Flat-dark images* im einfachen Modus) | Darks für die Flats: gleiche ISO und Belichtungszeit wie die Vignettierungsbilder. |
 | **Foreground image** | Freiwillig: eine Aufnahme des Bodens vom selben Stativstandort – zur blauen Stunde, lang belichtet oder mit niedriger ISO. Sie ersetzt unterhalb der Himmelsregion den (verrauschten, dunklen) gestackten Vordergrund. **Match brightness** passt sie an die Helligkeit des gestackten Vordergrunds an; **Exposure (EV)** macht sie von dort aus heller oder dunkler. Braucht eine Himmelsregion. |
-| **Output** | `.tif` (16 Bit), `.jpg` (8 Bit) oder `.fits` / `.xisf` (32-Bit-Gleitkomma, linear, zur Weiterverarbeitung in Siril, PixInsight usw.). |
+| **Output** | Wird in der Zeile **Save as** gesetzt: Name, Typ und Ordner. `.tif` / `.png` (16 Bit), `.jpg` (8 Bit) oder `.fits` / `.xisf` (32-Bit-Gleitkomma, linear, zur Weiterverarbeitung in Siril, PixInsight usw.). |
 
 Alle Kalibrierungsbilder sind freiwillig. Bei hoher ISO helfen schon wenige
 Dunkelbilder viel.

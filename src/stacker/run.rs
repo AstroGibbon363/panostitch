@@ -237,7 +237,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     let nthreads = rayon::current_num_threads().div_ceil(2).clamp(1, 4);
     let results: Vec<(usize, FrameInfo)> = {
         let jobs: Vec<(usize, usize)> = cand.iter().enumerate().filter(|(k, _)| *k != bi).map(|(k, &i)| (k, i)).collect();
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(nthreads).build().map_err(|e| e.to_string())?;
+        let pool = crate::sys::low_priority_pool(nthreads)?;
         pool.install(|| {
             use rayon::prelude::*;
             jobs.par_iter()
@@ -404,6 +404,19 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
             let outdir = dir.join("aligned");
             std::fs::create_dir_all(&outdir).map_err(|e| e.to_string())?;
             let ext = if is_astro(&cfg.output) { format!(".{}", crate::io::ext_of(&cfg.output)) } else { ".tif".to_string() };
+            // 32-bit float for FITS / XISF, 16-bit TIFF otherwise (3 colours).
+            let need = (frames.len() * h * w) as f64 * if is_astro(&cfg.output) { 12.0 } else { 6.0 };
+            if let Some(free) = super::available_disk(&outdir) {
+                if need + 1e9 > free as f64 {
+                    return Err(format!(
+                        "Not enough disk space for the aligned frames: {} frames of {w}×{h} need about {:.1} GB, but only {:.1} GB is free in {}. Choose an output folder on a bigger disk, switch on Half size, or use fewer frames.",
+                        frames.len(),
+                        need / 1e9,
+                        free as f64 / 1e9,
+                        outdir.display()
+                    ));
+                }
+            }
             for (n, (fi, &k)) in frames.iter().zip(ks.iter()).enumerate() {
                 progress(&format!("Writing aligned frame {}/{}", n + 1, frames.len()))?;
                 let stem = Path::new(&fi.path).file_stem().and_then(|s| s.to_str()).unwrap_or("frame").to_string();

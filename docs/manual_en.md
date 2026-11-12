@@ -130,7 +130,7 @@ values. The program remembers the switches.
    **spherical** for several rows or anything reaching far up or down. Click
    **Auto exposure** if it is too dark, and adjust **Pitch** if the horizon is
    bent. Click **Auto crop** to cut away the ragged edges.
-6. Click **Save full resolution…**. Click **Save project…** if you want to come
+6. Click **Save panorama…**. Click **Save project…** if you want to come
    back to it later.
 
 **Deep-sky mosaic from FITS files:**
@@ -177,7 +177,7 @@ changed afterwards.
 | **▲ / ▼** | Moves the selected images up or down in the list. Only the *sequential* and *grid* pair modes care about the order. |
 | **Reference** | The image the others are placed around; it stays undistorted. **auto (centre)** picks the image in the middle of the group, which usually gives the most even result. |
 | **RAW via** | Which RAW converter to use; see [RAW files](#8-raw-files). Applies to images added afterwards. |
-| **half size** | Decodes RAW files and colour-camera FITS files at half resolution: about 4× faster and ¼ of the memory. Applies to images added afterwards. Turn it off before loading if you want a full-resolution result. |
+| **half size** | Decodes RAW files and colour-camera FITS files at half resolution: about 4× faster and ¼ of the memory. Applies to images added afterwards. RAW files are read again at full size when you save at an **Output size** above 50 %. |
 
 The list marks each entry:
 
@@ -296,6 +296,7 @@ See [Projections](#7-projections) for what each one looks like.
 | **Yaw (°)** | Turns the whole panorama left or right: chooses which direction is in the centre. Useful for 360° panoramas (e.g. to put the Milky Way core in the middle instead of at the edge). |
 | **Pitch (°)** | Tilts the whole panorama up or down. Use it to **straighten a curved horizon** (for example if the camera was pointed down). |
 | **Roll (°)** | Rotates the whole panorama. Use it to level a sloping horizon. |
+| *Fine control* | Yaw, pitch and roll each have a slider, a number box and **◀ ▶**. The pitch and roll sliders are fine near 0° (where corrections usually are) and coarse further out. Drag the number box slowly for 0.02° per pixel, or double-click it and type. **◀ ▶** step by 0.1° (with Shift by 1°). |
 | **Reset focal / yaw / pitch / roll** | Returns these four sliders to their defaults. |
 
 The view title shows the panorama size, the focal length in pixels, the field
@@ -315,7 +316,7 @@ These controls update the preview immediately (once a preview exists).
 | **Auto exposure** | Sets **Exposure** from the current preview: typical brightness to middle grey, without clipping more than the brightest 0.5 % (stars, lamps). |
 | **Even out** | Computes per-image brightness factors that make the overlaps match. |
 | **Reset moves** | Undoes all manual moves. |
-| **Auto crop** | Cuts the panorama to the largest rectangle that is completely covered by images, so the black, ragged edges disappear. The preview then shows the cropped result, and **Save full resolution…** saves it. The status line says how much of the panorama is kept. Straighten the horizon (Pitch, Roll) first; a bent panorama leaves only a thin rectangle. |
+| **Auto crop** | Cuts the panorama to the largest rectangle that is completely covered by images, so the black, ragged edges disappear. The preview then shows the cropped result, and **Save panorama…** saves it. The status line says how much of the panorama is kept. Straighten the horizon (Pitch, Roll) first; a bent panorama leaves only a thin rectangle. |
 | **Uncrop** | Removes the crop. The crop is also removed automatically when you change anything that moves the images (projection, focal, yaw, pitch, roll, moves, matching). |
 | **Nudge ← ↑ ↓ →** | Moves the current image by one preview pixel (see below). |
 
@@ -404,7 +405,7 @@ points: about 50 kB per image.
 | Pan | drag with **left** button | arrow keys (Image and Pair views) | |
 | Zoom in | scroll up | `+` | **Zoom +** |
 | Zoom out | scroll down | `-` | **Zoom -** |
-| Reset zoom | | `0` or `Home` | **Fit** |
+| Reset zoom | | `F`, `0` or `Home` | **Fit** |
 | Select image (Panorama view) | click inside its outline | | |
 | Show / hide outlines, numbers, links | | | **overlays** switch |
 | Move image (Panorama view) | **Ctrl + drag** | arrow keys (`Shift` = 10 steps) | **← ↑ ↓ →** |
@@ -413,6 +414,24 @@ points: about 50 kB per image.
 
 The **Image + keypoints**, **Pair matches** and **Panorama** buttons switch
 between the three views.
+
+**Other shortcuts** (hover over a button to see its shortcut):
+
+| Keys | Panorama stitcher | Star stacking |
+|---|---|---|
+| `Ctrl+Enter` | **Run all steps** | **Start** |
+| `P` / `Ctrl+P` | `P`: **Preview panorama** | `Ctrl+P`: **Quick preview** |
+| `Ctrl+S` | save the project (to the open project file at once; the first time, asks for a name) | same |
+| `Ctrl+Shift+S` | **Save panorama…** | |
+| `Ctrl+O` | **Open project…** | same |
+| `Esc` | | cancel the running stack |
+| `F` | fit the image to the view | same |
+
+On macOS use `Cmd` instead of `Ctrl`.
+
+**Closing the window** asks first if a stack is running or if the work in a
+tab is not saved in a project file. You can then save the project, quit
+anyway or cancel.
 
 **Sharp zoom:** the preview is a reduced image. When you zoom into the
 panorama and pause for a moment, the visible area is re-rendered at screen
@@ -512,7 +531,7 @@ first image is used.
 
 ## 10. Saving
 
-Click **Save full resolution…** and choose a file name. The file type follows
+Click **Save panorama…** and choose a file name. The file type follows
 the extension:
 
 | Extension | Result |
@@ -524,10 +543,21 @@ the extension:
 
 When all loaded images are FITS, the suggested file name ends in `.fits`.
 
-The panorama is rendered from the loaded images at their full size: half the
-camera resolution if **half size** was on when you loaded them.
+**Output size** (above the Save button) sets how big the saved panorama is, in
+% of the photos' full camera resolution; the line below it shows the size in
+pixels (after a preview). The buttons ¼, ½, full and 2× are quick choices.
+100 % keeps all the detail; RAW files loaded with **half size** are read again
+at full size while saving, so this needs more time and memory. 50 % or 25 %
+give a smaller file quickly, above 100 % enlarges (no new detail).
 
-Panoramas wider or taller than 40,000 px are refused. This almost always means
+Below the size, an estimate shows how much memory saving needs and how big
+the file can get, next to what is free. It turns orange (⚠) when it does not
+fit; hover over it for what to do. Saving then refuses with the same advice
+instead of filling the memory, which would make the whole computer stop
+responding. Loading stops early, with a message, when the memory is almost
+full.
+
+Panoramas wider or taller than 60,000 px are refused. This almost always means
 that one pair is matched wrongly or that the projection is unsuitable; try
 cylindrical or spherical.
 
@@ -537,7 +567,9 @@ cylindrical or spherical.
 
 | Problem | What to try |
 |---|---|
-| **No window appears** | Start the program from a terminal and read the error message there. On Linux it needs OpenGL: check that the graphics driver is installed. |
+| **No window appears** | On Windows a message says why; on Linux and macOS start the program from a terminal and read the error there. The window needs OpenGL 2.0 or newer: update the graphics driver (on old PCs, the one from the maker of the graphics chip). |
+| **The program closed unexpectedly** | At the next start the status line says so. The details are in `crash.log` in the settings folder (Linux `~/.config/panostitch`, Windows `%APPDATA%\panostitch`, macOS `~/Library/Application Support/panostitch`); please attach it when you report the problem. |
+| **Controls cut off at the side** | Drag the edge between a side panel and the image wider. |
 | **"Busy – wait…"** | A step is still running; wait for the status line to change. |
 | **An image is skipped while loading** | The status line names the file and the reason. For RAW, try another converter in **RAW via**. For `.fz` FITS, decompress the file first. |
 | **Panorama is mostly black** | Photos: click **Auto exposure** or raise **Exposure (EV)** (night shots often need +1.5 to +4), or edit the photos in RawTherapee (their `.pp3` files are then used). FITS and other linear data: click **Auto stretch**. |
@@ -628,8 +660,14 @@ time left.
    mask with the brush. Stars are searched for only in the sky.
 3. Click **Quick preview**: a small, fast result from up to 10 frames, to check
    the settings. Nothing is saved.
-4. Highlight **Output** and choose where to save (default: `stacked.tif` next
-   to the first star image), then click **Start**.
+4. Check the **Save as** row under the input list: type a file name or pick
+   one of the suggested names in the dropdown next to it, choose the file
+   type in the second dropdown, and the folder with **Folder…** (default:
+   `stacked.tif` next to the first star image). If the file already exists, the
+   row says so; **next free name** adds a number. Below it, an estimate shows
+   how much space the frames need while stacking (from their number and
+   size) and whether they are kept in memory or on disk; it turns orange (⚠)
+   when there is not enough. Then click **Start**.
 5. Adjust the post-processing on the right; the result updates at once. Click
    **Save result…** to save it again with the new settings.
 
@@ -644,7 +682,7 @@ time left.
 | **Flat field frames** (*Vignetting images* in simple mode) | Flat frames: an evenly lit white surface, same focal length and aperture. Corrects darker corners and dust shadows. |
 | **Flat-dark frames** (*Flat-dark images* in simple mode) | Darks for the flats: same ISO and exposure time as the vignetting images. |
 | **Foreground image** | Optional: one shot of the ground from the same tripod position – at blue hour, a long exposure or low ISO. It replaces the (noisy, dark) stacked foreground below the sky region. **Match brightness** scales it to the stacked ground; **Exposure (EV)** brightens or darkens it from there. Needs a sky region. |
-| **Output** | `.tif` (16-bit), `.jpg` (8-bit), or `.fits` / `.xisf` (32-bit float, linear, for further processing in Siril, PixInsight etc.). |
+| **Output** | Set in the **Save as** row: file name, type and folder. `.tif` / `.png` (16-bit), `.jpg` (8-bit), or `.fits` / `.xisf` (32-bit float, linear, for further processing in Siril, PixInsight etc.). |
 
 All calibration frames are optional. Even a few dark frames help a lot at
 high ISO.

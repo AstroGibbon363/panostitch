@@ -14,11 +14,14 @@ use crate::io::{self, basename, LoadOptions, RawDecoder};
 use crate::stitcher::*;
 use egui::{Color32, Pos2, Stroke};
 use rayon::prelude::*;
+use crate::sys::{available_disk, available_memory, gb, memory_reserve};
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 const DISP_MAX: usize = 1600;
+/// Marks images left out because the memory was almost full.
+const LOWMEM: &str = "\u{1}lowmem:";
 
 #[derive(Clone)]
 pub struct Item {
@@ -30,6 +33,8 @@ pub struct Item {
     pub featkey: Option<FeatKey>,
     pub gain: f64,
     pub offset: [f64; 2],
+    /// Full (sensor) size ÷ loaded size: 2 for a RAW loaded at half size, else 1.
+    pub native: f64,
 }
 
 pub type FeatKey = (usize, usize, u64, u64);
@@ -100,6 +105,8 @@ pub struct Params {
     pub decoder: RawDecoder,
     pub half: bool,
     pub unlinked: bool,
+    /// Size of the saved panorama in % of the photos' full (camera) resolution.
+    pub out_pct: f64,
 }
 
 impl Default for Params {
@@ -108,7 +115,7 @@ impl Default for Params {
             det_px: 2000, nkp: 5000, thr: 0.001, denoise: 1.5, layout: Layout::All, cols: 5, snake: false, ratio: 0.8, maxd: 0.35,
             tol: 5.0, mininl: 20, model: Model::Homography, refine: true, proj: Projection::Cylindrical, blend: Blend::Smart, focal: 1.0,
             yaw: 0.0, pitch: 0.0, roll: 0.0, prev_px: 1800, ev: 0.0, black: 0.0, mid: 0.5, white: 1.0, decoder: RawDecoder::Auto, half: true,
-            unlinked: false,
+            unlinked: false, out_pct: 100.0,
         }
     }
 }
@@ -162,6 +169,51 @@ enum ViewKind {
     Pano,
 }
 
+/// What saving the panorama needs (bytes), for the estimate and the check before saving.
+struct SaveNeeds {
+    w: f64,
+    h: f64,
+    w0: f64,
+    h0: f64,
+    nat: f64,
+    reread: f64,
+    per_px: f64,
+    mem: f64,
+    file: f64,
+}
+
+impl SaveNeeds {
+    /// Whether it fits in the free memory and the disk holding `dir`; else what to do instead.
+    /// `fresh`: query the system now (otherwise a value at most a few seconds old).
+    fn check(&self, dir: &std::path::Path, fresh: bool) -> Result<(), String> {
+        let (mem, disk) = if fresh { (available_memory(), available_disk(dir)) } else { crate::sys::free_cached(dir) };
+        let free = mem - memory_reserve();
+        if self.mem > free {
+            // The largest output size that fits: without reading the RAWs again (up to their loaded size), or with.
+            let area = self.w0 * self.h0 * self.per_px;
+            let fit_loaded = (free.max(0.0) / area).sqrt().min(1.0) / self.nat * 100.0;
+            let fit_full = ((free - self.reread).max(0.0) / area).sqrt() / self.nat * 100.0;
+            let best = if fit_full > 100.0 / self.nat { fit_full } else { fit_loaded };
+            let pct = (best / 5.0).floor() * 5.0;
+            return Err(format!(
+                "Not enough memory: saving {}×{} px needs about {}, but only {} is free (keeping {} for the system). {}",
+                self.w,
+                self.h,
+                gb(self.mem),
+                gb(free.max(0.0)),
+                gb(memory_reserve()),
+                if pct >= 5.0 { format!("Lower Output size to {pct:.0} % or less, or close other programs.") } else { "Close other programs, or stitch fewer images.".to_string() }
+            ));
+        }
+        if let Some(d) = disk {
+            if self.file > d as f64 {
+                return Err(format!("Not enough disk space: the file needs up to {}, but only {} is free in {}. Choose another folder, a smaller Output size or JPEG.", gb(self.file), gb(d as f64), dir.display()));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct StitchTab {
     items: Vec<Item>,
     pairs: Vec<PairRes>,
@@ -197,6 +249,8 @@ pub struct StitchTab {
     committed: Option<(u64, Snap)>,
     pending: Option<(u64, std::time::Instant)>,
     project: Option<String>,
+    /// Fingerprint of the state last saved to (or opened from) a project file.
+    saved_fp: Option<u64>,
     pending_project: Option<ProjData>,
     pano_version: u64,
     detail: Option<Detail>,
@@ -249,7 +303,7 @@ fn sliders(p: &mut Params) -> Vec<(&'static str, f64, Box<dyn FnMut(&mut Params,
         s!("Max distance", maxd, f64), s!("RANSAC tol. (px)", tol, f64), s!("Min. inliers", mininl, usize),
         s!("Focal (× auto)", focal, f64), s!("Yaw (°)", yaw, f64), s!("Pitch (°)", pitch, f64), s!("Roll (°)", roll, f64),
         s!("Preview size", prev_px, usize), s!("Exposure", ev, f64), s!("Black point", black, f64), s!("Midtones", mid, f64),
-        s!("White point", white, f64),
+        s!("White point", white, f64), s!("Output size (%)", out_pct, f64),
     ]
 }
 
@@ -324,7 +378,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: "Add images to begin (any order).".into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -413,6 +467,11 @@ fn park_unlinked(mut g: Vec<M3>, parent: &[Option<usize>], order: &[usize], comp
 }
 
 impl StitchTab {
+    /// Show a message in the status line.
+    pub fn notice(&mut self, s: String) {
+        self.status = s;
+    }
+
     pub fn busy(&self) -> bool {
         self.busy || self.dialog.is_some()
     }
@@ -425,7 +484,7 @@ impl StitchTab {
         self.busy = true;
         self.status = msg.into();
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&tx))).unwrap_or_else(|_| Err("internal error (panic)".into()));
             let _ = tx.send(r.unwrap_or_else(Msg::Error));
         });
@@ -444,17 +503,28 @@ impl StitchTab {
         let n = ps.len();
         self.spawn(&format!("Loading {n} image(s)…"), move |tx| {
             let done = std::sync::atomic::AtomicUsize::new(0);
+            // Stop before the memory runs out: past that point the system swaps
+            // and everything (not just this program) stops responding.
+            let reserve = memory_reserve();
+            let full = std::sync::atomic::AtomicBool::new(false);
             let res: Vec<Result<Item, String>> = ps
                 .par_iter()
                 .map(|p| {
                     if p.is_empty() {
                         return Err(String::new());
                     }
+                    if full.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err(format!("{LOWMEM}{}", basename(p)));
+                    }
+                    let native = if opt.half && io::is_raw(p) { 2.0 } else { 1.0 };
                     let r = io::load_any(p, &opt).map(|img| {
                         let f = (DISP_MAX as f64 / img.w.max(img.h) as f64).min(1.0);
                         let disp = if f < 1.0 { resize(&img, f) } else { img.clone() };
-                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2] }
+                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native }
                     });
+                    if available_memory() < reserve {
+                        full.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     let k = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let _ = tx.send(Msg::Status(format!("Loading {k}/{n}: {}", basename(p))));
                     r
@@ -741,7 +811,7 @@ impl StitchTab {
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let (proj, blend, tx) = (self.p.proj, self.p.blend, self.tx.clone());
         self.detail_busy = true;
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| {
                 let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
                 let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12 };
@@ -917,6 +987,7 @@ impl StitchTab {
         }
         std::fs::write(&path, toml::to_string(&d).map_err(|e| e.to_string())?).map_err(|e| format!("Cannot save {path}: {e}"))?;
         self.project = Some(path.clone());
+        self.saved_fp = Some(self.fingerprint());
         Ok(path)
     }
 
@@ -1058,6 +1129,7 @@ impl StitchTab {
         self.redo.clear();
         self.committed = None;
         self.project = Some(pd.path.clone());
+        self.saved_fp = Some(self.fingerprint());
         let failed: Vec<String> = failed.into_iter().filter(|f| !f.is_empty()).collect();
         self.status = format!(
             "Opened {}: {} images, {} pairs.{note}{}{}",
@@ -1076,23 +1148,83 @@ impl StitchTab {
         }
     }
 
+    /// Estimated memory and disk space for saving the area `box_` as a file of type `ext`.
+    fn save_needs(&self, box_: (f64, f64, f64, f64), ext: &str) -> SaveNeeds {
+        let scale = self.out_scale();
+        let nat = self.layout.as_ref().and_then(|l| self.items.get(l.ref_)).map(|it| it.native).unwrap_or(1.0);
+        let (w0, h0) = (box_.1 - box_.0 + 1.0, box_.3 - box_.2 + 1.0);
+        let reread = if scale > 1.0 { self.visible().iter().map(|&i| &self.items[i]).filter(|it| it.native > 1.0).map(|it| (it.img.w * it.img.h) as f64 * it.native.powi(2) * 12.0).sum() } else { 0.0 };
+        // Rendering (the smart blend keeps several layers per pixel), then the copy that is saved.
+        let per_px = if self.p.blend == Blend::Smart { 64.0 } else { 32.0 } + 18.0;
+        let bpp = match ext {
+            "jpg" | "jpeg" => 1.0,
+            "fits" | "fit" | "fts" | "xisf" => 12.0,
+            _ => 6.0, // 16-bit TIFF / PNG, uncompressed at most
+        };
+        let (w, h) = ((w0 * scale).round().max(1.0), (h0 * scale).round().max(1.0));
+        SaveNeeds { w, h, w0, h0, nat, reread, per_px, mem: reread + w * h * per_px, file: w * h * bpp + 50e6 }
+    }
+
+    /// Render scale of the saved panorama (output px per loaded px of the reference photo).
+    fn out_scale(&self) -> f64 {
+        let nat = self.layout.as_ref().and_then(|l| self.items.get(l.ref_)).map(|it| it.native).unwrap_or(1.0);
+        self.p.out_pct / 100.0 * nat
+    }
+
+    /// Size (w, h) in px the saved panorama will have, from the last preview's area.
+    fn out_size(&self) -> Option<(usize, usize)> {
+        let p = self.pano.as_ref()?;
+        let s = self.out_scale();
+        let (w, h) = (p.img.w as f64 / p.scale, p.img.h as f64 / p.scale);
+        Some((((w * s).round() as usize).max(1), ((h * s).round() as usize).max(1)))
+    }
+
     fn save_full(&mut self, out: String) {
         let Some((f, c, g, vis, lens)) = self.geometry() else { return };
         let p = self.p.clone();
         let o: Vec<Vec<Pt>> = vis.iter().map(|&i| outline(&g[i], self.items[i].img.h, self.items[i].img.w, p.proj, f, c, lens, 24)).collect();
         let box_ = self.crop.unwrap_or_else(|| bounds(&o));
-        let (w, h) = (box_.1 - box_.0 + 1.0, box_.3 - box_.2 + 1.0);
-        if w.max(h) > 40_000.0 {
-            self.status = format!("The panorama would be {w}×{h} px; check the pairs or use another projection.");
+        let scale = self.out_scale();
+        let (w, h) = (((box_.1 - box_.0 + 1.0) * scale).round().max(1.0), ((box_.3 - box_.2 + 1.0) * scale).round().max(1.0));
+        if w.max(h) > 60_000.0 {
+            self.status = format!("The panorama would be {w}×{h} px; lower the output size, check the pairs or use another projection.");
             return;
         }
-        let (imgs, _, sizes, gains, gv) = self.compose_inputs(&vis, &g, 1.0);
-        let imgs: Vec<Arc<Img>> = imgs.iter().zip(&vis).map(|(_, &i)| self.items[i].img.clone()).collect();
+        let (mut imgs, mut scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
+        // Above the loaded resolution, read RAWs loaded at half size again at full size.
+        let reread: Vec<(usize, String)> = vis.iter().enumerate().filter(|(_, &i)| self.items[i].native > 1.0 && scale > 1.0).map(|(k, &i)| (k, self.items[i].path.clone())).collect();
+        if let Err(e) = crate::sys::check_writable(&out) {
+            self.status = e;
+            return;
+        }
+        // Enough memory and disk space? Running out would make the whole system stop responding.
+        let dir = std::path::Path::new(&out).parent().filter(|d| !d.as_os_str().is_empty()).map(|d| d.to_path_buf()).unwrap_or_else(|| ".".into());
+        let nd = self.save_needs(box_, &io::ext_of(&out));
+        if let Err(e) = nd.check(&dir, true) {
+            self.status = e;
+            return;
+        }
+        let opt = LoadOptions { decoder: p.decoder, half: false, ..Default::default() };
         let cropped = self.crop.is_some();
-        self.spawn("Rendering full-resolution panorama…", move |_| {
+        self.spawn("Rendering the panorama…", move |tx| {
+            let nre = reread.len();
+            for (n, (k, path)) in reread.iter().enumerate() {
+                let _ = tx.send(Msg::Status(format!("Reading {}/{nre} at full size: {}", n + 1, basename(path))));
+                if let Ok(full) = io::load_any(path, &opt) {
+                    let (h0, w0) = sizes[*k];
+                    let (rx, ry) = (full.w as f64 / w0 as f64, full.h as f64 / h0 as f64);
+                    // Only if it is the same picture, just larger (same orientation and aspect).
+                    if rx > 1.0 && (rx - ry).abs() < 0.02 * rx {
+                        imgs[*k] = Arc::new(full);
+                        scales[*k] = rx;
+                    }
+                }
+            }
+            let _ = tx.send(Msg::Status(format!("Rendering the panorama ({w}×{h} px)…")));
             let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-            let cp = ComposeParams { scale: 1.0, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12 };
-            let (img, _) = compose(&refs, &gv, box_, &cp, &gains, &vec![1.0; refs.len()], &sizes, false);
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12 };
+            let (img, _) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, false);
+            let (w, h) = (img.w, img.h);
             let astro = io::is_astro(&out);
             io::save_panorama(&out, &if astro { img } else { look(&img, 1.0, &p) })?;
             Ok(Msg::Done(format!("Saved {out} ({w}×{h} px, {} images{}{}).", refs.len(), if cropped { ", cropped" } else { "" }, if astro { ", linear 32-bit" } else if p.stretched() { ", stretched as shown" } else { "" })))
@@ -1130,7 +1262,17 @@ impl StitchTab {
                 Msg::Loaded(items, failed) => {
                     self.busy = false;
                     let items: Vec<Item> = items.into_iter().flatten().collect();
-                    let failed: Vec<String> = failed.into_iter().filter(|f| !f.is_empty()).collect();
+                    let (lowmem, failed): (Vec<String>, Vec<String>) = failed.into_iter().filter(|f| !f.is_empty()).partition(|f| f.starts_with(LOWMEM));
+                    let lowmem_note = if lowmem.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "\nMemory is almost full: {} image(s) were not loaded ({}). {}Close other programs, or stitch fewer images at a time.",
+                            lowmem.len(),
+                            lowmem.iter().map(|f| f.trim_start_matches(LOWMEM)).collect::<Vec<_>>().join(", "),
+                            if self.p.half { "" } else { "Switch on RAW at half size (a quarter of the memory) and add them again. " }
+                        )
+                    };
                     let astro = items.iter().any(|it| io::is_astro(&it.path));
                     let n = items.len();
                     let n0 = self.items.len();
@@ -1149,7 +1291,7 @@ impl StitchTab {
                         (self.p.black, self.p.mid, self.p.white) = (b, m, w);
                         note = " Auto stretch applied for viewing (FITS / XISF data is linear).".into();
                     }
-                    self.status = format!("Loaded {n} image(s). Next: Run all steps (or detect, match, preview).{note}{}", if failed.is_empty() { String::new() } else { format!("\nSkipped {}:\n{}", failed.len(), failed.join("\n")) });
+                    self.status = format!("Loaded {n} image(s). Next: Run all steps (or detect, match, preview).{note}{}{lowmem_note}", if failed.is_empty() { String::new() } else { format!("\nSkipped {}:\n{}", failed.len(), failed.join("\n")) });
                 }
                 Msg::Detected(feats, key) => {
                     self.busy = false;
@@ -1258,10 +1400,10 @@ impl StitchTab {
         self.poll(ctx);
         self.check_undo();
         let mut redo_preview = false;
-        egui::Panel::left("stitch_left").exact_size(390.0).show(ui, |ui| {
+        egui::Panel::left("stitch_left").default_size(400.0).size_range(380.0..=700.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("sl").show(ui, |ui| self.left_panel(ui));
         });
-        egui::Panel::right("stitch_right").exact_size(330.0).show(ui, |ui| {
+        egui::Panel::right("stitch_right").default_size(350.0).size_range(320.0..=600.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("sr").show(ui, |ui| redo_preview = self.right_panel(ui));
         });
         egui::CentralPanel::default().show(ui, |ui| self.center(ui, ctx));
@@ -1271,23 +1413,16 @@ impl StitchTab {
     }
 
     fn left_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("⇪ Open project…").clicked() && self.dialog.is_none() {
-                self.dialog = Some((dialogs::pick_open("Open project", "PanoStitch projects", PROJECT_EXT), "openproj"));
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("⇪ Open project…").on_hover_text("Ctrl+O").clicked() {
+                self.ask_open_project();
             }
-            if ui.button("⬇ Save project…").clicked() && self.dialog.is_none() {
-                if self.items.is_empty() {
-                    self.status = "Nothing to save yet.".into();
-                } else {
-                    let default = self.project.clone().unwrap_or_else(|| {
-                        std::path::Path::new(&self.items[0].path).parent().unwrap_or(std::path::Path::new(".")).join(format!("project{PROJECT_EXT}")).to_string_lossy().to_string()
-                    });
-                    self.dialog = Some((dialogs::pick_save("Save project", &default), "saveproj"));
-                }
+            if ui.button("⬇ Save project…").on_hover_text("Ctrl+S saves to the open project at once").clicked() {
+                self.ask_save_project(false);
             }
         });
         ui.heading("Images");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Add…").clicked() && self.dialog.is_none() {
                 self.dialog = Some((dialogs::pick_images(), "add"));
             }
@@ -1305,7 +1440,7 @@ impl StitchTab {
                 self.move_selected(1);
             }
         });
-        let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text("…or type a file/folder path + Enter").desired_width(370.0));
+        let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text("…or type a file/folder path + Enter").desired_width(ui.available_width().min(420.0)));
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.pathbox.trim().is_empty() {
             let t = self.pathbox.trim().to_string();
             self.pathbox.clear();
@@ -1405,7 +1540,7 @@ impl StitchTab {
         });
         ui.separator();
         if self.simple {
-            if ui.add(egui::Button::new(egui::RichText::new("▶ Run all steps").strong())).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new("▶ Run all steps").strong())).on_hover_text("Ctrl+Enter").clicked() {
                 self.match_pairs(None, true);
             }
             return;
@@ -1417,11 +1552,11 @@ impl StitchTab {
             slider(ui, "Corner threshold", &mut self.p.thr, 0.0..=0.02, 0.0001);
             slider(ui, "Denoise (σ px)", &mut self.p.denoise, 0.0..=4.0, 0.05);
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Detect features").clicked() {
                 self.detect_only();
             }
-            if ui.add(egui::Button::new(egui::RichText::new("▶ Run all steps").strong())).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new("▶ Run all steps").strong())).on_hover_text("Ctrl+Enter").clicked() {
                 self.match_pairs(None, true);
             }
         });
@@ -1447,7 +1582,7 @@ impl StitchTab {
             }
             ui.end_row();
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Match").clicked() {
                 self.match_pairs(None, false);
             }
@@ -1470,7 +1605,7 @@ impl StitchTab {
                 }
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Pair");
             let label = |q: &PairRes| format!("{}–{}  {}", q.i + 1, q.j + 1, if q.ok { format!("{} inl", q.inl.len()) } else { "rejected".into() });
             let cur = self.pairs.get(self.pairsel).filter(|q| q.listed).map(label).unwrap_or_else(|| "(none)".into());
@@ -1501,9 +1636,9 @@ impl StitchTab {
                 redo = true;
             }
             redo |= slider(ui, "Focal (× auto)", &mut self.p.focal, 0.3..=3.0, 0.005);
-            redo |= slider(ui, "Yaw (°)", &mut self.p.yaw, -180.0..=180.0, 0.1);
-            redo |= slider(ui, "Pitch (°)", &mut self.p.pitch, -90.0..=90.0, 0.1);
-            redo |= slider(ui, "Roll (°)", &mut self.p.roll, -45.0..=45.0, 0.05);
+            redo |= angle(ui, "Yaw (°)", &mut self.p.yaw, 180.0, false);
+            redo |= angle(ui, "Pitch (°)", &mut self.p.pitch, 90.0, true);
+            redo |= angle(ui, "Roll (°)", &mut self.p.roll, 45.0, true);
         });
         if ui.button("Reset focal / yaw / pitch / roll").clicked() {
             (self.p.focal, self.p.yaw, self.p.pitch, self.p.roll) = (1.0, 0.0, 0.0, 0.0);
@@ -1536,7 +1671,7 @@ impl StitchTab {
             self.crop = None;
             redo = true;
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Auto exposure").clicked() {
                 // Middle grey for the typical brightness, without clipping more than the brightest 0.5 %.
                 match &self.pano {
@@ -1580,7 +1715,7 @@ impl StitchTab {
                 redo = true;
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Auto crop").clicked() {
                 self.auto_crop();
             }
@@ -1591,7 +1726,7 @@ impl StitchTab {
             }
         });
         if !simple {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Nudge selected:");
             for (l, d) in [("←", (-1.0, 0.0)), ("↑", (0.0, -1.0)), ("↓", (0.0, 1.0)), ("→", (1.0, 0.0))] {
                 if ui.button(l).clicked() {
@@ -1609,7 +1744,7 @@ impl StitchTab {
             slider(ui, "Midtones", &mut self.p.mid, 0.0005..=0.9995, 0.0005);
             slider(ui, "White point", &mut self.p.white, 0.5..=1.0, 0.0005);
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Auto stretch").clicked() {
                 if let Some(src) = self.hist_source() {
                     (self.p.black, self.p.mid, self.p.white) = auto_stretch(&src, 0.25, 2.8);
@@ -1621,11 +1756,12 @@ impl StitchTab {
         });
         }
         ui.separator();
-        let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(15.0)).min_size(egui::vec2(310.0, 36.0));
-        if ui.add(big("◐ Preview panorama")).clicked() {
+        let bw = ui.available_width().min(310.0);
+        let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(15.0)).min_size(egui::vec2(bw, 36.0));
+        if ui.add(big("◐ Preview panorama")).on_hover_text("P").clicked() {
             self.request_preview();
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Format");
             let cur = self.save_format.and_then(|e| io::OUTPUT_FORMATS.iter().find(|f| f.0 == e)).map(|f| f.1).unwrap_or("automatic");
             egui::ComboBox::from_id_salt("savefmt").selected_text(cur).width(240.0).show_ui(ui, |ui| {
@@ -1635,14 +1771,97 @@ impl StitchTab {
                 }
             });
         });
-        if ui.add(big("⬇ Save full resolution…")).clicked() && self.layout.is_some() && self.dialog.is_none() {
+        egui::Grid::new("outsize").num_columns(2).show(ui, |ui| {
+            ui.label("Output size");
+            ui.add(egui::Slider::new(&mut self.p.out_pct, 10.0..=200.0).step_by(5.0).suffix(" %"))
+                .on_hover_text("Size of the saved panorama: 100 % keeps the photos' full camera resolution (RAWs loaded at half size are read again at full size when saving), 50 % halves width and height, above 100 % enlarges.");
+            ui.end_row();
+            ui.label("");
+            match self.out_size() {
+                Some((w, h)) => ui.weak(format!("→ {w} × {h} px ({:.1} MP)", (w * h) as f64 / 1e6)),
+                None => ui.weak("(preview to see the size in pixels)"),
+            };
+            ui.end_row();
+            // Live estimate of what saving needs, against what is free.
+            if let (Some(pv), Some(first)) = (&self.pano, self.items.first()) {
+                let auto = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
+                let nd = self.save_needs(pv.box_, self.save_format.unwrap_or(auto));
+                let dir = std::path::Path::new(&first.path).parent().filter(|d| !d.as_os_str().is_empty()).map(|d| d.to_path_buf()).unwrap_or_else(|| ".".into());
+                let (mem, disk) = crate::sys::free_cached(&dir);
+                let text = format!(
+                    "needs ≈ {} memory ({} free), file ≤ {}{}",
+                    gb(nd.mem),
+                    gb((mem - memory_reserve()).max(0.0)),
+                    gb(nd.file),
+                    disk.map(|d| format!(" ({} free here)", gb(d as f64))).unwrap_or_default()
+                );
+                ui.label("");
+                match nd.check(&dir, false) {
+                    Ok(()) => ui.weak(text),
+                    Err(e) => ui.colored_label(Color32::from_rgb(220, 120, 0), format!("⚠ {text}")).on_hover_text(e),
+                };
+                ui.end_row();
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (t, pct) in [("¼", 25.0), ("½", 50.0), ("full", 100.0), ("2×", 200.0)] {
+                if ui.selectable_label(self.p.out_pct == pct, t).clicked() {
+                    self.p.out_pct = pct;
+                }
+            }
+        });
+        if ui.add(big("⬇ Save panorama…")).on_hover_text("Ctrl+Shift+S").clicked() {
+            self.ask_save_pano();
+        }
+        redo
+    }
+
+    fn ask_open_project(&mut self) {
+        if self.dialog.is_none() {
+            self.dialog = Some((dialogs::pick_open("Open project", "PanoStitch projects", PROJECT_EXT), "openproj"));
+        }
+    }
+
+    /// Save the project: `quick` saves straight to the open project file, if there is one.
+    pub fn ask_save_project(&mut self, quick: bool) {
+        if self.items.is_empty() {
+            self.status = "Nothing to save yet.".into();
+            return;
+        }
+        if quick {
+            if let Some(p) = self.project.clone() {
+                self.status = match self.save_project(&p) {
+                    Ok(p) => format!("Saved project {p}."),
+                    Err(e) => format!("Error: {e}"),
+                };
+                return;
+            }
+        }
+        if self.dialog.is_none() {
+            let default = self.project.clone().unwrap_or_else(|| {
+                std::path::Path::new(&self.items[0].path).parent().unwrap_or(std::path::Path::new(".")).join(format!("project{PROJECT_EXT}")).to_string_lossy().to_string()
+            });
+            self.dialog = Some((dialogs::pick_save("Save project", &default), "saveproj"));
+        }
+    }
+
+    /// Whether there are images whose state is not saved in a project file.
+    pub fn unsaved(&self) -> bool {
+        !self.items.is_empty() && self.saved_fp != Some(self.fingerprint())
+    }
+
+    fn ask_save_pano(&mut self) {
+        if self.layout.is_none() {
+            self.status = "Match the images first (Run all steps).".into();
+            return;
+        }
+        if self.dialog.is_none() {
             let auto = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
             let ext = self.save_format.unwrap_or(auto);
             let dir = std::path::Path::new(&self.items[0].path).parent().map(|d| d.to_path_buf()).unwrap_or_default();
             let default = dir.join(format!("panorama.{ext}")).to_string_lossy().to_string();
             self.dialog = Some((dialogs::pick_save("Save panorama", &default), "save"));
         }
-        redo
     }
 
     fn hist_source(&self) -> Option<Img> {
@@ -1686,7 +1905,7 @@ impl StitchTab {
     }
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (k, l) in [(ViewKind::Image, "Image + keypoints"), (ViewKind::Pair, "Pair matches"), (ViewKind::Pano, "Panorama")] {
                 if self.simple && k == ViewKind::Pair {
                     continue;
@@ -1702,14 +1921,14 @@ impl StitchTab {
             if ui.button("Zoom -").clicked() {
                 super::zoom_by(&mut self.vstate, 1.0 / 1.5);
             }
-            if ui.button("Fit").clicked() {
+            if ui.button("Fit").on_hover_text("F (or 0, Home); + / − zoom").clicked() {
                 self.vstate.fit = true;
             }
             ui.checkbox(&mut self.overlays, "overlays");
-            if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("↶ Undo")).on_hover_text(self.undo.last().map(|u| u.1.clone()).unwrap_or_default()).clicked() {
+            if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("↶ Undo")).on_hover_text(format!("{} (Ctrl+Z)", self.undo.last().map(|u| u.1.clone()).unwrap_or_default())).clicked() {
                 self.step(false);
             }
-            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("↷ Redo")).on_hover_text(self.redo.last().map(|u| u.1.clone()).unwrap_or_default()).clicked() {
+            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("↷ Redo")).on_hover_text(format!("{} (Ctrl+Y or Ctrl+Shift+Z)", self.redo.last().map(|u| u.1.clone()).unwrap_or_default())).clicked() {
                 self.step(true);
             }
         });
@@ -1722,8 +1941,31 @@ impl StitchTab {
         });
         let col = if ui.visuals().dark_mode { Color32::from_rgb(255, 160, 128) } else { Color32::from_rgb(140, 0, 0) };
         egui::ScrollArea::vertical().id_salt("status").show(ui, |ui| ui.colored_label(col, &self.status));
-        // Keys: arrows nudge in the panorama view, +/-/0 zoom.
+        // Shortcuts that work even while typing in a field.
+        use egui::{Key, KeyboardShortcut as Ks, Modifiers as Mo};
+        let (save_pano, save_proj, open, run) = ctx.input_mut(|i| {
+            (i.consume_shortcut(&Ks::new(Mo::COMMAND | Mo::SHIFT, Key::S)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::S)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::O)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::Enter)))
+        });
+        if save_pano {
+            self.ask_save_pano();
+        } else if save_proj {
+            self.ask_save_project(true);
+        }
+        if open {
+            self.ask_open_project();
+        }
+        if run && !self.items.is_empty() {
+            self.match_pairs(None, true);
+        }
+        // Keys: arrows nudge in the panorama view, +/-/0 zoom, F fits, P previews.
         if !ctx.egui_wants_keyboard_input() {
+            let (fit, prev) = ui.input(|i| (i.key_pressed(Key::F) && i.modifiers.is_none(), i.key_pressed(Key::P) && i.modifiers.is_none()));
+            if fit {
+                self.vstate.fit = true;
+            }
+            if prev && self.layout.is_some() {
+                self.request_preview();
+            }
             let (z, y, sh) = ui.input(|i| (i.modifiers.command && i.key_pressed(egui::Key::Z), i.modifiers.command && i.key_pressed(egui::Key::Y), i.modifiers.shift));
             if z {
                 self.step(sh);
@@ -1961,6 +2203,36 @@ impl StitchTab {
             }
         }
     }
+}
+
+/// An angle (row of a grid): a slider, a box to drag finely (0.02° per pixel)
+/// or type into, and ◀ ▶ steps of 0.1° (Shift: 1°). `fine_centre`: the slider
+/// is logarithmic, so small corrections near 0° (the usual case for pitch and
+/// roll) take most of its length instead of a few pixels.
+fn angle(ui: &mut egui::Ui, label: &str, v: &mut f64, max: f64, fine_centre: bool) -> bool {
+    ui.label(label);
+    let mut ch = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().slider_width = 130.0;
+        let mut s = egui::Slider::new(v, -max..=max).show_value(false);
+        if fine_centre {
+            s = s.logarithmic(true).smallest_positive(0.05);
+        }
+        ch |= ui.add(s).on_hover_text("Drag for big changes; fine near 0°").changed();
+        ch |= ui.add(egui::DragValue::new(v).speed(0.02).range(-max..=max).max_decimals(2).suffix("°")).on_hover_text("Drag slowly for fine changes, or double-click and type").changed();
+        let step = if ui.input(|i| i.modifiers.shift) { 1.0 } else { 0.1 };
+        if ui.small_button("◀").on_hover_text("−0.1° (Shift: −1°)").clicked() {
+            *v = ((*v - step) * 100.0).round() / 100.0;
+            ch = true;
+        }
+        if ui.small_button("▶").on_hover_text("+0.1° (Shift: +1°)").clicked() {
+            *v = ((*v + step) * 100.0).round() / 100.0;
+            ch = true;
+        }
+        *v = v.clamp(-max, max);
+    });
+    ui.end_row();
+    ch
 }
 
 /// Histogram (log scale) with black / white point markers and the transfer curve.

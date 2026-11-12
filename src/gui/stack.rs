@@ -14,6 +14,7 @@ use crate::image::{resize, Bits, Gray, Img};
 use crate::io::{self, basename};
 use crate::stacker::*;
 use crate::stitcher::Model;
+use crate::sys::gb;
 use egui::{Color32, Pos2, Stroke};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -47,7 +48,8 @@ struct Progress {
 }
 
 enum Msg {
-    Preview(String, Arc<Img>),
+    /// A file's preview, and its size (h, w) as loaded at half size.
+    Preview(String, Arc<Img>, (usize, usize)),
     Sky(Bits, String),
     Result(Box<StackResult>, Img, Gray, String),
     Post(u64, PostResult),
@@ -69,6 +71,8 @@ pub struct StackTab {
     cfg: StackConfig,
     shown: Option<String>,
     disp: Option<Arc<Img>>,
+    /// A light frame and its size (h, w) at half size, for the space estimate.
+    frame_dims: Option<(String, (usize, usize))>,
     disp_tex: Option<egui::TextureHandle>,
     overlay_tex: Option<(String, egui::TextureHandle)>,
     aux: bool,
@@ -89,6 +93,8 @@ pub struct StackTab {
     progress: Arc<Mutex<Progress>>,
     status: String,
     pathbox: String,
+    /// The output name while it is being typed (it may be empty meanwhile).
+    name_edit: Option<String>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     dialog: Option<(Receiver<Picked>, &'static str)>,
@@ -98,6 +104,8 @@ pub struct StackTab {
     /// The highlighted settings entry (None: the options of the highlighted file group).
     setting: Option<usize>,
     project: Option<String>,
+    /// Fingerprint of the setup last saved to (or opened from) a project file.
+    saved_fp: Option<u64>,
     post_note: &'static str,
 }
 
@@ -140,12 +148,12 @@ impl Default for StackTab {
         let mut cfg = StackConfig::default();
         cfg.sky.gradient = 0.1;
         Self {
-            to_stitcher: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, disp_tex: None, overlay_tex: None,
+            to_stitcher: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, frame_dims: None, disp_tex: None, overlay_tex: None,
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
             post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
-            status: "Add light frames to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), tx, rx, dialog: None,
-            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, post_note: super::notes::note("Tone"),
+            status: "Add light frames to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
+            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: super::notes::note("Tone"),
         }
     }
 }
@@ -233,13 +241,13 @@ impl StackTab {
         self.loading = true;
         let tx = self.tx.clone();
         self.status = format!("Loading preview of {}…", basename(&p));
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| {
                 let f = PREVIEW_MAX as f64 / a.w.max(a.h) as f64;
-                if f < 1.0 { resize(&a, f) } else { a }
+                ((a.h, a.w), if f < 1.0 { resize(&a, f) } else { a })
             });
             let _ = tx.send(match r {
-                Ok(img) => Msg::Preview(p, Arc::new(img)),
+                Ok((hw, img)) => Msg::Preview(p, Arc::new(img), hw),
                 Err(e) => Msg::Error(format!("Cannot preview {}: {e}", basename(&p))),
             });
         });
@@ -264,6 +272,12 @@ impl StackTab {
             self.status = "Set the output file first (Output).".into();
             return;
         }
+        if !preview {
+            if let Err(e) = crate::sys::check_writable(&self.cfg.output) {
+                self.status = e;
+                return;
+            }
+        }
         let cfg = self.settings();
         self.running = true;
         self.running_preview = preview;
@@ -277,14 +291,14 @@ impl StackTab {
         let ncal: usize = kinds.iter().map(|k| k.1).sum();
         let combine_units = 0.35 * lights as f64;
         let total = ncal as f64 + lights as f64 + combine_units;
-        *prog.lock().unwrap() = Progress { msg: "Starting…".into(), done: 0.0, total, start: Some(std::time::Instant::now()) };
-        std::thread::spawn(move || {
+        *prog.lock().unwrap_or_else(|e| e.into_inner()) = Progress { msg: "Starting…".into(), done: 0.0, total, start: Some(std::time::Instant::now()) };
+        crate::sys::background(move || {
             let t0 = std::time::Instant::now();
             let progress = |m: &str| -> Result<(), String> {
                 if cancel.load(Ordering::Relaxed) {
                     return Err("Cancelled.".into());
                 }
-                let mut p = prog.lock().unwrap();
+                let mut p = prog.lock().unwrap_or_else(|e| e.into_inner());
                 // Where in the run this message is.
                 let frac = |s: &str| -> Option<(f64, f64)> {
                     let t = s.split(':').nth(1)?.split_whitespace().next()?;
@@ -401,8 +415,9 @@ impl StackTab {
     fn poll(&mut self) {
         while let Ok(m) = self.rx.try_recv() {
             match m {
-                Msg::Preview(p, img) => {
+                Msg::Preview(p, img, hw) => {
                     self.loading = false;
+                    self.frame_dims = Some((p.clone(), hw));
                     self.shown = Some(p);
                     self.disp = Some(img);
                     self.disp_tex = None;
@@ -456,7 +471,7 @@ impl StackTab {
             }
         }
         if self.running {
-            self.status = self.progress.lock().unwrap().msg.clone();
+            self.status = self.progress.lock().unwrap_or_else(|e| e.into_inner()).msg.clone();
         }
         // Live post-processing of the screen-size stack.
         if let Some((raw, w, fw)) = &self.raw_small {
@@ -464,7 +479,7 @@ impl StackTab {
             if key != self.post_key && !self.post_busy {
                 self.post_busy = true;
                 let (raw, w, fw, cfg, tx) = (raw.clone(), w.clone(), *fw, self.cfg.clone(), self.tx.clone());
-                std::thread::spawn(move || {
+                crate::sys::background(move || {
                     let p = std::panic::catch_unwind(|| postprocess(&raw, &w, &cfg, fw, None));
                     let _ = tx.send(match p {
                         Ok(p) => Msg::Post(key, p),
@@ -625,6 +640,7 @@ impl StackTab {
         }
         std::fs::write(&path, toml::to_string(&d).map_err(|e| e.to_string())?).map_err(|e| format!("Cannot save {path}: {e}"))?;
         self.project = Some(path.clone());
+        self.saved_fp = Some(self.fingerprint());
         Ok(path)
     }
 
@@ -634,7 +650,10 @@ impl StackTab {
             return;
         }
         match self.read_project(path) {
-            Ok(s) => self.status = s,
+            Ok(s) => {
+                self.status = s;
+                self.saved_fp = Some(self.fingerprint());
+            }
             Err(e) => self.status = e,
         }
     }
@@ -737,7 +756,7 @@ impl StackTab {
         cfg.output = p.clone();
         let tx = self.tx.clone();
         self.status = format!("Saving {}…", basename(&p));
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let _ = tx.send(match save_result(&r, &cfg) {
                 Ok(_) => Msg::Status(format!("Saved {p}{}", if io::is_astro(&p) { " (linear 32-bit)." } else { "." })),
                 Err(e) => Msg::Error(e),
@@ -757,6 +776,89 @@ impl StackTab {
             self.cfg.excluded.push(path.to_string());
             self.status = format!("{} will be left out of the next run.", basename(path));
         }
+    }
+
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut as Ks, Modifiers as Mo};
+        let (save, open, start, prev) = ctx.input_mut(|i| {
+            (i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::S)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::O)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::Enter)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::P)))
+        });
+        if save {
+            self.ask_save_project(true);
+        }
+        if open {
+            self.ask_open_project();
+        }
+        // These start a run, never cancel one (Esc cancels).
+        if (start || prev) && !self.running {
+            self.run(prev && !start);
+        }
+        if !ctx.egui_wants_keyboard_input() {
+            let (fit, esc) = ctx.input(|i| (i.key_pressed(Key::F) && i.modifiers.is_none(), i.key_pressed(Key::Escape)));
+            if fit {
+                self.vstate.fit = true;
+            }
+            if esc && self.running {
+                self.run(false);
+            }
+        }
+    }
+
+    fn ask_open_project(&mut self) {
+        if self.dialog.is_none() {
+            self.dialog = Some((dialogs::pick_open("Open project", "Stacking projects", PROJECT_EXT), "openproj"));
+        }
+    }
+
+    /// Save the project: `quick` saves straight to the open project file, if there is one.
+    pub fn ask_save_project(&mut self, quick: bool) {
+        if quick {
+            if let Some(p) = self.project.clone() {
+                self.status = match self.save_project(&p) {
+                    Ok(p) => format!("Saved project {p}."),
+                    Err(e) => format!("Error: {e}"),
+                };
+                return;
+            }
+        }
+        if self.dialog.is_none() {
+            let default = self.project.clone().unwrap_or_else(|| match self.files[0].first() {
+                Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join(format!("stacking{PROJECT_EXT}")).to_string_lossy().to_string(),
+                None => format!("stacking{PROJECT_EXT}"),
+            });
+            self.dialog = Some((dialogs::pick_save("Save stacking project", &default), "saveproj"));
+        }
+    }
+
+    /// Everything a project file keeps, as one number.
+    fn fingerprint(&mut self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let menus = self.menus();
+        let (tg, sl) = self.named();
+        let t: Vec<(&str, bool)> = tg.iter().map(|(k, v)| (*k, **v)).collect();
+        let v: Vec<(&str, f64)> = sl.iter().map(|(k, v, _)| (*k, *v)).collect();
+        let text = format!("{:?}{:?}{t:?}{v:?}{:?}{:?}{:?}{:?}{}", self.files, self.cfg.excluded, menus, self.cfg.output, self.cfg.sky.line, runs(&self.cfg.sky.mask), self.brush);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut h);
+        h.finish()
+    }
+
+    /// Whether there are light frames whose setup is not saved in a project file.
+    pub fn unsaved(&mut self) -> bool {
+        let fp = self.fingerprint();
+        !self.files[0].is_empty() && self.saved_fp != Some(fp)
+    }
+
+    /// Stop a running stack (when the window closes).
+    pub fn cancel_run(&mut self) {
+        if self.running {
+            self.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether a stacking run is going.
+    pub fn running(&self) -> bool {
+        self.running
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -779,13 +881,180 @@ impl StackTab {
                 _ => {}
             }
         }
-        egui::Panel::left("stack_left").exact_size(390.0).show(ui, |ui| {
+        self.shortcuts(ctx);
+        egui::Panel::left("stack_left").default_size(470.0).size_range(400.0..=750.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("kl").show(ui, |ui| self.left(ui));
         });
-        egui::Panel::right("stack_right").exact_size(330.0).show(ui, |ui| {
+        egui::Panel::right("stack_right").default_size(340.0).size_range(300.0..=600.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("kr").show(ui, |ui| self.right(ui));
         });
         egui::CentralPanel::default().show(ui, |ui| self.center(ui, ctx));
+    }
+
+    /// The output path split into folder, name (without extension) and extension, with defaults.
+    fn out_parts(&self) -> (String, String, String) {
+        let def_dir = || self.files[0].first().and_then(|f| std::path::Path::new(f).parent()).map(|d| d.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
+        if self.cfg.output.is_empty() {
+            return (def_dir(), "stacked".into(), "tif".into());
+        }
+        let p = std::path::Path::new(&self.cfg.output);
+        let dir = p.parent().map(|d| d.to_string_lossy().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(def_dir);
+        let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "stacked".into());
+        let ext = match io::ext_of(&self.cfg.output).as_str() {
+            "" => "tif".to_string(),
+            "tiff" => "tif".to_string(),
+            "jpeg" => "jpg".to_string(),
+            e => e.to_string(),
+        };
+        (dir, stem, ext)
+    }
+
+    fn set_out(&mut self, dir: &str, stem: &str, ext: &str) {
+        let clean: String = stem.trim().chars().map(|c| if "/\\:*?\"<>|".contains(c) { '_' } else { c }).collect();
+        let stem = if clean.is_empty() { "stacked" } else { clean.as_str() };
+        self.cfg.output = std::path::Path::new(dir).join(format!("{stem}.{ext}")).to_string_lossy().to_string();
+    }
+
+    /// Names to offer for the output file.
+    fn name_suggestions(&self) -> Vec<String> {
+        let stem = |f: &String| std::path::Path::new(f).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let kind = match self.cfg.composition {
+            Composition::StarTrails => "star_trails",
+            _ if self.cfg.sky.mode == SkyMode::None => "deep_sky",
+            _ => "milky_way",
+        };
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut v = vec!["stacked".to_string(), kind.to_string(), format!("{kind}_{date}")];
+        if let (Some(a), Some(b)) = (self.files[0].first(), self.files[0].last()) {
+            v.push(format!("{}_stacked", stem(a)));
+            if a != b {
+                v.push(format!("{}-{}", stem(a), stem(b)));
+            }
+            if let Some(d) = std::path::Path::new(a).parent().and_then(|d| d.file_name()) {
+                v.push(format!("{}_stacked", d.to_string_lossy()));
+            }
+        }
+        v.push(format!("{kind}_{}lights", self.files[0].len()));
+        let mut seen = std::collections::HashSet::new();
+        v.retain(|n| seen.insert(n.clone()));
+        v
+    }
+
+    /// Estimated working space for the frames of a full run (bytes), and the
+    /// space the aligned frames take on disk (Align only), from the frame size
+    /// (or, before a preview, the average file size) and the number of frames.
+    fn work_needs(&self) -> Option<(f64, f64)> {
+        let k = self.files[0].iter().filter(|p| !self.cfg.excluded.contains(p)).count();
+        if k == 0 {
+            return None;
+        }
+        let half_px = match &self.frame_dims {
+            Some((p, (h, w))) if self.files[0].contains(p) => {
+                // Previews are loaded at half size; RAWs are stacked at full size unless Half size is on.
+                let px = (h * w) as f64;
+                if io::is_raw(p) { px * 4.0 } else { px }
+            }
+            _ => {
+                // No preview yet: guess the pixels from the average file size.
+                let sizes: Vec<f64> = self.files[0].iter().take(20).filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len() as f64).collect();
+                if sizes.is_empty() {
+                    return None;
+                }
+                let avg = sizes.iter().sum::<f64>() / sizes.len() as f64;
+                let p = &self.files[0][0];
+                avg / if io::is_raw(p) { 1.3 } else if io::is_astro(p) { 2.0 } else { 6.0 }
+            }
+        };
+        let raw = io::is_raw(&self.files[0][0]);
+        let mut px = half_px;
+        if raw && self.cfg.raw.half {
+            px /= 4.0;
+        }
+        if self.cfg.merge4 {
+            px /= 4.0;
+        }
+        let store = 6.0 * px * k as f64;
+        let aligned = if self.cfg.align_mode == AlignMode::AlignOnly { px * k as f64 * if io::is_astro(&self.cfg.output) { 12.0 } else { 6.0 } } else { 0.0 };
+        Some((store, aligned))
+    }
+
+    /// Always-visible output choice: folder, file name (with suggestions) and file type.
+    fn output_row(&mut self, ui: &mut egui::Ui) {
+        let (dir, stem0, ext) = self.out_parts();
+        let mut stem = self.name_edit.clone().unwrap_or(stem0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Save as").strong());
+            let r = ui.add(egui::TextEdit::singleline(&mut stem).desired_width(150.0).hint_text("file name"));
+            if r.has_focus() {
+                self.name_edit = Some(stem.clone());
+                if !stem.trim().is_empty() {
+                    self.set_out(&dir, &stem, &ext);
+                }
+            } else if self.name_edit.take().is_some() || r.lost_focus() {
+                self.set_out(&dir, &stem, &ext);
+            }
+            let mut pick: Option<String> = None;
+            egui::ComboBox::from_id_salt("outname").selected_text("").width(18.0).height(400.0).show_ui(ui, |ui| {
+                ui.weak("Suggested names");
+                for n in self.name_suggestions() {
+                    if ui.selectable_label(n == stem, &n).clicked() {
+                        pick = Some(n);
+                    }
+                }
+            }).response.on_hover_text("Suggested file names");
+            if let Some(n) = pick {
+                self.set_out(&dir, &n, &ext);
+            }
+            ui.label(".");
+            let mut new_ext: Option<&str> = None;
+            egui::ComboBox::from_id_salt("outext").selected_text(ext.as_str()).width(55.0).show_ui(ui, |ui| {
+                for (e, d) in io::OUTPUT_FORMATS {
+                    if ui.selectable_label(ext == e, format!("{e}   {d}")).clicked() {
+                        new_ext = Some(e);
+                    }
+                }
+            }).response.on_hover_text(io::OUTPUT_FORMATS.iter().find(|f| f.0 == ext).map(|f| f.1).unwrap_or("file type"));
+            if let Some(e) = new_ext {
+                self.set_out(&dir, &stem, e);
+            }
+            if ui.button("Folder…").on_hover_text(format!("Saved in {dir}")).clicked() && self.dialog.is_none() {
+                let d = if self.cfg.output.is_empty() { std::path::Path::new(&dir).join(format!("{stem}.{ext}")).to_string_lossy().to_string() } else { self.cfg.output.clone() };
+                self.dialog = Some((dialogs::pick_save("Output", &d), "output"));
+            }
+        });
+        if let Some((store, aligned)) = self.work_needs() {
+            let (mem, disk) = crate::sys::free_cached(std::path::Path::new(&dir));
+            let in_ram = store < 0.5 * mem;
+            let disk_need = aligned + if in_ram { 0.0 } else { store + 2e9_f64.max(0.02 * store) };
+            let disk_ok = disk.is_none_or(|d| disk_need <= d as f64);
+            let disk_free = disk.map(|d| format!("{} free here", gb(d as f64))).unwrap_or_else(|| "free space unknown".into());
+            let mut text = format!(
+                "Frames need ≈ {}: {}",
+                gb(store),
+                if in_ram { format!("kept in memory ({} free)", gb(mem)) } else { format!("too big for memory ({} free), kept on disk here ({disk_free})", gb(mem)) }
+            );
+            if aligned > 0.0 {
+                text += &format!("; aligned frames ≈ {} on disk ({disk_free})", gb(aligned));
+            }
+            if disk_ok {
+                ui.weak(text);
+            } else {
+                ui.colored_label(Color32::from_rgb(220, 120, 0), format!("⚠ {text}. Not enough space: switch on Half size (RAW conversion) or Merge 4 pixels, use fewer frames, or choose a folder on a bigger disk."));
+            }
+        }
+        let exists = !self.cfg.output.is_empty() && std::path::Path::new(&self.cfg.output).exists();
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(format!("in {dir}"));
+            if exists {
+                ui.colored_label(Color32::from_rgb(200, 120, 0), "– exists, will be replaced");
+                if ui.small_button("next free name").clicked() {
+                    let base = stem.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end_matches('_').to_string();
+                    if let Some(n) = (2..10_000).map(|k| format!("{base}_{k}")).find(|n| !std::path::Path::new(&dir).join(format!("{n}.{ext}")).exists()) {
+                        self.set_out(&dir, &n, &ext);
+                    }
+                }
+            }
+        });
     }
 
     fn left(&mut self, ui: &mut egui::Ui) {
@@ -854,6 +1123,7 @@ impl StackTab {
                 ui.end_row();
             }
         });
+        self.output_row(ui);
         if let Some(b) = new_base {
             self.files[1] = b.iter().cloned().collect();
             if let Some(b) = &b {
@@ -870,7 +1140,7 @@ impl StackTab {
             self.view = ViewKind::Base;
             self.show_preview(Some(f));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Add…").clicked() && self.dialog.is_none() {
                 if self.group == 7 {
                     let d = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
@@ -916,7 +1186,7 @@ impl StackTab {
                 }
             }
         });
-        let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text("…or type a file/folder path + Enter").desired_width(370.0));
+        let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text("…or type a file/folder path + Enter").desired_width(ui.available_width().min(420.0)));
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.pathbox.trim().is_empty() {
             let t = self.pathbox.trim().to_string();
             self.pathbox.clear();
@@ -929,7 +1199,7 @@ impl StackTab {
         }
         // The settings list: click an entry to see its options below.
         ui.separator();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Preset").strong());
             egui::ComboBox::from_id_salt("stackpreset").selected_text("choose…").width(220.0).show_ui(ui, |ui| {
                 for name in STACK_PRESETS {
@@ -979,7 +1249,7 @@ impl StackTab {
         }
         let mut first = 0;
         for (k, text, active) in &rows {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let dot = if *k != first {
                     if *active { Color32::from_rgb(65, 105, 225) } else { Color32::GRAY }
                 } else {
@@ -1017,34 +1287,11 @@ impl StackTab {
                         ui.add(egui::Slider::new(&mut self.cfg.foreground.ev, -3.0..=3.0).step_by(0.1).text("Exposure (EV)"));
                     }
                     7 => {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text("output file (.tif / .jpg / .fits / .xisf)").desired_width(290.0));
-                            if ui.button("Browse…").clicked() && self.dialog.is_none() {
-                                let d = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
-                                self.dialog = Some((dialogs::pick_save("Output", &d), "output"));
-                            }
-                        });
-                        // The format follows the file's extension; choosing one changes it.
-                        let ext = io::ext_of(&self.cfg.output);
-                        let cur = io::OUTPUT_FORMATS.iter().find(|f| f.0 == ext || (f.0 == "tif" && ext == "tiff") || (f.0 == "jpg" && ext == "jpeg")).map(|f| f.1).unwrap_or("choose…");
-                        ui.horizontal(|ui| {
-                            ui.label("Format");
-                            egui::ComboBox::from_id_salt("outfmt").selected_text(cur).width(230.0).show_ui(ui, |ui| {
-                                for (e, d) in io::OUTPUT_FORMATS {
-                                    if ui.selectable_label(cur == d, d).clicked() {
-                                        let base = if self.cfg.output.is_empty() {
-                                            match self.files[0].first() {
-                                                Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join("stacked").to_string_lossy().to_string(),
-                                                None => "stacked".to_string(),
-                                            }
-                                        } else {
-                                            self.cfg.output.clone()
-                                        };
-                                        self.cfg.output = io::with_ext(&base, e);
-                                    }
-                                }
-                            });
-                        });
+                        ui.label("Saved as (edit the full path here, or use the Save as row on the left):");
+                        ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text("output file (.tif / .png / .jpg / .fits / .xisf)").desired_width(ui.available_width().min(420.0)));
+                        if !self.cfg.output.is_empty() && std::path::Path::new(&self.cfg.output).exists() {
+                            ui.colored_label(Color32::from_rgb(200, 120, 0), "This file exists and will be replaced.");
+                        }
                     }
                     _ => {}
                 }
@@ -1088,13 +1335,13 @@ impl StackTab {
                 if ui.checkbox(&mut self.show_stars, "Show detected stars").changed() && self.show_stars && self.result.is_none() {
                     self.status = "Stars are shown after a run (Quick preview or Start).".into();
                 }
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("◎ Detect sky").clicked() {
                         match (&self.disp, &self.shown) {
                             (Some(img), Some(sh)) if !self.loading => {
                                 self.loading = true;
                                 let (img, sh, rows, tx) = (img.clone(), sh.clone(), self.mask_size().0, self.tx.clone());
-                                std::thread::spawn(move || {
+                                crate::sys::background(move || {
                                     let (mask, _) = detect_sky(&img, MASK_COLS, Some(rows), 0.01);
                                     let pct = 100 * mask.count() / mask.len().max(1);
                                     let _ = tx.send(Msg::Sky(mask, format!("Sky detected in {}: {pct} % of the frame (hatched = foreground). Approximate: correct it with the brush – left button paints sky, right erases, wheel = brush size.", basename(&sh))));
@@ -1172,14 +1419,14 @@ impl StackTab {
             }
         }
         ui.separator();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(15.0)).min_size(egui::vec2(180.0, 36.0));
             // While a run is going, its own button cancels it; the other one waits.
             let (rp, rs) = (self.running && self.running_preview, self.running && !self.running_preview);
-            if ui.add_enabled(!rs, big(if rp { "Cancel" } else { "◐ Quick preview" })).clicked() {
+            if ui.add_enabled(!rs, big(if rp { "Cancel" } else { "◐ Quick preview" })).on_hover_text(if rp { "Esc" } else { "Ctrl+P" }).clicked() {
                 self.run(true);
             }
-            if ui.add_enabled(!rp, big(if rs { "Cancel" } else { "▶ Start" })).clicked() {
+            if ui.add_enabled(!rp, big(if rs { "Cancel" } else { "▶ Start" })).on_hover_text(if rs { "Esc" } else { "Ctrl+Enter" }).clicked() {
                 self.run(false);
             }
         });
@@ -1269,7 +1516,7 @@ impl StackTab {
         if let Some(n) = changed {
             self.post_note = super::notes::note(n);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Linear (for processing)").clicked() {
                 (self.cfg.bg_extraction.0, self.cfg.color_calibration, self.cfg.color_noise.0, self.cfg.enhance_stars.0, self.cfg.auto_brightness, self.cfg.hdr) = (false, false, false, false, false, false);
                 self.cfg.light_pollution.filter = Pollution::Off;
@@ -1306,26 +1553,22 @@ impl StackTab {
     }
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (k, l) in [(ViewKind::Base, group_name(1, self.simple)), (ViewKind::Result, "Result"), (ViewKind::Report, "Frame report")] {
                 if ui.selectable_label(self.view == k, l).clicked() {
                     self.view = k;
                     self.vstate.fit = true;
                 }
             }
-            if ui.button("Fit").clicked() {
+            if ui.button("Fit").on_hover_text("F").clicked() {
                 self.vstate.fit = true;
             }
             ui.add_space(30.0);
-            if ui.button("⇪ Open project…").clicked() && self.dialog.is_none() {
-                self.dialog = Some((dialogs::pick_open("Open project", "Stacking projects", PROJECT_EXT), "openproj"));
+            if ui.button("⇪ Open project…").on_hover_text("Ctrl+O").clicked() {
+                self.ask_open_project();
             }
-            if ui.button("⬇ Save project…").clicked() && self.dialog.is_none() {
-                let default = self.project.clone().unwrap_or_else(|| match self.files[0].first() {
-                    Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join(format!("stacking{PROJECT_EXT}")).to_string_lossy().to_string(),
-                    None => format!("stacking{PROJECT_EXT}"),
-                });
-                self.dialog = Some((dialogs::pick_save("Save stacking project", &default), "saveproj"));
+            if ui.button("⬇ Save project…").on_hover_text("Ctrl+S saves to the open project at once").clicked() {
+                self.ask_save_project(false);
             }
         });
         let avail = ui.available_size();
@@ -1336,7 +1579,7 @@ impl StackTab {
         });
         let col = if ui.visuals().dark_mode { Color32::from_rgb(255, 160, 128) } else { Color32::from_rgb(140, 0, 0) };
         if self.running {
-            let p = self.progress.lock().unwrap().clone();
+            let p = self.progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let f = if p.total > 0.0 { (p.done / p.total) as f32 } else { 0.0 };
             let left = match p.start {
                 Some(t) if f > 0.03 && f < 1.0 => {

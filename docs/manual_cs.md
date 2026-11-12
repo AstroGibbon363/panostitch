@@ -136,7 +136,7 @@ nastavení si ponechají hodnoty z předvolby. Program si přepínače pamatuje.
    pro více řad nebo pro záběry sahající hodně nahoru či dolů. Je-li výsledek
    tmavý, klikněte na **Auto exposure**; je-li horizont prohnutý, upravte
    **Pitch**. Tlačítkem **Auto crop** odříznete zubaté okraje.
-6. Klikněte na **Save full resolution…**. Chcete-li se k práci později vrátit,
+6. Klikněte na **Save panorama…**. Chcete-li se k práci později vrátit,
    klikněte i na **Save project…**.
 
 **Mozaika hlubokého vesmíru ze souborů FITS:**
@@ -183,7 +183,7 @@ dál měnit.
 | **▲ / ▼** | Posune vybrané snímky v seznamu nahoru nebo dolů. Na pořadí záleží jen v režimech párování *sequential* a *grid*. |
 | **Reference** | Snímek, kolem kterého se ostatní umisťují; zůstane nezkreslený. **auto (centre)** zvolí snímek uprostřed skupiny, což obvykle dává nejvyrovnanější výsledek. |
 | **RAW via** | Který převodník RAW použít, viz [Soubory RAW](#8-soubory-raw). Platí pro snímky přidané poté. |
-| **half size** | Načte soubory RAW a soubory FITS z barevných kamer v poloviční velikosti: asi 4× rychleji a se čtvrtinou paměti. Platí pro snímky přidané poté. Chcete-li výsledek v plném rozlišení, vypněte ho před načtením. |
+| **half size** | Načte soubory RAW a soubory FITS z barevných kamer v poloviční velikosti: asi 4× rychleji a se čtvrtinou paměti. Platí pro snímky přidané poté. Při ukládání s **Output size** nad 50 % se soubory RAW načtou znovu v plné velikosti. |
 
 Značky v seznamu:
 
@@ -302,6 +302,7 @@ Jak jednotlivé projekce vypadají, popisuje kapitola [Projekce](#7-projekce).
 | **Yaw (°)** | Otočí celou panoramu doleva nebo doprava: určuje, který směr bude uprostřed. Hodí se u 360° panoram (např. aby jádro Mléčné dráhy bylo uprostřed, ne na okraji). |
 | **Pitch (°)** | Nakloní celou panoramu nahoru nebo dolů. Slouží k **narovnání prohnutého horizontu** (například když fotoaparát mířil dolů). |
 | **Roll (°)** | Otočí celou panoramu. Slouží k vyrovnání šikmého horizontu. |
+| *Jemné nastavení* | Yaw, pitch a roll mají posuvník, číselné pole a **◀ ▶**. Posuvníky pitch a roll jsou jemné u 0° (kde bývají opravy) a dál hrubší. Pomalým tažením číselného pole je to 0,02° na pixel, dvojklikem do něj můžete hodnotu napsat. **◀ ▶** krokují po 0,1° (se Shiftem po 1°). |
 | **Reset focal / yaw / pitch / roll** | Vrátí tyto čtyři posuvníky na výchozí hodnoty. |
 
 Titulek náhledu ukazuje velikost panoramy, ohniskovou vzdálenost v pixelech,
@@ -321,7 +322,7 @@ Tyto prvky mění náhled okamžitě (jakmile náhled existuje).
 | **Auto exposure** | Nastaví **Exposure** podle aktuálního náhledu: typický jas na střední šedou, aniž by se přepálilo víc než nejjasnějších 0,5 % (hvězdy, lampy). |
 | **Even out** | Spočítá jasové faktory snímků tak, aby si překryvy odpovídaly. |
 | **Reset moves** | Zruší všechna ruční posunutí. |
-| **Auto crop** | Ořízne panoramu na největší obdélník, který je celý pokrytý snímky, takže zmizí černé zubaté okraje. Náhled pak ukazuje oříznutý výsledek a **Save full resolution…** ho uloží. Stavový řádek uvede, kolik panoramy zůstalo. Nejdřív narovnejte horizont (Pitch, Roll); z prohnuté panoramy zbude jen úzký pruh. |
+| **Auto crop** | Ořízne panoramu na největší obdélník, který je celý pokrytý snímky, takže zmizí černé zubaté okraje. Náhled pak ukazuje oříznutý výsledek a **Save panorama…** ho uloží. Stavový řádek uvede, kolik panoramy zůstalo. Nejdřív narovnejte horizont (Pitch, Roll); z prohnuté panoramy zbude jen úzký pruh. |
 | **Uncrop** | Zruší ořez. Ořez se zruší i automaticky, když změníte cokoli, co snímky posune (projekci, ohnisko, yaw, pitch, roll, ruční posuny, párování). |
 | **Nudge ← ↑ ↓ →** | Posune aktuální snímek o jeden pixel náhledu (viz níže). |
 
@@ -410,7 +411,7 @@ shodné body: asi 50 kB na snímek.
 | Posun | tažení **levým** tlačítkem | šipky (pohledy Image a Pair) | |
 | Přiblížení | kolečko nahoru | `+` | **Zoom +** |
 | Oddálení | kolečko dolů | `-` | **Zoom -** |
-| Zpět na celek | | `0` nebo `Home` | **Fit** |
+| Zpět na celek | | `F`, `0` nebo `Home` | **Fit** |
 | Výběr snímku (pohled Panorama) | klik do jeho obrysu | | |
 | Zobrazit / skrýt obrysy, čísla, vazby | | | přepínač **overlays** |
 | Posun snímku (pohled Panorama) | **Ctrl + tažení** | šipky (`Shift` = 10 kroků) | **← ↑ ↓ →** |
@@ -419,6 +420,24 @@ shodné body: asi 50 kB na snímek.
 
 Tlačítka **Image + keypoints**, **Pair matches** a **Panorama** přepínají mezi
 třemi pohledy.
+
+**Další zkratky** (zkratku tlačítka ukáže najetí myší):
+
+| Klávesy | Panorama stitcher | Star stacking |
+|---|---|---|
+| `Ctrl+Enter` | **Run all steps** | **Start** |
+| `P` / `Ctrl+P` | `P`: **Preview panorama** | `Ctrl+P`: **Quick preview** |
+| `Ctrl+S` | uloží projekt (do otevřeného souboru projektu hned; poprvé se zeptá na název) | totéž |
+| `Ctrl+Shift+S` | **Save panorama…** | |
+| `Ctrl+O` | **Open project…** | totéž |
+| `Esc` | | zruší běžící skládání |
+| `F` | přizpůsobí obraz náhledu | totéž |
+
+Na macOS místo `Ctrl` použijte `Cmd`.
+
+**Zavření okna** se nejdřív zeptá, pokud běží skládání nebo pokud práce v
+některé kartě není uložená v projektu. Pak můžete projekt uložit, přesto
+skončit, nebo zrušit.
 
 **Ostré přiblížení:** náhled je zmenšený obrázek. Když panoramu přiblížíte a
 chvíli počkáte, viditelná oblast se znovu vykreslí v rozlišení obrazovky z
@@ -518,7 +537,7 @@ se ignorují; použije se první obrázek.
 
 ## 10. Ukládání
 
-Klikněte na **Save full resolution…** a zvolte název souboru. Typ souboru se
+Klikněte na **Save panorama…** a zvolte název souboru. Typ souboru se
 řídí příponou:
 
 | Přípona | Výsledek |
@@ -530,10 +549,20 @@ Klikněte na **Save full resolution…** a zvolte název souboru. Typ souboru se
 
 Jsou-li všechny načtené snímky FITS, navržený název souboru končí na `.fits`.
 
-Panorama se vykreslí z načtených snímků v jejich plné velikosti: v polovičním
-rozlišení fotoaparátu, pokud bylo při načítání zapnuté **half size**.
+**Output size** (nad tlačítkem pro uložení) určuje velikost uložené panoramy
+v % plného rozlišení fotoaparátu; řádek pod ním ukazuje velikost v pixelech
+(po náhledu). Tlačítka ¼, ½, full a 2× jsou rychlá volba. 100 % zachová
+všechen detail; soubory RAW načtené s **half size** se při ukládání načtou
+znovu v plné velikosti, takže to trvá déle a potřebuje víc paměti. 50 % nebo
+25 % dají rychle menší soubor, nad 100 % se zvětšuje (bez nového detailu).
 
-Panoramy širší nebo vyšší než 40 000 px se odmítnou. Téměř vždy to znamená, že
+Pod velikostí je odhad, kolik paměti uložení potřebuje a jak velký může být
+soubor, vedle volného místa. Když se nevejde, zbarví se oranžově (⚠); po
+najetí myší ukáže, co dělat. Uložení pak odmítne se stejnou radou, místo aby
+zaplnilo paměť a celý počítač přestal reagovat. Načítání se při téměř plné
+paměti zastaví dřív a ohlásí to.
+
+Panoramy širší nebo vyšší než 60 000 px se odmítnou. Téměř vždy to znamená, že
 je některá dvojice spárovaná špatně nebo že projekce není vhodná; zkuste
 cylindrical nebo spherical.
 
@@ -543,7 +572,9 @@ cylindrical nebo spherical.
 
 | Problém | Co zkusit |
 |---|---|
-| **Okno se neobjeví** | Spusťte program z terminálu a přečtěte si tam chybové hlášení. Na Linuxu potřebuje OpenGL: ověřte, že je nainstalovaný grafický ovladač. |
+| **Okno se neobjeví** | Na Windows se objeví zpráva s důvodem; na Linuxu a macOS spusťte program z terminálu a přečtěte si chybu tam. Okno potřebuje OpenGL 2.0 nebo novější: aktualizujte grafický ovladač (na starých PC ten od výrobce grafického čipu). |
+| **Program se nečekaně zavřel** | Při dalším spuštění to oznámí stavový řádek. Podrobnosti jsou v `crash.log` ve složce nastavení (Linux `~/.config/panostitch`, Windows `%APPDATA%\panostitch`, macOS `~/Library/Application Support/panostitch`); přiložte ho prosím k hlášení problému. |
+| **Ovládací prvky jsou na okraji useknuté** | Rozšiřte boční panel tažením jeho okraje. |
 | **„Busy – wait…“** | Krok ještě běží; počkejte, až se stavový řádek změní. |
 | **Snímek se při načítání přeskočí** | Stavový řádek uvede soubor a důvod. U RAW zkuste jiný převodník v **RAW via**. Soubory FITS `.fz` nejdřív rozbalte. |
 | **Panorama je skoro černá** | Fotografie: klikněte na **Auto exposure** nebo zvyšte **Exposure (EV)** (noční záběry často potřebují +1,5 až +4), nebo snímky upravte v RawTherapee (jejich soubory `.pp3` se pak použijí). FITS a jiná lineární data: klikněte na **Auto stretch**. |
@@ -636,8 +667,14 @@ odhadovaný zbývající čas.
    masku opravte štětcem. Hvězdy se hledají jen na obloze.
 3. Klikněte na **Quick preview**: malý, rychlý výsledek z nejvýše 10 snímků
    pro kontrolu nastavení. Nic se neukládá.
-4. Zvýrazněte **Output** a zvolte, kam uložit (výchozí: `stacked.tif` vedle
-   prvního snímku oblohy), potom klikněte na **Start**.
+4. Zkontrolujte řádek **Save as** pod seznamem vstupů: napište název souboru
+   nebo vyberte navržený název v rozbalovacím seznamu vedle, ve druhém
+   seznamu zvolte typ souboru a tlačítkem **Folder…** složku (výchozí:
+   `stacked.tif` vedle prvního snímku oblohy). Pokud soubor už existuje, řádek
+   to oznámí; **next free name** přidá číslo. Pod ním je odhad, kolik místa
+   snímky při skládání potřebují (podle počtu a velikosti) a zda zůstanou v
+   paměti, nebo na disku; když místo nestačí, zbarví se oranžově (⚠). Potom
+   klikněte na **Start**.
 5. Upravte dodatečné zpracování vpravo; výsledek se hned aktualizuje.
    **Save result…** ho uloží znovu s novým nastavením.
 
@@ -652,7 +689,7 @@ odhadovaný zbývající čas.
 | **Flat field frames** (*Vignetting images* v jednoduchém režimu) | Flaty: rovnoměrně osvětlená bílá plocha, stejná ohnisková vzdálenost a clona. Opraví tmavší rohy a stíny prachu. |
 | **Flat-dark frames** (*Flat-dark images* v jednoduchém režimu) | Darky k flatům: stejné ISO a čas jako vinětační snímky. |
 | **Foreground image** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Match brightness** ho přizpůsobí jasu složeného popředí; **Exposure (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
-| **Output** | `.tif` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
+| **Output** | Nastavuje se v řádku **Save as**: název, typ a složka. `.tif` / `.png` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
 
 Všechny kalibrační snímky jsou nepovinné. Při vysokém ISO hodně pomůže i
 několik tmavých snímků.

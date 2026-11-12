@@ -364,3 +364,30 @@ fn file_round_trips() {
     assert!(st::auto_stretch(&img, 0.25, 2.8).2 == 1.0);
     assert_eq!(st::lum_histogram(&img, 16).len(), 16);
 }
+
+/// Long background jobs must not hold up the window thread's own (small)
+/// parallel work: they run in a separate, low-priority pool.
+#[test]
+fn background_work_does_not_block_the_window_thread() {
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    let stop = Arc::new(AtomicBool::new(false));
+    let s = stop.clone();
+    // Occupy every worker of the background pool until told to stop.
+    panostitch::sys::background(move || {
+        (0..4 * rayon::current_num_threads()).into_par_iter().for_each(|_| {
+            while !s.load(Ordering::Relaxed) {
+                std::hint::spin_loop();
+            }
+        })
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let t = Instant::now();
+    let sum: u64 = (0..100_000u64).into_par_iter().map(|x| x % 7).sum();
+    let took = t.elapsed();
+    stop.store(true, Ordering::Relaxed);
+    assert_eq!(sum, (0..100_000u64).map(|x| x % 7).sum::<u64>());
+    assert!(took < Duration::from_secs(1), "window-side work waited {took:?}");
+}

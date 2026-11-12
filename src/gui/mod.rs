@@ -10,7 +10,18 @@ use crate::image::Img;
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
 
 /// Upload an image as a texture (8-bit, clamped).
+/// A texture of `img`, reduced if it is larger than the graphics card allows
+/// (often 4096 or 8192 px on older or built-in graphics). It is drawn into the
+/// same rectangle either way, so only the on-screen sharpness changes.
 pub fn texture(ctx: &egui::Context, name: &str, img: &Img) -> egui::TextureHandle {
+    let max = ctx.input(|i| i.max_texture_side).clamp(1024, 16384);
+    let small;
+    let img = if img.w.max(img.h) > max {
+        small = crate::image::resize(img, (max as f64 - 1.0) / img.w.max(img.h) as f64);
+        &small
+    } else {
+        img
+    };
     let bytes = crate::io::to_rgb8(img);
     ctx.load_texture(name, egui::ColorImage::from_rgb([img.w, img.h], &bytes), egui::TextureOptions::LINEAR)
 }
@@ -191,6 +202,9 @@ pub struct App {
     prefs: Prefs,
     pub stitch: stitch::StitchTab,
     pub stack: stack::StackTab,
+    /// Why closing the window was held back (shown in a dialog), if it was.
+    confirm_close: Option<Vec<String>>,
+    allow_close: bool,
 }
 
 impl App {
@@ -203,7 +217,7 @@ impl App {
         install_fonts(ctx);
         let prefs = load_prefs();
         apply_style(ctx, prefs);
-        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default() };
+        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default(), confirm_close: None, allow_close: false };
         // Project files open in their tab; images go to the stitcher.
         let (stackp, rest): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| p.to_lowercase().ends_with(stack::PROJECT_EXT));
         let (panop, imgs): (Vec<String>, Vec<String>) = rest.into_iter().partition(|p| p.to_lowercase().ends_with(stitch::PROJECT_EXT));
@@ -215,6 +229,11 @@ impl App {
         if let Some(p) = stackp.first() {
             app.stack.open_project(p);
             app.tab = Tab::Stack;
+        }
+        let marker = config_dir().join("crashed");
+        if marker.exists() {
+            let _ = std::fs::remove_file(&marker);
+            app.stitch.notice(format!("PanoStitch closed unexpectedly last time. The details are in {} – please attach that file when you report it.", crash_log().display()));
         }
         app
     }
@@ -273,6 +292,79 @@ impl App {
         if self.stitch.busy() || self.stack.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
+        self.guard_close(&ctx);
+    }
+
+    /// What would be lost by closing the window now.
+    pub fn close_reasons(&mut self) -> Vec<String> {
+        let mut r = Vec::new();
+        if self.stack.running() {
+            r.push("Stacking is running; it will be stopped.".to_string());
+        } else if self.stitch.busy() {
+            r.push("The stitcher is still working (rendering or saving).".to_string());
+        }
+        if self.stitch.unsaved() {
+            r.push("Panorama stitcher: changes not saved in a project.".to_string());
+        }
+        if self.stack.unsaved() {
+            r.push("Star stacking: setup not saved in a project.".to_string());
+        }
+        r
+    }
+
+    /// Ask before closing the window when work would be lost.
+    fn guard_close(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.confirm_close.is_none() {
+            let r = self.close_reasons();
+            if !r.is_empty() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.confirm_close = Some(r);
+            }
+        }
+        let Some(reasons) = self.confirm_close.clone() else { return };
+        let mut choice = None;
+        egui::Modal::new(egui::Id::unique("confirm_close")).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.heading("Quit PanoStitch?");
+            for r in &reasons {
+                ui.label(format!("• {r}"));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(egui::RichText::new("Quit anyway").strong()).clicked() {
+                    choice = Some(0);
+                }
+                if self.stitch.unsaved() && ui.button("Save panorama project…").clicked() {
+                    choice = Some(1);
+                }
+                if self.stack.unsaved() && ui.button("Save stacking project…").clicked() {
+                    choice = Some(2);
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    choice = Some(3);
+                }
+            });
+        });
+        match choice {
+            Some(0) => {
+                self.confirm_close = None;
+                self.allow_close = true;
+                self.stack.cancel_run();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Some(1) => {
+                self.confirm_close = None;
+                self.tab = Tab::Stitch;
+                self.stitch.ask_save_project(true);
+            }
+            Some(2) => {
+                self.confirm_close = None;
+                self.tab = Tab::Stack;
+                self.stack.ask_save_project(true);
+            }
+            Some(_) => self.confirm_close = None,
+            None => {}
+        }
     }
 }
 
@@ -291,8 +383,53 @@ fn save_prefs(p: Prefs) {
     let _ = std::fs::write(dir.join("ui.toml"), format!("dark = {}\nmodern = {}\nsimple = {}\n", p.dark, p.modern, p.simple));
 }
 
+/// Where a crash is recorded.
+pub fn crash_log() -> std::path::PathBuf {
+    config_dir().join("crash.log")
+}
+
+/// Record panics (with the place in the code) in the crash log, so a crash
+/// leaves something to report even when there is no console (Windows).
+fn install_crash_log() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Panics inside background jobs are caught and shown in the status line; log them all anyway.
+        let thread = std::thread::current().name().unwrap_or("?").to_string();
+        let text = format!(
+            "{} PanoStitch {} ({} {}), thread {thread}:\n{info}\n{}\n\n",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            std::backtrace::Backtrace::force_capture()
+        );
+        let _ = std::fs::create_dir_all(config_dir());
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(crash_log()) {
+            use std::io::Write;
+            let _ = f.write_all(text.as_bytes());
+        }
+        // A panic on the window's thread ends the program: say so at the next start.
+        if std::thread::current().name() == Some("main") {
+            let _ = std::fs::write(config_dir().join("crashed"), "");
+        }
+        prev(info);
+    }));
+}
+
+/// Show a message when there is no window to show it in (e.g. the graphics driver is too old).
+pub fn fatal_message(text: &str) {
+    eprintln!("{text}");
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        unsafe { MessageBoxW(std::ptr::null_mut(), w(text).as_ptr(), w("PanoStitch").as_ptr(), MB_OK | MB_ICONERROR) };
+    }
+}
+
 /// Open the window with `paths` loaded into the stitcher.
 pub fn run(paths: Vec<String>) -> eframe::Result {
+    install_crash_log();
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1700.0, 1000.0]).with_title(concat!("PanoStitch ", env!("CARGO_PKG_VERSION"))),
         ..Default::default()

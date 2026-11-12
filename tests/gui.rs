@@ -150,8 +150,11 @@ fn stitcher_tab_end_to_end() {
         assert!(img.w > 500 && img.h > 300, "{ext}: {}×{}", img.w, img.h);
     }
 
+    // Closing asks first while the work is not saved in a project.
+    assert!(w.app.close_reasons().iter().any(|r| r.starts_with("Panorama")), "{:?}", w.app.close_reasons());
     // Save the project and open it in a new window: same images, pairs, moves, crop.
     let proj = w.app.stitch.save_project(&pj(&d, &format!("test"))).unwrap();
+    assert!(w.app.close_reasons().is_empty(), "{:?}", w.app.close_reasons());
     assert!(proj.ends_with(".panoproj"));
     let mut w2 = Win::new(vec![proj]);
     w2.idle("open project");
@@ -161,6 +164,7 @@ fn stitcher_tab_end_to_end() {
     assert!(w2.app.stitch.t_cropped());
     assert!(w2.app.stitch.t_pano_size().is_some(), "{}", w2.app.stitch.t_status());
     assert!(w2.app.stitch.t_status().starts_with("Opened"), "{}", w2.app.stitch.t_status());
+    assert!(w2.app.close_reasons().is_empty(), "just opened: {:?}", w2.app.close_reasons());
 
     // Reordering and removing images keeps the matching results of the others.
     w2.app.stitch.t_select(0, &[]);
@@ -268,9 +272,12 @@ fn stacking_tab_end_to_end() {
     assert!(std::path::Path::new(&out).is_file());
 
     // The project keeps files, exclusions, the sky line and the settings.
+    assert!(w.app.close_reasons().iter().any(|r| r.starts_with("Star stacking")), "{:?}", w.app.close_reasons());
     let proj = w.app.stack.save_project(&pj(&d, &format!("stack"))).unwrap();
+    assert!(w.app.close_reasons().is_empty(), "{:?}", w.app.close_reasons());
     let mut w2 = Win::new(vec![proj.clone()]);
     w2.idle("open stacking project");
+    assert!(w2.app.close_reasons().is_empty(), "just opened: {:?}", w2.app.close_reasons());
     assert_eq!(w2.app.stack.t_files()[0].len(), 6, "{}", w2.app.stack.t_status());
     // The preview shows the base frame after opening a project.
     w2.until("base preview", 30, |a| a.stack.t_shown().is_some());
