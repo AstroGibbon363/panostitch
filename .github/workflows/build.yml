@@ -56,7 +56,7 @@ jobs:
           mkdir -p "$dir/docs"
           ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           cp target/release/panostitch$ext target/release/panostack$ext "$dir/"
-          cp README.md LICENSE "$dir/"
+          cp README.md CHANGELOG.md LICENSE "$dir/"
           cp docs/manual_*.md "$dir/docs/"
           cp assets/fonts/LICENSE-DejaVu.txt "$dir/docs/"
           if [ "$RUNNER_OS" = "Windows" ]; then 7z a "$dir.zip" "$dir" > /dev/null; else zip -qr "$dir.zip" "$dir"; fi
@@ -72,6 +72,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -80,6 +81,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          {
+            echo "Downloads for Linux, Windows and macOS (Apple Silicon). Unzip and start panostitch; panostack stacks star images from the command line. The manual is in docs/."
+            echo
+            # This version's section of CHANGELOG.md, without its heading
+            awk -v v="## $GITHUB_REF_NAME" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md
+          } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/*.zip --repo "$GITHUB_REPOSITORY" \
-            --title "PanoStitch $GITHUB_REF_NAME" \
-            --notes "Downloads for Linux, Windows and macOS (Apple Silicon). Unzip and start panostitch; panostack stacks star images from the command line. The manual is in docs/."
+            --title "PanoStitch $GITHUB_REF_NAME" --notes-file notes.md
