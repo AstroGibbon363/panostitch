@@ -1,5 +1,25 @@
 # Changes
 
+## v0.4.0 (in development)
+
+### Post-processing tab (new)
+- The last steps on a stacked or stitched image in one place: turn and crop (any angle, empty corners cut away, crop to 3:2 / 16:9 / 1:1 …), stretch, white balance, light, curves, colour, noise, star reduction, sharpening, and saving at a chosen size (e.g. 2048 px for forums) with JPEG quality.
+- **Stretches:** MTF (automatic, each colour on its own by default, or manual), Arcsinh and Generalized Hyperbolic (GHS), both also inverse; "Keep star colours"; black and symmetry point from the sky background.
+- **White balance** on linear light, before the stretch: sample a grey rectangle on the preview, neutral background, temperature and tint.
+- **Light:** exposure, contrast, highlights, midtones, shadows, whites, blacks. **Curves** for RGB and each colour.
+- **Display modes** as in Siril (linear, log, square root, squared, asinh, AutoStretch, histogram equalisation): only the view changes.
+- Live preview on a small copy; saving processes the full image with the values measured on the preview, so the file looks like the preview. Compare with the starting point (hold B).
+- Results come in from the stacking tab ("Use in Post-processing") and the stitcher ("Post-process" after saving).
+
+### Timelapse tab (controls only)
+- Frames with a preview of the selected one; kind (time-lapse, growing or fading star trails), deflicker, output format, frame rate, resolution and the video length.
+- Look: the Post-processing light and colour sliders, separately for the whole frame, the sky and the foreground, with a brush mask painted on the frame (left = sky, right = foreground).
+- Nothing is applied yet: making the video comes later.
+
+### Reports and times
+- After stacking and after saving a panorama, a short report: photos / frames used, time taken, result size, file and its size, or what went wrong.
+- The stacking progress bar shows the time elapsed next to the time left; the stitcher's status line shows the time elapsed while it works.
+
 ## v0.3.1
 
 Stability, ease of use, and testing on real data.

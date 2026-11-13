@@ -27,6 +27,8 @@ trails ([Star stacking](#13-star-stacking)).
 13. [Star stacking](#13-star-stacking)
 14. [Use without the window](#14-use-without-the-window)
 15. [Files](#15-files)
+16. [Post-processing](#16-post-processing)
+17. [Timelapse](#17-timelapse)
 
 ---
 
@@ -561,6 +563,13 @@ Panoramas wider or taller than 60,000 px are refused. This almost always means
 that one pair is matched wrongly or that the projection is unsuitable; try
 cylindrical or spherical.
 
+While the stitcher works, the status line shows the time elapsed. After
+saving, a small **report** under the Save button sums it up: how many photos
+are in the panorama (and how many did not match), the stitching time (loading,
+matching and previews since the first photo was added), the saving time, the
+size in pixels and the file with its size, or the error if saving failed.
+× closes it.
+
 ---
 
 ## 11. Troubleshooting
@@ -648,8 +657,12 @@ one click: **Milky Way landscape** (freeze ground, sky detected
 automatically, distortion correction, light pollution), **Star trails** (gaps
 filled) and **Deep sky (telescope)** (all sky, background extraction, colour
 calibration, automatic stretch). Every setting can still be changed. While a
-run is going, a progress bar under the view shows the step and the estimated
-time left.
+run is going, a progress bar under the view shows the step, the time elapsed
+and the estimated time left. When the run ends, a small **report** appears at
+the top of the right panel: how many frames were stacked of how many (left out
+and excluded ones counted), the calibration frames, the time it took, the
+result's size and the saved file with its size, or what went wrong. × closes
+it.
 
 ### 13.1 Quick start
 
@@ -881,7 +894,114 @@ Source code (to build the program yourself):
 | `src/image.rs`, `src/io/` | Images; loading and saving (JPEG, PNG, TIFF, BMP, RAW, FITS, XISF). |
 | `src/stitcher/` | Stitching: features, matching, placement, refinement, projections, blending. |
 | `src/stacker/` | Star stacking. |
-| `src/gui/` | The window: both tabs and the file dialogs. |
+| `src/finish.rs` | Post-processing: geometry, stretches (MTF, arcsinh, GHS), white balance, light, curves, colour, detail. |
+| `src/gui/` | The window: the four tabs and the file dialogs. |
 | `src/bin/` | The two programs, `panostitch` and `panostack`. |
-| `tests/` | Tests: stacking on synthetic night scenes, stitching, file formats, and both tabs of the window. Run them with `cargo test --release`. |
+| `tests/` | Tests: stacking on synthetic night scenes, stitching, post-processing, file formats, and the tabs of the window. Run them with `cargo test --release`. |
 | `examples/scripted.rs` | Using the stitcher from your own Rust code. |
+
+---
+
+## 16. Post-processing
+
+*New in 0.4 (in development).* The **Post-processing** tab does the last
+steps on a stacked or stitched image, so you don't need another program for
+them: turn and crop, stretch linear data, white balance, light, curves,
+colour, noise, stars, sharpening, and saving at the size you want.
+
+**Getting an image in:** **Open…** (Ctrl+O) or type a path and press Enter;
+**✎ Use in Post-processing** in the Star stacking tab; or **✎ Post-process**
+in the stitcher after saving a panorama. FITS and XISF files are treated as
+linear data and start with the automatic stretch; JPEG, TIFF and PNG are
+treated as finished images (no stretch). **Linear data (needs stretching)**
+switches this by hand.
+
+The preview works on a copy of at most 2000 px, so it follows the sliders
+almost at once. **Save** processes the full image in the background with
+exactly the same settings; values the program measures (automatic stretch,
+neutral background) are taken from the preview, so the saved file looks like
+the preview.
+
+The steps always run in this order, top to bottom on the left:
+
+| Section | What it does |
+|---|---|
+| **Turn and crop** | ⟲ ⟳ quarter turns, **Mirror**, **Rotate** by any angle (fine near 0°, as Yaw/Pitch/Roll in the stitcher), **Cut away the empty corners** after rotating, crop from each side, or crop to a shape (3:2, 4:3, 16:9, 4:5, 1:1, 2:1). |
+| **Stretch** (linear data) | **Background extraction** and **Colour calibration** first (both optional, on the linear data), then the stretch method (below). |
+| **White balance** | On linear light, before the stretch. **◎ Sample grey**, then drag a rectangle over something that should be neutral (sky background, a cloud): the colour multipliers are set from it. **Neutral background** makes the darker half grey. **Temperature** and **Tint** fine-tune. Finished images are taken out of their sRGB curve for this and put back, so the balance is right at every brightness. |
+| **Light** | **Exposure** (EV), **Contrast**, **Highlights** (around 75 %), **Midtones** (50 %), **Shadows** (25 %), **Whites** and **Blacks** (the end points), as in photo editors. |
+| **Curves** | One curve for all colours (**RGB**) and one each for **Red**, **Green**, **Blue**. Click to add a point, drag to move it, right-click to remove it. The histogram behind the curve is of what goes into it. A • marks the curves you changed. |
+| **Colour** | **Saturation** (0 = black and white) and **Vibrance** (dull colours more than strong ones). |
+| **Detail** | **Noise reduction** (smooths flat areas, keeps edges and stars), **Colour noise**, **Star reduction** (smaller stars), **Sharpen** and its radius. Radii are in pixels of the full image, so the preview matches the saved result. |
+
+**Stretch methods:**
+
+| Method | Use |
+|---|---|
+| **Off** | The image is already finished. |
+| **sRGB curve** | As a camera would: for linear data that only needs the normal gamma. |
+| **MTF, automatic** | Black point just below the sky background, midtones so the background ends up at **Background** brightness (as Siril's AutoStretch / PixInsight's STF). **Each colour on its own** (default) measures red, green and blue separately, so a camera stack's colour cast doesn't hide the picture; the data itself is not changed. **Auto → manual** continues by hand from the measured values. |
+| **MTF, manual** | Black point, midtones and white point (midtones transfer function). |
+| **Arcsinh** | Inverse hyperbolic sine: strong stretch that keeps star colours. **Stretch factor** 1–10000; deep stacks with a faint background need several thousand. |
+| **Generalized hyperbolic (GHS)** | **Stretch ln(D+1)** (strength), **Local intensity b** (how narrowly the stretch concentrates around the symmetry point), **Symmetry point** (where the stretch is strongest: put it on the sky background), **Protect shadows** and **Protect highlights** (straight line below / above them). |
+
+For Arcsinh and GHS: **Inverse** uses the inverse curve (compresses instead of
+stretching, e.g. to undo too strong a stretch); **Keep star colours** stretches
+the brightness and keeps each pixel's colour (off: each colour on its own,
+more saturated sky, paler stars); **Points from the background** sets the
+black point just below the background of the darkest colour and, for GHS, the
+symmetry point on the background.
+
+**Display** (above the preview) only changes how the preview is shown, never
+the saved image, as Siril's display modes: **Linear (as saved)**,
+**Logarithm**, **Square root**, **Squared**, **Asinh**, **AutoStretch**,
+**Histogram equalisation**. Useful to look into the shadows or check the
+background without changing anything. "view only" is shown while it is not
+Linear.
+
+**◐ Compare** (hold it, or hold B) shows the starting point: turned, cropped
+and stretched, nothing else.
+
+**Save** (right): **Size** (full, or a longest side such as 2048 px for
+forums), file name and type, **JPEG quality**. The line below says how much
+memory saving needs. FITS / XISF get the finished (stretched) image as 32-bit
+float. **Keep settings for the next image** (left) gives several images the
+same look, e.g. the panels of a panorama.
+
+| Key | Action |
+|---|---|
+| Ctrl+O | Open an image |
+| Ctrl+S | Save (to the file name shown) |
+| Ctrl+Shift+S | Save as… |
+| F | Fit the preview |
+| B (hold) | Compare with the starting point |
+
+Not yet: undo, saving the settings as a preset, cropping by dragging on the image.
+
+## 17. Timelapse
+
+*Being built for 0.4.* The **Timelapse** tab will make a video from a
+sequence of frames: a plain time-lapse, growing star trails or comet-style
+fading trails, with deflicker, steadying, the Post-processing look on every
+frame, and MP4, WebM, GIF or numbered-image output.
+
+For now only the controls are there; nothing is applied to the frames and no
+video is made yet (**▶ Make video** is greyed out):
+
+- **Frames:** add files or a folder; they play in file-name order. Click one
+  to show it in the middle (◀ ▶ step through them).
+- **Look:** the same light and colour sliders as in Post-processing
+  (exposure, contrast, highlights, midtones, shadows, whites, blacks,
+  temperature, tint, saturation, vibrance), set separately for the **Whole
+  frame**, the **Sky** and the **Foreground**. Sky and foreground come on top
+  of the whole-frame look, only inside their part of the mask; • marks the
+  parts you changed.
+- **Mask:** switch on **✎ Paint** and paint on the shown frame: left button =
+  sky, right button = foreground, mouse wheel = brush size. **All sky**,
+  **Invert**, **Clear** and **Soft edge** (how softly the two looks blend at
+  the border). One mask serves every frame, because on a tripod the
+  foreground does not move. Sky is tinted blue, foreground orange (**Show
+  mask**).
+- **Video and output:** kind, deflicker, steadying, starting from the
+  Post-processing look, slow zoom, format, frame rate, resolution, 16:9 crop,
+  quality, and how long the video would run (frames ÷ frame rate).

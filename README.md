@@ -25,7 +25,7 @@ development libraries (present on any desktop install).
 
 ```
 cargo build --release      # target/release/panostitch and panostack
-cargo test --release       # engine, file formats, and both tabs of the window (headless)
+cargo test --release       # engine, post-processing, file formats, and the window's tabs (headless)
 ```
 
 Build on each target system (Windows, macOS, Linux); the result is a single
@@ -39,9 +39,10 @@ executable of about 15 MB that needs nothing else.
 | `src/io/` | Loading and saving: JPEG/PNG/TIFF/BMP, FITS, XISF, camera RAW |
 | `src/stitcher/` | Features, matching, RANSAC, placement, bundle adjustment, projections, blending |
 | `src/stacker/` | Calibration, star detection and alignment, combining, post-processing, the run |
-| `src/gui/` | The window (egui): stitcher tab, stacking tab, file dialogs |
+| `src/finish.rs` | The Post-processing tab's engine: geometry, stretches (MTF, arcsinh, GHS), white balance, light, curves, colour, detail |
+| `src/gui/` | The window (egui): stitcher, stacking, post-processing and timelapse tabs, file dialogs |
 | `src/bin/` | `panostitch` (window) and `panostack` (command line) |
-| `tests/` | Tests: stacking on synthetic night scenes, stitching, file formats, both tabs of the window |
+| `tests/` | Tests: stacking on synthetic night scenes, stitching, post-processing, file formats, the window's tabs |
 | `examples/` | Using the library from your own Rust code |
 | `docs/` | User manual in English, Czech and German (Markdown) |
 

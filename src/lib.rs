@@ -8,5 +8,6 @@ pub mod stitcher;
 pub mod stacker;
 pub mod gui;
 pub mod sys;
+pub mod finish;
 
 pub use image::{Gray, Img, Rgb};

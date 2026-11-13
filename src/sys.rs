@@ -17,7 +17,13 @@ pub fn memory_reserve() -> f64 {
 }
 
 pub fn gb(bytes: f64) -> String {
-    if bytes < 1e9 { format!("{:.0} MB", bytes / 1e6) } else { format!("{:.1} GB", bytes / 1e9) }
+    if bytes < 1e6 {
+        format!("{:.0} kB", (bytes / 1e3).max(1.0))
+    } else if bytes < 1e9 {
+        format!("{:.0} MB", bytes / 1e6)
+    } else {
+        format!("{:.1} GB", bytes / 1e9)
+    }
 }
 
 /// Lower the priority of the calling thread (below the window's).

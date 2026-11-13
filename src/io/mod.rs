@@ -125,6 +125,11 @@ pub fn basename(path: &str) -> String {
 /// Save with a sensible bit depth: 16-bit for TIFF/PNG, 8-bit for JPEG/BMP, and
 /// 32-bit float FITS / XISF (values kept as they are, not clipped).
 pub fn save_panorama(path: &str, img: &Img) -> Result<(), String> {
+    save_image(path, img, 95)
+}
+
+/// As `save_panorama`, with the JPEG quality (1…100).
+pub fn save_image(path: &str, img: &Img, jpeg_quality: u8) -> Result<(), String> {
     if is_fits(path) {
         return fits::write_fits(path, img);
     }
@@ -150,7 +155,7 @@ pub fn save_panorama(path: &str, img: &Img) -> Result<(), String> {
             let buf = to_rgb8(img);
             let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
             let mut wr = std::io::BufWriter::new(file);
-            let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut wr, 95);
+            let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut wr, jpeg_quality.clamp(1, 100));
             use image::ImageEncoder;
             enc.write_image(&buf, w, h, image::ExtendedColorType::Rgb8)
         }

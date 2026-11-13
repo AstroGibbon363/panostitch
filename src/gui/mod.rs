@@ -2,9 +2,11 @@
 //! zoomable image view, and native file dialogs.
 
 pub mod dialogs;
+pub mod finish;
 pub mod notes;
 pub mod stack;
 pub mod stitch;
+pub mod timelapse;
 
 use crate::image::Img;
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
@@ -130,10 +132,71 @@ pub fn combo<T: Copy + PartialEq>(ui: &mut egui::Ui, label: &str, v: &mut T, all
     *v != before
 }
 
+/// A short summary of a finished job (panorama saved, stack finished, failed …),
+/// shown in the tab until it is closed or the next job finishes.
+#[derive(Clone, Debug)]
+pub struct JobReport {
+    pub title: String,
+    pub ok: bool,
+    pub rows: Vec<(String, String)>,
+}
+
+impl JobReport {
+    pub fn new(title: impl Into<String>, ok: bool) -> Self {
+        Self { title: title.into(), ok, rows: Vec::new() }
+    }
+    pub fn row(mut self, k: &str, v: impl Into<String>) -> Self {
+        self.rows.push((k.to_string(), v.into()));
+        self
+    }
+    /// Draw the report; true when the user closes it.
+    pub fn ui(&self, ui: &mut egui::Ui) -> bool {
+        let col = if self.ok { Color32::from_rgb(70, 170, 90) } else { Color32::from_rgb(230, 140, 40) };
+        let mut close = false;
+        egui::Frame::group(ui.style()).stroke(egui::Stroke::new(1.5, col)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.colored_label(col, egui::RichText::new(format!("{} {}", if self.ok { "✔" } else { "✖" }, self.title)).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close = ui.small_button("×").on_hover_text("Close the report").clicked();
+                });
+            });
+            egui::Grid::new(("report", &self.title)).num_columns(2).spacing([10.0, 2.0]).show(ui, |ui| {
+                for (k, v) in &self.rows {
+                    ui.label(egui::RichText::new(k).weak());
+                    ui.add(egui::Label::new(v).wrap());
+                    ui.end_row();
+                }
+            });
+        });
+        close
+    }
+}
+
+/// A duration for people: "42 s", "3 min 05 s", "1 h 02 min".
+pub fn duration(secs: f64) -> String {
+    let s = secs.max(0.0);
+    if s < 10.0 {
+        format!("{s:.1} s")
+    } else if s < 60.0 {
+        format!("{s:.0} s")
+    } else if s < 3600.0 {
+        format!("{} min {:02} s", (s / 60.0) as u64, (s % 60.0) as u64)
+    } else {
+        format!("{} h {:02} min", (s / 3600.0) as u64, ((s % 3600.0) / 60.0) as u64)
+    }
+}
+
+/// Size of a file on disk, for reports ("38 MB"), or "?" if it cannot be read.
+pub fn file_size(path: &str) -> String {
+    std::fs::metadata(path).map(|m| crate::sys::gb(m.len() as f64)).unwrap_or_else(|_| "?".into())
+}
+
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Stitch,
     Stack,
+    Finish,
+    Timelapse,
 }
 
 /// Appearance: light or dark colours, classic or modern look (rounder, roomier),
@@ -202,6 +265,8 @@ pub struct App {
     prefs: Prefs,
     pub stitch: stitch::StitchTab,
     pub stack: stack::StackTab,
+    pub finish: finish::FinishTab,
+    pub timelapse: timelapse::TimelapseTab,
     /// Why closing the window was held back (shown in a dialog), if it was.
     confirm_close: Option<Vec<String>>,
     allow_close: bool,
@@ -217,7 +282,7 @@ impl App {
         install_fonts(ctx);
         let prefs = load_prefs();
         apply_style(ctx, prefs);
-        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default(), confirm_close: None, allow_close: false };
+        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default(), finish: finish::FinishTab::default(), timelapse: timelapse::TimelapseTab::default(), confirm_close: None, allow_close: false };
         // Project files open in their tab; images go to the stitcher.
         let (stackp, rest): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| p.to_lowercase().ends_with(stack::PROJECT_EXT));
         let (panop, imgs): (Vec<String>, Vec<String>) = rest.into_iter().partition(|p| p.to_lowercase().ends_with(stitch::PROJECT_EXT));
@@ -229,6 +294,15 @@ impl App {
         if let Some(p) = stackp.first() {
             app.stack.open_project(p);
             app.tab = Tab::Stack;
+        }
+        // Development aid (screenshots): PANOSTITCH_FINISH=<file> opens it in Post-processing,
+        // PANOSTITCH_TAB=timelapse shows that tab.
+        if let Ok(p) = std::env::var("PANOSTITCH_FINISH") {
+            app.finish.open(&p);
+            app.tab = Tab::Finish;
+        }
+        if std::env::var("PANOSTITCH_TAB").as_deref() == Ok("timelapse") {
+            app.tab = Tab::Timelapse;
         }
         let marker = config_dir().join("crashed");
         if marker.exists() {
@@ -247,7 +321,15 @@ impl eframe::App for App {
 
 impl App {
     pub fn busy(&self) -> bool {
-        self.stitch.busy() || self.stack.busy()
+        self.stitch.busy() || self.stack.busy() || self.finish.busy()
+    }
+    /// Show the Post-processing tab.
+    pub fn show_finish(&mut self) {
+        self.tab = Tab::Finish;
+    }
+    /// Show the Timelapse tab.
+    pub fn show_timelapse(&mut self) {
+        self.tab = Tab::Timelapse;
     }
     pub fn show_stack(&mut self, on: bool) {
         self.tab = if on { Tab::Stack } else { Tab::Stitch };
@@ -265,6 +347,8 @@ impl App {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::Stitch, egui::RichText::new("Panorama stitcher").strong());
                 ui.selectable_value(&mut self.tab, Tab::Stack, egui::RichText::new("Star stacking (landscape / trails)").strong());
+                ui.selectable_value(&mut self.tab, Tab::Finish, egui::RichText::new("Post-processing").strong());
+                ui.selectable_value(&mut self.tab, Tab::Timelapse, egui::RichText::new("Timelapse").strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let before = self.prefs;
                     ui.checkbox(&mut self.prefs.simple, "✓ Simple").on_hover_text("Leave out the advanced controls");
@@ -283,13 +367,23 @@ impl App {
             self.stitch.add_paths(handed);
             self.tab = Tab::Stitch;
         }
+        // Results handed to Post-processing (the last one wins).
+        let handed: Vec<String> = std::mem::take(&mut self.stack.to_finish).into_iter().chain(std::mem::take(&mut self.stitch.to_finish)).collect();
+        if let Some(p) = handed.last() {
+            self.finish.open(p);
+            self.tab = Tab::Finish;
+        }
         self.stitch.simple = self.prefs.simple;
         self.stack.simple = self.prefs.simple;
+        self.finish.simple = self.prefs.simple;
+        self.timelapse.simple = self.prefs.simple;
         match self.tab {
             Tab::Stitch => self.stitch.ui(ui, &ctx),
             Tab::Stack => self.stack.ui(ui, &ctx),
+            Tab::Finish => self.finish.ui(ui, &ctx),
+            Tab::Timelapse => self.timelapse.ui(ui, &ctx),
         }
-        if self.stitch.busy() || self.stack.busy() {
+        if self.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         self.guard_close(&ctx);
@@ -302,12 +396,17 @@ impl App {
             r.push("Stacking is running; it will be stopped.".to_string());
         } else if self.stitch.busy() {
             r.push("The stitcher is still working (rendering or saving).".to_string());
+        } else if self.finish.saving() {
+            r.push("Post-processing is still saving the image.".to_string());
         }
         if self.stitch.unsaved() {
             r.push("Panorama stitcher: changes not saved in a project.".to_string());
         }
         if self.stack.unsaved() {
             r.push("Star stacking: setup not saved in a project.".to_string());
+        }
+        if self.finish.unsaved() {
+            r.push("Post-processing: adjusted image not saved.".to_string());
         }
         r
     }

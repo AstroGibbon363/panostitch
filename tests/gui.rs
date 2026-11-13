@@ -148,6 +148,14 @@ fn stitcher_tab_end_to_end() {
         w.idle("save");
         let img = panostitch::io::load_any(&out, &Default::default()).unwrap();
         assert!(img.w > 500 && img.h > 300, "{ext}: {}×{}", img.w, img.h);
+        // The report: saved, how many photos, the size and the file.
+        let rep = w.app.stitch.t_report().expect("no report after saving");
+        assert!(rep.ok && rep.title == "Panorama saved", "{rep:?}");
+        let row = |k: &str| rep.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).unwrap_or_default();
+        assert_eq!(row("Photos"), "3", "{rep:?}");
+        assert!(row("Size").starts_with(&format!("{}×{} px", img.w, img.h)), "{rep:?}");
+        assert!(row("File").contains(&format!("pano.{ext}")), "{rep:?}");
+        assert!(!row("Stitching").is_empty() && !row("Saving").is_empty(), "{rep:?}");
     }
 
     // Closing asks first while the work is not saved in a project.
@@ -270,6 +278,12 @@ fn stacking_tab_end_to_end() {
     assert!(r.report.iter().any(|f| f.status == panostitch::stacker::Status::Excluded));
     assert_eq!(r.report.iter().filter(|f| f.used()).count(), 5, "{}", panostitch::stacker::report_text(&r.report));
     assert!(std::path::Path::new(&out).is_file());
+    let rep = w.app.stack.t_report().expect("no report after stacking");
+    assert!(rep.ok && rep.title == "Stack finished", "{rep:?}");
+    let row = |k: &str| rep.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).unwrap_or_default();
+    assert!(row("Frames").starts_with("5 of 6 stacked") && row("Frames").contains("1 excluded by you"), "{rep:?}");
+    assert!(row("Saved").starts_with("stacked.tif ("), "{rep:?}");
+    assert!(!row("Time").is_empty() && row("Result").contains(" px"), "{rep:?}");
 
     // The project keeps files, exclusions, the sky line and the settings.
     assert!(w.app.close_reasons().iter().any(|r| r.starts_with("Star stacking")), "{:?}", w.app.close_reasons());
@@ -312,7 +326,7 @@ fn button_symbols_have_glyphs() {
     w.frame();
     w.frame();
     let mut used: Vec<char> = Vec::new();
-    for f in ["src/gui/mod.rs", "src/gui/stitch.rs", "src/gui/stack.rs"] {
+    for f in ["src/gui/mod.rs", "src/gui/stitch.rs", "src/gui/stack.rs", "src/gui/finish.rs", "src/gui/timelapse.rs"] {
         let s = std::fs::read_to_string(f).unwrap();
         used.extend(s.chars().filter(|c| ('\u{2190}'..='\u{2BFF}').contains(c)));
     }
@@ -322,5 +336,77 @@ fn button_symbols_have_glyphs() {
     for fam in [egui::FontId::proportional(14.0), egui::FontId::monospace(14.0)] {
         let missing: String = w.ctx.fonts_mut(|f| used.iter().copied().filter(|c| !f.has_glyph(&fam, *c)).collect());
         assert!(missing.is_empty(), "{fam:?}: no glyph for {missing}");
+    }
+}
+
+#[test]
+fn post_processing_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_string_lossy().to_string();
+    let src = pj(&d, "stack.fits");
+    // A dark, linear "stack": FITS opens with the automatic stretch.
+    let img = scene(300, 450, 9).map(|c| c.map(|v| v * 0.05));
+    panostitch::io::save_panorama(&src, &img).unwrap();
+    let mut w = Win::new(vec![]);
+    w.app.show_finish();
+    w.app.finish.open(&src);
+    w.idle("open");
+    assert_eq!(w.app.finish.t_loaded(), Some((450, 300)), "{}", w.app.finish.t_status());
+    w.idle("preview");
+    assert!(w.app.finish.t_shown_current(), "{}", w.app.finish.t_status());
+    assert!(w.app.close_reasons().is_empty(), "nothing changed yet: {:?}", w.app.close_reasons());
+
+    // Turn and crop, a GHS stretch and some tone: the preview follows.
+    w.app.finish.p.quarter = 1;
+    w.app.finish.p.crop = [0.0, 0.1, 0.0, 0.1];
+    w.app.finish.p.stretch = panostitch::finish::StretchMode::Ghs;
+    w.app.finish.p.shadows = 0.4;
+    w.idle("adjust");
+    w.idle("adjust again");
+    assert!(w.app.finish.t_shown_current());
+    assert_eq!(w.app.finish.t_shown(), Some((300, 360)));
+    assert!(w.app.close_reasons().iter().any(|r| r.contains("Post-processing")), "{:?}", w.app.close_reasons());
+
+    // Save at a smaller size.
+    let out = pj(&d, "final.jpg");
+    w.app.finish.p.long_edge = 200;
+    w.app.finish.t_set_out(&out);
+    w.app.finish.t_save();
+    w.idle("save");
+    assert!(w.app.finish.t_status().starts_with("Saved"), "{}", w.app.finish.t_status());
+    let saved = panostitch::io::load_plain(&out).unwrap();
+    assert_eq!((saved.w, saved.h), (167, 200));
+    assert!(w.app.close_reasons().is_empty(), "{:?}", w.app.close_reasons());
+}
+
+#[test]
+fn timelapse_tab_mask() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_string_lossy().to_string();
+    let paths: Vec<String> = (0..3)
+        .map(|k| {
+            let p = pj(&d, &format!("frame{k:03}.jpg"));
+            panostitch::io::save_panorama(&p, &scene(200, 300, 20 + k)).unwrap();
+            p
+        })
+        .collect();
+    let mut w = Win::new(vec![]);
+    w.app.show_timelapse();
+    w.app.timelapse.t_add(paths);
+    w.until("frame preview", 30, |a| a.timelapse.t_shown().is_some());
+    assert_eq!(w.app.timelapse.t_shown(), Some((300, 200)));
+    let (mh, mw, n) = w.app.timelapse.t_mask();
+    assert_eq!((mh, mw, n), (320, 480, 0));
+    // Paint sky at the top, then take a bit back as foreground.
+    w.app.timelapse.t_paint(150.0, 20.0, true);
+    let (_, _, sky) = w.app.timelapse.t_mask();
+    assert!(sky > 1000, "painted {sky}");
+    w.app.timelapse.t_paint(150.0, 20.0, false);
+    assert_eq!(w.app.timelapse.t_mask().2, 0);
+    // Looks per region are kept apart.
+    w.app.timelapse.t_look(1).exposure = 0.5;
+    assert_eq!(w.app.timelapse.t_look(2).exposure, 0.0);
+    for _ in 0..3 {
+        w.frame();
     }
 }

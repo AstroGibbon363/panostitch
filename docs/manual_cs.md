@@ -30,6 +30,8 @@ uvedeny **tučně v angličtině**, přesně tak, jak je uvidíte na obrazovce.
 13. [Skládání hvězd](#13-skládání-hvězd)
 14. [Použití bez okna](#14-použití-bez-okna)
 15. [Soubory](#15-soubory)
+16. [Dodatečné úpravy](#16-dodatečné-úpravy)
+17. [Timelapse](#17-timelapse)
 
 ---
 
@@ -566,6 +568,12 @@ Panoramy širší nebo vyšší než 60 000 px se odmítnou. Téměř vždy to z
 je některá dvojice spárovaná špatně nebo že projekce není vhodná; zkuste
 cylindrical nebo spherical.
 
+Během práce ukazuje stavový řádek uplynulý čas. Po uložení shrne vše krátký
+**přehled** pod tlačítkem Save: kolik fotek je v panoramě (a kolik se
+nespárovalo), čas spojování (načtení, párování a náhledy od přidání první
+fotky), čas ukládání, velikost v pixelech a soubor s jeho velikostí, nebo
+chyba, pokud se uložení nepovedlo. × ho zavře.
+
 ---
 
 ## 11. Řešení problémů
@@ -655,8 +663,11 @@ kliknutím: **Milky Way landscape** (zmrazené popředí, oblast oblohy
 detekovaná automaticky, korekce zkreslení, světelné znečištění), **Star
 trails** (vyplněné mezery) a **Deep sky (telescope)** (celý snímek je obloha,
 extrakce pozadí, kalibrace barev, automatické roztažení). Každé nastavení lze
-dál měnit. Během skládání ukazuje ukazatel průběhu pod náhledem krok a
-odhadovaný zbývající čas.
+dál měnit. Během skládání ukazuje ukazatel průběhu pod náhledem krok, uplynulý
+čas a odhadovaný zbývající čas. Po skončení se nahoře v pravém panelu objeví
+krátký **přehled**: kolik snímků se složilo z kolika (včetně vynechaných a
+vyřazených), kalibrační snímky, jak dlouho to trvalo, velikost výsledku a
+uložený soubor s jeho velikostí, nebo co se pokazilo. × ho zavře.
 
 ### 13.1 Rychlý start
 
@@ -886,7 +897,111 @@ Zdrojový kód (pro vlastní sestavení programu):
 | `src/image.rs`, `src/io/` | Obrazy; načítání a ukládání (JPEG, PNG, TIFF, BMP, RAW, FITS, XISF). |
 | `src/stitcher/` | Spojování: body, párování, umístění, zpřesnění, projekce, prolínání. |
 | `src/stacker/` | Skládání hvězd. |
-| `src/gui/` | Okno: obě karty a dialogy souborů. |
+| `src/finish.rs` | Dodatečné úpravy: geometrie, roztažení (MTF, arcsinh, GHS), vyvážení bílé, světla, křivky, barvy, detail. |
+| `src/gui/` | Okno: čtyři karty a dialogy souborů. |
 | `src/bin/` | Oba programy, `panostitch` a `panostack`. |
-| `tests/` | Testy: skládání na umělých nočních scénách, spojování, formáty souborů a obě karty okna. Spustíte je příkazem `cargo test --release`. |
+| `tests/` | Testy: skládání na umělých nočních scénách, spojování, dodatečné úpravy, formáty souborů a karty okna. Spustíte je příkazem `cargo test --release`. |
 | `examples/scripted.rs` | Použití spojování z vlastního kódu v Rustu. |
+
+---
+
+## 16. Dodatečné úpravy
+
+*Novinka ve verzi 0.4 (ve vývoji).* Karta **Post-processing** provede
+poslední kroky se složeným nebo spojeným snímkem, takže na ně nepotřebujete
+jiný program: otočení a ořez, roztažení lineárních dat, vyvážení bílé, světla,
+křivky, barvy, šum, hvězdy, doostření a uložení v požadované velikosti.
+
+**Jak dostat snímek dovnitř:** **Open…** (Ctrl+O) nebo napište cestu a
+stiskněte Enter; tlačítko **✎ Use in Post-processing** na kartě skládání
+hvězd; nebo **✎ Post-process** ve spojování po uložení panoramy. Soubory FITS
+a XISF se berou jako lineární data a začínají automatickým roztažením; JPEG,
+TIFF a PNG jako hotové snímky (bez roztažení). Ručně to přepíná **Linear data
+(needs stretching)**.
+
+Náhled pracuje s kopií o nejvýše 2000 px, takže na posuvníky reaguje téměř
+hned. **Save** zpracuje celý snímek na pozadí přesně se stejným nastavením;
+hodnoty, které program měří (automatické roztažení, neutrální pozadí), se
+převezmou z náhledu, takže uložený soubor vypadá jako náhled.
+
+Kroky běží vždy v tomto pořadí, vlevo shora dolů:
+
+| Oddíl | Co dělá |
+|---|---|
+| **Turn and crop** | ⟲ ⟳ otočení o 90°, **Mirror** (zrcadlení), **Rotate** o libovolný úhel (jemné u 0°, jako Yaw/Pitch/Roll ve spojování), **Cut away the empty corners** (odříznout prázdné rohy po otočení), ořez z každé strany nebo na tvar (3:2, 4:3, 16:9, 4:5, 1:1, 2:1). |
+| **Stretch** (lineární data) | Nejdřív **Background extraction** a **Colour calibration** (obojí volitelné, na lineárních datech), potom metoda roztažení (viz níže). |
+| **White balance** | Na lineárním světle, před roztažením. **◎ Sample grey**, potom táhněte obdélník přes něco, co má být neutrální (pozadí oblohy, mrak): podle něj se nastaví násobitele barev. **Neutral background** udělá tmavší polovinu šedou. **Temperature** a **Tint** doladí. Hotové snímky se kvůli tomu vyjmou z křivky sRGB a pak do ní vrátí, takže vyvážení sedí v každém jasu. |
+| **Light** | **Exposure** (EV), **Contrast**, **Highlights** (kolem 75 %), **Midtones** (50 %), **Shadows** (25 %), **Whites** a **Blacks** (krajní body), jako ve fotoeditorech. |
+| **Curves** | Jedna křivka pro všechny barvy (**RGB**) a po jedné pro **Red**, **Green**, **Blue**. Kliknutím přidáte bod, tažením ho posunete, pravým tlačítkem odeberete. Histogram za křivkou je histogram toho, co do ní vstupuje. • označuje změněné křivky. |
+| **Colour** | **Saturation** (0 = černobílé) a **Vibrance** (mdlé barvy víc než sytré). |
+| **Detail** | **Noise reduction** (vyhladí plochá místa, zachová hrany a hvězdy), **Colour noise**, **Star reduction** (menší hvězdy), **Sharpen** a jeho poloměr. Poloměry jsou v pixelech celého snímku, takže náhled odpovídá uloženému výsledku. |
+
+**Metody roztažení:**
+
+| Metoda | Použití |
+|---|---|
+| **Off** | Snímek je už hotový. |
+| **sRGB curve** | Jako fotoaparát: pro lineární data, kterým stačí běžná gama. |
+| **MTF, automatic** | Černý bod těsně pod pozadím oblohy, střední tóny tak, aby pozadí mělo jas **Background** (jako AutoStretch v Sirilu / STF v PixInsightu). **Each colour on its own** (výchozí) měří červenou, zelenou a modrou zvlášť, takže barevný nádech složeného snímku obraz neschová; data se přitom nemění. **Auto → manual** pokračuje ručně od naměřených hodnot. |
+| **MTF, manual** | Černý bod, střední tóny a bílý bod (midtones transfer function). |
+| **Arcsinh** | Inverzní hyperbolický sinus: silné roztažení, které zachová barvy hvězd. **Stretch factor** 1–10000; hluboké snímky se slabým pozadím potřebují několik tisíc. |
+| **Generalized hyperbolic (GHS)** | **Stretch ln(D+1)** (síla), **Local intensity b** (jak úzce se roztažení soustředí kolem bodu symetrie), **Symmetry point** (kde je roztažení nejsilnější: dejte ho na pozadí oblohy), **Protect shadows** a **Protect highlights** (pod / nad nimi přímka). |
+
+U Arcsinh a GHS: **Inverse** použije inverzní křivku (stlačuje místo
+roztahování, např. když je roztažení příliš silné); **Keep star colours**
+roztahuje jas a zachová barvu každého pixelu (vypnuto: každá barva zvlášť,
+sytější obloha, bledší hvězdy); **Points from the background** nastaví černý
+bod těsně pod pozadí nejtmavší barvy a u GHS bod symetrie na pozadí.
+
+**Display** (nad náhledem) mění jen zobrazení náhledu, nikdy uložený snímek,
+jako režimy zobrazení v Sirilu: **Linear (as saved)**, **Logarithm**,
+**Square root**, **Squared**, **Asinh**, **AutoStretch**, **Histogram
+equalisation**. Hodí se k nahlédnutí do stínů nebo kontrole pozadí, aniž byste
+cokoli měnili. Dokud není zvoleno Linear, svítí „view only".
+
+**◐ Compare** (podržte ho, nebo podržte B) ukáže výchozí bod: otočeno,
+oříznuto a roztaženo, nic víc.
+
+**Save** (vpravo): **Size** (plná velikost, nebo delší strana např. 2048 px
+pro fóra), název a typ souboru, **JPEG quality**. Řádek pod tím říká, kolik
+paměti uložení potřebuje. FITS / XISF dostanou hotový (roztažený) snímek jako
+32bitová desetinná čísla. **Keep settings for the next image** (vlevo) dá
+několika snímkům stejný vzhled, např. dílům panoramy.
+
+| Klávesa | Akce |
+|---|---|
+| Ctrl+O | Otevřít snímek |
+| Ctrl+S | Uložit (do zobrazeného souboru) |
+| Ctrl+Shift+S | Uložit jako… |
+| F | Celý náhled do okna |
+| B (držet) | Porovnat s výchozím bodem |
+
+Zatím chybí: zpět (undo), uložení nastavení jako předvolby, ořez tažením v obraze.
+
+## 17. Timelapse
+
+*Připravuje se pro verzi 0.4.* Karta **Timelapse** bude ze série snímků
+dělat video: běžný časosběr, rostoucí hvězdné stopy nebo stopy ve stylu komet
+(s doznívajícími konci), s odstraněním blikání, stabilizací, vzhledem z karty
+Post-processing na každém snímku a výstupem MP4, WebM, GIF nebo číslovaných
+snímků.
+
+Zatím jsou tu jen ovládací prvky; na snímky se nic nepoužije a video se
+zatím nevytvoří (**▶ Make video** je šedé):
+
+- **Snímky:** přidejte soubory nebo složku; přehrávají se v pořadí názvů
+  souborů. Kliknutím se snímek zobrazí uprostřed (◀ ▶ listují).
+- **Look (vzhled):** stejné posuvníky světla a barev jako v Post-processing
+  (expozice, kontrast, světla, střední tóny, stíny, bílé, černé, teplota,
+  odstín, sytost, živost), zvlášť pro **Whole frame** (celý snímek), **Sky**
+  (oblohu) a **Foreground** (popředí). Obloha a popředí se přidávají k
+  vzhledu celého snímku, jen ve své části masky; • označuje změněné části.
+- **Maska:** zapněte **✎ Paint** a malujte na zobrazený snímek: levé tlačítko
+  = obloha, pravé = popředí, kolečko myši = velikost štětce. **All sky**,
+  **Invert**, **Clear** a **Soft edge** (jak měkce se oba vzhledy na hranici
+  prolnou). Jedna maska platí pro všechny snímky, protože na stativu se
+  popředí nehýbe. Obloha je obarvená modře, popředí oranžově (**Show mask**).
+- **Video a výstup:** druh, odstranění blikání, stabilizace, začátek od
+  vzhledu z Post-processing, pomalý zoom, formát, snímková frekvence,
+  rozlišení, ořez na 16:9, kvalita a jak dlouhé by video bylo (počet snímků ÷
+  snímková frekvence).

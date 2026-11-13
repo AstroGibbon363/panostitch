@@ -215,6 +215,20 @@ impl SaveNeeds {
 }
 
 pub struct StitchTab {
+    /// Saved panoramas handed to the Post-processing tab.
+    pub to_finish: Vec<String>,
+    /// The panorama being saved, and the last one saved.
+    saving_to: Option<String>,
+    last_pano: Option<String>,
+    /// The running job: when it started and whether it is saving the panorama.
+    job_t0: Option<std::time::Instant>,
+    job_is_save: bool,
+    /// Time spent loading, matching and previewing since the first image was added.
+    work_secs: f64,
+    /// What the panorama being saved is made of: images used, images loaded, cropped.
+    save_meta: (usize, usize, bool),
+    /// Summary of the last save.
+    report: Option<super::JobReport>,
     items: Vec<Item>,
     pairs: Vec<PairRes>,
     layout: Option<Placement>,
@@ -378,7 +392,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: "Add images to begin (any order).".into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -476,11 +490,17 @@ impl StitchTab {
         self.busy || self.dialog.is_some()
     }
 
-    fn spawn(&mut self, msg: &str, f: impl FnOnce(&Sender<Msg>) -> Result<Msg, String> + Send + 'static) {
+    /// Run `f` in the background; false if another step is still running.
+    fn spawn(&mut self, msg: &str, f: impl FnOnce(&Sender<Msg>) -> Result<Msg, String> + Send + 'static) -> bool {
         if self.busy {
             self.status = "Busy – wait for the current step to finish.".into();
-            return;
+            return false;
         }
+        if self.items.is_empty() {
+            self.work_secs = 0.0; // a new set of images
+        }
+        self.job_t0 = Some(std::time::Instant::now());
+        self.job_is_save = false;
         self.busy = true;
         self.status = msg.into();
         let tx = self.tx.clone();
@@ -488,6 +508,7 @@ impl StitchTab {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&tx))).unwrap_or_else(|_| Err("internal error (panic)".into()));
             let _ = tx.send(r.unwrap_or_else(Msg::Error));
         });
+        true
     }
 
     pub fn add_paths(&mut self, ps: Vec<String>) {
@@ -1206,7 +1227,9 @@ impl StitchTab {
         }
         let opt = LoadOptions { decoder: p.decoder, half: false, ..Default::default() };
         let cropped = self.crop.is_some();
-        self.spawn("Rendering the panorama…", move |tx| {
+        let meta = (vis.len(), self.items.len(), cropped);
+        let out_name = out.clone();
+        let started = self.spawn("Rendering the panorama…", move |tx| {
             let nre = reread.len();
             for (n, (k, path)) in reread.iter().enumerate() {
                 let _ = tx.send(Msg::Status(format!("Reading {}/{nre} at full size: {}", n + 1, basename(path))));
@@ -1229,19 +1252,74 @@ impl StitchTab {
             io::save_panorama(&out, &if astro { img } else { look(&img, 1.0, &p) })?;
             Ok(Msg::Done(format!("Saved {out} ({w}×{h} px, {} images{}{}).", refs.len(), if cropped { ", cropped" } else { "" }, if astro { ", linear 32-bit" } else if p.stretched() { ", stretched as shown" } else { "" })))
         });
+        if started {
+            self.job_is_save = true;
+            self.saving_to = Some(out_name);
+            self.save_meta = meta;
+        }
+    }
+
+    /// The summary shown when saving a panorama has finished or failed.
+    fn save_report(&self, ok: Result<&str, &str>) -> super::JobReport {
+        let (used, total, cropped) = self.save_meta;
+        let secs = self.job_t0.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+        let mut r = match ok {
+            Ok(_) => super::JobReport::new("Panorama saved", true),
+            Err(e) => super::JobReport::new("Panorama not saved", false).row("Error", e.to_string()),
+        };
+        r = r.row("Photos", if used == total { format!("{used}") } else { format!("{used} of {total} (the others did not match)") });
+        if self.work_secs > 0.0 {
+            r = r.row("Stitching", format!("{} (loading, matching, previews)", super::duration(self.work_secs)));
+        }
+        r = r.row("Saving", super::duration(secs));
+        if let (Ok(msg), Some(p)) = (ok, &self.saving_to) {
+            // "Saved <path> (W×H px, …)": the size from the message, the file from disk.
+            if let Some(dims) = msg.rsplit_once(" (").and_then(|(_, t)| t.split(" px").next()) {
+                let mp = dims.split_once('×').and_then(|(a, b)| Some(a.parse::<f64>().ok()? * b.parse::<f64>().ok()? / 1e6));
+                r = r.row("Size", format!("{dims} px{}{}", mp.map(|m| format!(" ({m:.1} MP)")).unwrap_or_default(), if cropped { ", cropped" } else { "" }));
+            }
+            r = r.row("File", format!("{} ({})", basename(p), super::file_size(p)));
+        }
+        r
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
+        self.poll_messages(ctx);
+        // A job has ended: count its time (saving is reported on its own).
+        if !self.busy {
+            if let Some(t0) = self.job_t0.take() {
+                if !self.job_is_save {
+                    self.work_secs += t0.elapsed().as_secs_f64();
+                }
+                self.job_is_save = false;
+            }
+        }
+    }
+
+    fn poll_messages(&mut self, ctx: &egui::Context) {
         while let Ok(m) = self.rx.try_recv() {
             match m {
                 Msg::Status(s) => self.status = s,
                 Msg::Error(e) => {
+                    if self.job_is_save {
+                        self.report = Some(self.save_report(Err(&e)));
+                        self.saving_to = None;
+                    }
                     self.status = format!("Error: {e}");
                     self.busy = false;
                     self.preview_pending = false;
                     self.note_after = None;
                 }
                 Msg::Done(s) => {
+                    if self.job_is_save {
+                        if let Some(p) = self.saving_to.clone() {
+                            if s.starts_with(&format!("Saved {p} ")) {
+                                self.report = Some(self.save_report(Ok(&s)));
+                                self.last_pano = Some(p);
+                            }
+                        }
+                        self.saving_to = None;
+                    }
                     self.status = s;
                     self.busy = false;
                 }
@@ -1813,6 +1891,17 @@ impl StitchTab {
         if ui.add(big("⬇ Save panorama…")).on_hover_text("Ctrl+Shift+S").clicked() {
             self.ask_save_pano();
         }
+        if let Some(p) = self.last_pano.clone() {
+            if ui.button("✎ Post-process").on_hover_text(format!("Open {} in the Post-processing tab: crop, curves, colour, noise", basename(&p))).clicked() {
+                self.to_finish.push(p);
+            }
+        }
+        if let Some(r) = &self.report {
+            ui.add_space(4.0);
+            if r.ui(ui) {
+                self.report = None;
+            }
+        }
         redo
     }
 
@@ -1940,7 +2029,11 @@ impl StitchTab {
             ViewKind::Pano => self.show_pano(ui, ctx),
         });
         let col = if ui.visuals().dark_mode { Color32::from_rgb(255, 160, 128) } else { Color32::from_rgb(140, 0, 0) };
-        egui::ScrollArea::vertical().id_salt("status").show(ui, |ui| ui.colored_label(col, &self.status));
+        let status = match self.job_t0 {
+            Some(t0) if self.busy && t0.elapsed().as_secs_f64() >= 1.0 => format!("{} – {} elapsed", self.status, super::duration(t0.elapsed().as_secs_f64())),
+            _ => self.status.clone(),
+        };
+        egui::ScrollArea::vertical().id_salt("status").show(ui, |ui| ui.colored_label(col, status));
         // Shortcuts that work even while typing in a field.
         use egui::{Key, KeyboardShortcut as Ks, Modifiers as Mo};
         let (save_pano, save_proj, open, run) = ctx.input_mut(|i| {
@@ -2209,7 +2302,7 @@ impl StitchTab {
 /// or type into, and ◀ ▶ steps of 0.1° (Shift: 1°). `fine_centre`: the slider
 /// is logarithmic, so small corrections near 0° (the usual case for pitch and
 /// roll) take most of its length instead of a few pixels.
-fn angle(ui: &mut egui::Ui, label: &str, v: &mut f64, max: f64, fine_centre: bool) -> bool {
+pub(crate) fn angle(ui: &mut egui::Ui, label: &str, v: &mut f64, max: f64, fine_centre: bool) -> bool {
     ui.label(label);
     let mut ch = false;
     ui.horizontal(|ui| {
@@ -2265,6 +2358,9 @@ pub fn histogram(ui: &mut egui::Ui, img: &Img, stretch: Option<(f64, f64, f64)>)
 /// Hooks for the headless window tests (tests/gui.rs).
 #[doc(hidden)]
 impl StitchTab {
+    pub fn t_report(&self) -> Option<&super::JobReport> {
+        self.report.as_ref()
+    }
     pub fn t_status(&self) -> &str {
         &self.status
     }

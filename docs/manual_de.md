@@ -32,6 +32,8 @@ erscheinen.
 13. [Sterne stacken](#13-sterne-stacken)
 14. [Verwendung ohne Fenster](#14-verwendung-ohne-fenster)
 15. [Dateien](#15-dateien)
+16. [Nachbearbeitung](#16-nachbearbeitung)
+17. [Zeitraffer](#17-zeitraffer)
 
 ---
 
@@ -600,6 +602,13 @@ Panoramen, die breiter oder höher als 60 000 px würden, werden abgelehnt. Das
 bedeutet fast immer, dass ein Paar falsch zugeordnet ist oder die Projektion
 ungeeignet ist; probieren Sie cylindrical oder spherical.
 
+Während der Arbeit zeigt die Statuszeile die vergangene Zeit. Nach dem
+Speichern fasst ein kurzer **Bericht** unter dem Save-Knopf alles zusammen:
+wie viele Fotos im Panorama sind (und wie viele nicht passten), die Zeit zum
+Zusammenfügen (Laden, Zuordnen und Vorschauen seit dem ersten Foto), die Zeit
+zum Speichern, die Größe in Pixeln und die Datei mit ihrer Größe, oder den
+Fehler, falls das Speichern scheiterte. × schließt ihn.
+
 ---
 
 ## 11. Fehlerbehebung
@@ -694,7 +703,11 @@ Lichtverschmutzung), **Star trails** (Lücken gefüllt) und **Deep sky
 (telescope)** (das ganze Bild ist Himmel, Hintergrundextraktion,
 Farbkalibrierung, automatische Streckung). Jede Einstellung lässt sich
 weiterhin ändern. Während eines Laufs zeigt ein Fortschrittsbalken unter der
-Ansicht den Schritt und die geschätzte Restzeit.
+Ansicht den Schritt, die vergangene Zeit und die geschätzte Restzeit. Am Ende
+erscheint oben im rechten Bereich ein kurzer **Bericht**: wie viele Bilder von
+wie vielen gestackt wurden (ausgelassene und ausgeschlossene mitgezählt), die
+Kalibrierbilder, die benötigte Zeit, die Größe des Ergebnisses und die
+gespeicherte Datei mit ihrer Größe, oder was schiefging. × schließt ihn.
 
 ### 13.1 Schnellstart
 
@@ -939,7 +952,117 @@ Quellcode (um das Programm selbst zu bauen):
 | `src/image.rs`, `src/io/` | Bilder; Laden und Speichern (JPEG, PNG, TIFF, BMP, RAW, FITS, XISF). |
 | `src/stitcher/` | Zusammenfügen: Merkmale, Zuordnung, Platzierung, Verfeinerung, Projektionen, Überblendung. |
 | `src/stacker/` | Sterne stacken. |
-| `src/gui/` | Das Fenster: beide Tabs und die Dateidialoge. |
+| `src/finish.rs` | Nachbearbeitung: Geometrie, Streckungen (MTF, Arcsinh, GHS), Weißabgleich, Licht, Kurven, Farbe, Detail. |
+| `src/gui/` | Das Fenster: die vier Tabs und die Dateidialoge. |
 | `src/bin/` | Die beiden Programme, `panostitch` und `panostack`. |
-| `tests/` | Tests: Stacken mit künstlichen Nachtszenen, Zusammenfügen, Dateiformate und beide Tabs des Fensters. Ausführen mit `cargo test --release`. |
+| `tests/` | Tests: Stacken mit künstlichen Nachtszenen, Zusammenfügen, Nachbearbeitung, Dateiformate und die Tabs des Fensters. Ausführen mit `cargo test --release`. |
 | `examples/scripted.rs` | Das Zusammenfügen aus eigenem Rust-Code verwenden. |
+
+---
+
+## 16. Nachbearbeitung
+
+*Neu in 0.4 (in Entwicklung).* Der Tab **Post-processing** erledigt die
+letzten Schritte an einem gestackten oder zusammengefügten Bild, ohne dass
+ein anderes Programm nötig ist: drehen und zuschneiden, lineare Daten
+strecken, Weißabgleich, Licht, Kurven, Farbe, Rauschen, Sterne, Schärfen und
+Speichern in der gewünschten Größe.
+
+**Ein Bild hineinbringen:** **Open…** (Strg+O) oder einen Pfad eingeben und
+Enter drücken; **✎ Use in Post-processing** im Tab Sterne stacken; oder
+**✎ Post-process** im Stitcher nach dem Speichern eines Panoramas. FITS- und
+XISF-Dateien gelten als lineare Daten und beginnen mit der automatischen
+Streckung; JPEG, TIFF und PNG als fertige Bilder (ohne Streckung). **Linear
+data (needs stretching)** schaltet das von Hand um.
+
+Die Vorschau arbeitet mit einer Kopie von höchstens 2000 px und folgt den
+Reglern daher fast sofort. **Save** bearbeitet das ganze Bild im Hintergrund
+mit genau denselben Einstellungen; vom Programm gemessene Werte (automatische
+Streckung, neutraler Hintergrund) werden aus der Vorschau übernommen, sodass
+die gespeicherte Datei wie die Vorschau aussieht.
+
+Die Schritte laufen immer in dieser Reihenfolge, links von oben nach unten:
+
+| Abschnitt | Was er tut |
+|---|---|
+| **Turn and crop** | ⟲ ⟳ Vierteldrehungen, **Mirror** (spiegeln), **Rotate** um einen beliebigen Winkel (fein um 0°, wie Yaw/Pitch/Roll im Stitcher), **Cut away the empty corners** (leere Ecken nach dem Drehen abschneiden), von jeder Seite zuschneiden oder auf ein Format (3:2, 4:3, 16:9, 4:5, 1:1, 2:1). |
+| **Stretch** (lineare Daten) | Zuerst **Background extraction** und **Colour calibration** (beide optional, auf den linearen Daten), dann die Streckmethode (siehe unten). |
+| **White balance** | Auf linearem Licht, vor der Streckung. **◎ Sample grey**, dann ein Rechteck über etwas ziehen, das neutral sein soll (Himmelshintergrund, eine Wolke): Danach werden die Farbfaktoren gesetzt. **Neutral background** macht die dunklere Hälfte grau. **Temperature** und **Tint** zur Feinabstimmung. Fertige Bilder werden dafür aus ihrer sRGB-Kurve genommen und zurückgesetzt, sodass der Abgleich bei jeder Helligkeit stimmt. |
+| **Light** | **Exposure** (EV), **Contrast**, **Highlights** (um 75 %), **Midtones** (50 %), **Shadows** (25 %), **Whites** und **Blacks** (die Endpunkte), wie in Fotoprogrammen. |
+| **Curves** | Eine Kurve für alle Farben (**RGB**) und je eine für **Red**, **Green**, **Blue**. Klicken fügt einen Punkt hinzu, Ziehen verschiebt ihn, Rechtsklick entfernt ihn. Das Histogramm hinter der Kurve zeigt, was in sie hineingeht. • markiert geänderte Kurven. |
+| **Colour** | **Saturation** (0 = schwarzweiß) und **Vibrance** (blasse Farben mehr als kräftige). |
+| **Detail** | **Noise reduction** (glättet flache Bereiche, erhält Kanten und Sterne), **Colour noise**, **Star reduction** (kleinere Sterne), **Sharpen** und sein Radius. Radien sind in Pixeln des ganzen Bildes, daher entspricht die Vorschau dem gespeicherten Ergebnis. |
+
+**Streckmethoden:**
+
+| Methode | Verwendung |
+|---|---|
+| **Off** | Das Bild ist schon fertig. |
+| **sRGB curve** | Wie eine Kamera: für lineare Daten, die nur die normale Gammakurve brauchen. |
+| **MTF, automatic** | Schwarzpunkt knapp unter dem Himmelshintergrund, Mitteltöne so, dass der Hintergrund die Helligkeit **Background** erhält (wie AutoStretch in Siril / STF in PixInsight). **Each colour on its own** (Standard) misst Rot, Grün und Blau getrennt, sodass ein Farbstich des Stacks das Bild nicht verdeckt; die Daten selbst bleiben unverändert. **Auto → manual** macht von Hand mit den gemessenen Werten weiter. |
+| **MTF, manual** | Schwarzpunkt, Mitteltöne und Weißpunkt (Midtones Transfer Function). |
+| **Arcsinh** | Inverser hyperbolischer Sinus: starke Streckung, die Sternfarben erhält. **Stretch factor** 1–10000; tiefe Stacks mit schwachem Hintergrund brauchen einige Tausend. |
+| **Generalized hyperbolic (GHS)** | **Stretch ln(D+1)** (Stärke), **Local intensity b** (wie eng sich die Streckung um den Symmetriepunkt konzentriert), **Symmetry point** (wo die Streckung am stärksten ist: auf den Himmelshintergrund legen), **Protect shadows** und **Protect highlights** (darunter / darüber eine Gerade). |
+
+Bei Arcsinh und GHS: **Inverse** verwendet die inverse Kurve (staucht statt
+zu strecken, z. B. um eine zu starke Streckung zurückzunehmen); **Keep star
+colours** streckt die Helligkeit und erhält die Farbe jedes Pixels (aus: jede
+Farbe für sich, satterer Himmel, blassere Sterne); **Points from the
+background** setzt den Schwarzpunkt knapp unter den Hintergrund der dunkelsten
+Farbe und bei GHS den Symmetriepunkt auf den Hintergrund.
+
+**Display** (über der Vorschau) ändert nur die Anzeige der Vorschau, nie das
+gespeicherte Bild, wie die Anzeigemodi in Siril: **Linear (as saved)**,
+**Logarithm**, **Square root**, **Squared**, **Asinh**, **AutoStretch**,
+**Histogram equalisation**. Nützlich, um in die Schatten zu schauen oder den
+Hintergrund zu prüfen, ohne etwas zu ändern. Solange nicht Linear gewählt
+ist, steht „view only" daneben.
+
+**◐ Compare** (gedrückt halten, oder B halten) zeigt den Ausgangspunkt:
+gedreht, zugeschnitten und gestreckt, sonst nichts.
+
+**Save** (rechts): **Size** (volle Größe oder eine längste Seite wie 2048 px
+für Foren), Dateiname und -typ, **JPEG quality**. Die Zeile darunter nennt den
+Speicherbedarf beim Speichern. FITS / XISF erhalten das fertige (gestreckte)
+Bild als 32-Bit-Gleitkomma. **Keep settings for the next image** (links) gibt
+mehreren Bildern denselben Look, z. B. den Teilen eines Panoramas.
+
+| Taste | Aktion |
+|---|---|
+| Strg+O | Bild öffnen |
+| Strg+S | Speichern (unter dem angezeigten Namen) |
+| Strg+Umschalt+S | Speichern unter… |
+| F | Vorschau einpassen |
+| B (halten) | Mit dem Ausgangspunkt vergleichen |
+
+Noch nicht: Rückgängig, Einstellungen als Vorgabe speichern, Zuschneiden durch Ziehen im Bild.
+
+## 17. Zeitraffer
+
+*Entsteht für 0.4.* Der Tab **Timelapse** wird aus einer Bildfolge ein Video
+machen: einen normalen Zeitraffer, wachsende Strichspuren oder verblassende
+Spuren im Kometenstil, mit Entflackern, Beruhigen, dem Look aus dem Tab
+Post-processing auf jedem Bild und Ausgabe als MP4, WebM, GIF oder
+nummerierte Bilder.
+
+Vorerst gibt es nur die Bedienelemente; auf die Bilder wird noch nichts
+angewendet und kein Video erstellt (**▶ Make video** ist ausgegraut):
+
+- **Bilder:** Dateien oder einen Ordner hinzufügen; sie laufen in der
+  Reihenfolge der Dateinamen. Ein Klick zeigt das Bild in der Mitte (◀ ▶
+  blättern).
+- **Look:** dieselben Licht- und Farbregler wie in Post-processing
+  (Belichtung, Kontrast, Lichter, Mitteltöne, Schatten, Weiß, Schwarz,
+  Temperatur, Tönung, Sättigung, Dynamik), getrennt für **Whole frame** (das
+  ganze Bild), **Sky** (Himmel) und **Foreground** (Vordergrund). Himmel und
+  Vordergrund kommen zum Look des ganzen Bildes hinzu, nur in ihrem Teil der
+  Maske; • markiert geänderte Teile.
+- **Maske:** **✎ Paint** einschalten und auf das gezeigte Bild malen: linke
+  Taste = Himmel, rechte Taste = Vordergrund, Mausrad = Pinselgröße. **All
+  sky**, **Invert**, **Clear** und **Soft edge** (wie weich die beiden Looks
+  an der Grenze ineinander übergehen). Eine Maske gilt für alle Bilder, denn
+  auf dem Stativ bewegt sich der Vordergrund nicht. Himmel ist blau getönt,
+  Vordergrund orange (**Show mask**).
+- **Video und Ausgabe:** Art, Entflackern, Beruhigen, Start vom Look aus
+  Post-processing, langsamer Zoom, Format, Bildrate, Auflösung, 16:9-Zuschnitt,
+  Qualität und wie lang das Video würde (Bilder ÷ Bildrate).

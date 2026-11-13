@@ -66,6 +66,8 @@ enum ViewKind {
 
 pub struct StackTab {
     pub to_stitcher: Vec<String>,
+    /// Results handed to the Post-processing tab.
+    pub to_finish: Vec<String>,
     files: [Vec<String>; 7],
     group: usize,
     cfg: StackConfig,
@@ -88,6 +90,10 @@ pub struct StackTab {
     show_bg: bool,
     res_tex: Option<(u64, egui::TextureHandle)>,
     running: bool,
+    /// When the current run started, and what it was given (for the report).
+    run_info: Option<(std::time::Instant, String)>,
+    /// Summary of the last run.
+    report: Option<super::JobReport>,
     loading: bool,
     cancel: Arc<AtomicBool>,
     progress: Arc<Mutex<Progress>>,
@@ -148,7 +154,7 @@ impl Default for StackTab {
         let mut cfg = StackConfig::default();
         cfg.sky.gradient = 0.1;
         Self {
-            to_stitcher: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, frame_dims: None, disp_tex: None, overlay_tex: None,
+            run_info: None, report: None, to_stitcher: vec![], to_finish: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, frame_dims: None, disp_tex: None, overlay_tex: None,
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
             post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
@@ -281,6 +287,12 @@ impl StackTab {
         let cfg = self.settings();
         self.running = true;
         self.running_preview = preview;
+        let calib: Vec<String> = [(cfg.darks.len(), "darks"), (cfg.flats.len(), "flats"), (cfg.bias.len(), "biases"), (cfg.flatdarks.len(), "flat darks")]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, k)| format!("{n} {k}"))
+            .collect();
+        self.run_info = Some((std::time::Instant::now(), if calib.is_empty() { "none".into() } else { calib.join(", ") }));
         self.cancel.store(false, Ordering::Relaxed);
         let (tx, cancel, prog) = (self.tx.clone(), self.cancel.clone(), self.progress.clone());
         // Work units for the progress bar: one per frame loaded (calibration
@@ -354,6 +366,37 @@ impl StackTab {
             let _ = tx.send(msg);
         });
     }
+
+/// The summary shown when a run has finished.
+fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> super::JobReport {
+    let used = r.report.iter().filter(|fi| fi.used()).count();
+    let left = r.report.iter().filter(|fi| matches!(fi.status, Status::Rejected | Status::Failed)).count();
+    let excl = r.report.iter().filter(|fi| fi.status == Status::Excluded).count();
+    // A quick preview measures only a few frames: count against those.
+    let total = if r.preview { r.report.iter().filter(|fi| fi.status != Status::Skipped).count() } else { nlights };
+    let mut frames = format!("{used} of {total} stacked");
+    if left > 0 {
+        frames += &format!(", {left} left out (see Frame report)");
+    }
+    if excl > 0 {
+        frames += &format!(", {excl} excluded by you");
+    }
+    if r.preview {
+        frames += &format!(" (quick preview of {nlights} light frames)");
+    }
+    let (w, h) = (r.image.w, r.image.h);
+    let mut rep = super::JobReport::new(if r.preview { "Quick preview done" } else { "Stack finished" }, used > 0)
+        .row("Frames", frames)
+        .row("Calibration", calib.to_string())
+        .row("Time", super::duration(secs))
+        .row("Result", format!("{w} × {h} px ({:.1} MP)", (w * h) as f64 / 1e6));
+    rep = match r.saved.len() {
+        0 => rep.row("Saved", if r.preview { "not saved (quick preview)" } else { "not saved" }),
+        1 => rep.row("Saved", format!("{} ({})", basename(&r.saved[0]), super::file_size(&r.saved[0]))),
+        n => rep.row("Saved", format!("{n} files, e.g. {}", basename(&r.saved[0]))),
+    };
+    rep
+}
 
 /// Starting points for typical subjects; every setting can still be changed.
     fn apply_preset(&mut self, name: &str) -> &'static str {
@@ -435,6 +478,9 @@ impl StackTab {
                 }
                 Msg::Result(r, raw, w, s) => {
                     self.running = false;
+                    if let Some((t0, calib)) = self.run_info.take() {
+                        self.report = Some(Self::stack_report(&r, t0.elapsed().as_secs_f64(), &calib, self.files[0].len()));
+                    }
                     let fw = r.fwhm;
                     self.raw_small = Some((raw, w, fw));
                     if let Some(m) = &r.mask {
@@ -463,6 +509,14 @@ impl StackTab {
                 }
                 Msg::Status(s) => self.status = s,
                 Msg::Error(e) => {
+                    if let Some((t0, _)) = self.run_info.take() {
+                        let cancelled = e == "Cancelled.";
+                        let mut rep = super::JobReport::new(if cancelled { "Stacking cancelled" } else { "Stacking failed" }, false);
+                        if !cancelled {
+                            rep = rep.row("Error", e.clone());
+                        }
+                        self.report = Some(rep.row("Light frames", self.files[0].len().to_string()).row("Time", super::duration(t0.elapsed().as_secs_f64())));
+                    }
                     self.running = false;
                     self.loading = false;
                     self.post_busy = false;
@@ -1433,6 +1487,12 @@ impl StackTab {
     }
 
     fn right(&mut self, ui: &mut egui::Ui) {
+        if let Some(r) = &self.report {
+            if r.ui(ui) {
+                self.report = None;
+            }
+            ui.add_space(6.0);
+        }
         ui.heading("Post-processing");
         ui.weak("Applied to the result at once. Start saves with these settings; Save result… saves again.");
         let simple = self.simple;
@@ -1549,6 +1609,12 @@ impl StackTab {
                 _ => self.status = "Press Start first: the saved result goes to the Stitcher.".into(),
             }
         }
+        if ui.button("✎ Use in Post-processing").on_hover_text("Open the saved result in the Post-processing tab: crop, stretch, curves, colour, noise").clicked() {
+            match &self.result {
+                Some(r) if !r.preview && !r.saved.is_empty() => self.to_finish.push(r.saved[0].clone()),
+                _ => self.status = "Press Start first: the saved result goes to Post-processing.".into(),
+            }
+        }
         ui.label(egui::RichText::new(self.post_note).weak().size(12.5));
     }
 
@@ -1582,11 +1648,12 @@ impl StackTab {
             let p = self.progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let f = if p.total > 0.0 { (p.done / p.total) as f32 } else { 0.0 };
             let left = match p.start {
-                Some(t) if f > 0.03 && f < 1.0 => {
-                    let s = t.elapsed().as_secs_f64() * (1.0 - f as f64) / f as f64;
-                    if s < 60.0 { format!(" – about {:.0} s left", s.max(1.0)) } else { format!(" – about {} min {:02} s left", (s / 60.0) as u64, (s % 60.0) as u64) }
+                Some(t) => {
+                    let el = t.elapsed().as_secs_f64();
+                    let left = if f > 0.03 && f < 1.0 { format!(", about {} left", super::duration((el * (1.0 - f as f64) / f as f64).max(1.0))) } else { String::new() };
+                    format!(" – {} elapsed{left}", super::duration(el))
                 }
-                _ => String::new(),
+                None => String::new(),
             };
             ui.add(egui::ProgressBar::new(f).show_percentage().text(format!("{}{left}", p.msg)));
         } else {
@@ -1832,6 +1899,9 @@ impl StackTab {
 /// Hooks for the headless window tests (tests/gui.rs).
 #[doc(hidden)]
 impl StackTab {
+    pub fn t_report(&self) -> Option<&super::JobReport> {
+        self.report.as_ref()
+    }
     pub fn t_status(&self) -> &str {
         &self.status
     }
