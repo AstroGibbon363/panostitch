@@ -10,11 +10,23 @@
 - **Display modes** as in Siril (linear, log, square root, squared, asinh, AutoStretch, histogram equalisation): only the view changes.
 - Live preview on a small copy; saving processes the full image with the values measured on the preview, so the file looks like the preview. Compare with the starting point (hold B).
 - Results come in from the stacking tab ("Use in Post-processing") and the stitcher ("Post-process" after saving).
+- **Undo / redo** (Ctrl+Z, Ctrl+Y), **crop on the image** (draw, resize or move a frame on the whole image), and **presets** that save the look (not the turn, crop or size) to apply to other images.
+- **Sky and foreground:** looks of their own for the sky and the foreground (light, temperature, colour, detail) through a mask painted with a brush or found by "Detect sky", with a soft edge. The mask lies on the image, so it stays in place when turning or cropping.
 
-### Timelapse tab (controls only)
-- Frames with a preview of the selected one; kind (time-lapse, growing or fading star trails), deflicker, output format, frame rate, resolution and the video length.
-- Look: the Post-processing light and colour sliders, separately for the whole frame, the sky and the foreground, with a brush mask painted on the frame (left = sky, right = foreground).
-- Nothing is applied yet: making the video comes later.
+### Timelapse tab (new)
+- Makes a video from a sequence of landscape frames shot from a tripod.
+- **Look** for the whole frame, the sky and the foreground (the Post-processing light and colour sliders, the same brush mask and sky detection, or a disc inside a fisheye's image circle with an optional radial gradient), shown on the selected frame. Optionally every frame starts from the Post-processing tab's look; the automatic stretch is measured once, so the video does not flicker.
+- **Camera move:** a slider-like move across the frame (the view a few percent smaller, gliding left, right, up or down, with a gentle start and stop) and a slow zoom; the preview outlines where the video starts and ends.
+- **Deflicker** (light or strong) of brightness and of each colour, region by region on a coarse grid, so large-scale changes in one part of the frame are evened out too; slow changes such as dusk stay.
+- RAW frames are read with the fast built-in decoder by default; **RAW via** can choose RawTherapee (applies its `.pp3` edits, about ten times slower) or another installed decoder. The tab says how many frames have `.pp3` files.
+- 16:9 crop, resolution up to 4K (never scaled up), frame rate, play forward then back, hold the last frame.
+- **Output:** MP4 (H.264) and WebM (VP9) through ffmpeg when it is installed (or next to the program); animated GIF and numbered TIFF / PNG / JPEG images built in.
+- Runs in the background with a progress bar (time elapsed and left) and Cancel, then a report: frames, video size, frame rate and length, time taken, file and its size.
+
+### Speed and memory
+- **Big panoramas in less memory:** the full-size panorama is rendered in bands of rows when it does not fit in one piece and kept in the file's own format (6 bytes per pixel for 16-bit TIFF instead of about 50); photos read again at full size are kept in half precision. Smart blending renders each band with overlap, so the bands join seamlessly.
+- Star stacking loads the calibration frames in parallel (they were read one by one) and loads and measures as many light frames at once as the free memory allows (it was at most 4). 60 frames of 24 MP with darks, flats and bias: 118 s → 81 s on a 28-thread PC, the same result bit for bit.
+- Long jobs use at most 85 % of the CPU cores, and memory checks leave 15 % of the memory free, so the PC stays responsive.
 
 ### Reports and times
 - After stacking and after saving a panorama, a short report: photos / frames used, time taken, result size, file and its size, or what went wrong.

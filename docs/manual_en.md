@@ -559,6 +559,15 @@ instead of filling the memory, which would make the whole computer stop
 responding. Loading stops early, with a message, when the memory is almost
 full.
 
+A large panorama is rendered in bands of rows when it does not fit in memory
+in one piece; the status line then counts the bands. Only the finished
+panorama is kept whole, in the file's own format (3 bytes per pixel for JPEG,
+6 for 16-bit TIFF and PNG), and photos read again at full size are kept in
+half precision. So a 16-bit TIFF of 20,000 × 8,000 px needs about 1 GB plus
+one band and the photos, where it used to need about 8 GB. With **Smart**
+blending each band is rendered with some overlap, so the bands join without a
+visible step. Saving never uses more than 85 % of the memory.
+
 Panoramas wider or taller than 60,000 px are refused. This almost always means
 that one pair is matched wrongly or that the projection is unsuitable; try
 cylindrical or spherical.
@@ -933,6 +942,7 @@ The steps always run in this order, top to bottom on the left:
 | **Curves** | One curve for all colours (**RGB**) and one each for **Red**, **Green**, **Blue**. Click to add a point, drag to move it, right-click to remove it. The histogram behind the curve is of what goes into it. A • marks the curves you changed. |
 | **Colour** | **Saturation** (0 = black and white) and **Vibrance** (dull colours more than strong ones). |
 | **Detail** | **Noise reduction** (smooths flat areas, keeps edges and stars), **Colour noise**, **Star reduction** (smaller stars), **Sharpen** and its radius. Radii are in pixels of the full image, so the preview matches the saved result. |
+| **Sky and foreground** | Looks of their own for the sky and the foreground, on top of everything above, through a mask (see below). |
 
 **Stretch methods:**
 
@@ -975,33 +985,99 @@ same look, e.g. the panels of a panorama.
 | Ctrl+Shift+S | Save as… |
 | F | Fit the preview |
 | B (hold) | Compare with the starting point |
+| Ctrl+Z, Ctrl+Y | Undo, redo |
 
-Not yet: undo, saving the settings as a preset, cropping by dragging on the image.
+**Sky and foreground** (closed at first): a landscape under the stars often
+needs the two treated differently, e.g. less noise and smaller stars in the
+sky, a brighter and warmer foreground. Paint the mask with **✎ Paint** (left
+button = sky, right button = foreground, mouse wheel = brush size) or let
+**◎ Detect sky** find it (sky at the top; correct it with the brush; for a
+circular fisheye use **◯ Fisheye circle**, chapter 17), with
+**All sky**, **Invert** and **Clear** to start over. Then choose **Sky** or
+**Foreground** and set its light, temperature, colour and detail. **Soft
+edge** blends the two looks at the border; **Show mask** tints the sky blue
+and the foreground orange (always shown while painting). The mask lies on
+the image itself, so it stays in place when you turn or crop. The saved file
+gets the same looks; a • after the section's name shows that they are in use.
+
+**↶ Undo** and **↷ Redo** (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z) step back and
+forward through the changes; a slider drag or a brush stroke counts as one
+step, and the button's tooltip says what it undoes.
+
+**✂ Crop** crops on the image: the whole image is shown with a frame; drag to
+draw a new frame, drag its edges or corners to adjust it, drag inside it to
+move it. Click **✂ Crop: done** to see the result. The shape buttons and crop
+sliders in **Turn and crop** set the same frame.
+
+**Presets** (at the top, under the image): type a name and **Save** to keep
+the current look: stretch, white balance, light, curves, colour, detail and the
+sky and foreground looks, but not the turn, the crop or the export size (they
+belong to one image). **Preset** applies a saved look to the open image
+(Ctrl+Z undoes it); **Delete** removes the preset whose name is typed.
+Presets are kept in the settings folder (`presets`).
 
 ## 17. Timelapse
 
-*Being built for 0.4.* The **Timelapse** tab will make a video from a
-sequence of frames: a plain time-lapse, growing star trails or comet-style
-fading trails, with deflicker, steadying, the Post-processing look on every
-frame, and MP4, WebM, GIF or numbered-image output.
+*New in 0.4 (in development).* The **Timelapse** tab makes a video from a
+sequence of frames: a landscape under the night sky shot from a tripod,
+with the sky turning over a still foreground. A slow zoom or a slider-like
+move across the frame can give it a camera move.
 
-For now only the controls are there; nothing is applied to the frames and no
-video is made yet (**▶ Make video** is greyed out):
+**Frames:** add files or a folder; they play in file-name order (camera
+numbering). Click one to show it in the middle; ◀ ▶ step through them.
+With camera RAW frames, **RAW via** chooses how they are read: **built-in**
+(the default) is fast and treats every frame alike; **rawtherapee** applies
+the edits saved in RawTherapee's `.pp3` files next to the frames, but takes
+several seconds per frame (about ten times as long); **auto** uses
+RawTherapee only for frames that have a `.pp3` file. The tab says how many
+frames have one. RawTherapee writes a `.pp3` for every photo opened in its
+file browser, so having one does not mean the photo was edited.
 
-- **Frames:** add files or a folder; they play in file-name order. Click one
-  to show it in the middle (◀ ▶ step through them).
-- **Look:** the same light and colour sliders as in Post-processing
-  (exposure, contrast, highlights, midtones, shadows, whites, blacks,
-  temperature, tint, saturation, vibrance), set separately for the **Whole
-  frame**, the **Sky** and the **Foreground**. Sky and foreground come on top
-  of the whole-frame look, only inside their part of the mask; • marks the
-  parts you changed.
-- **Mask:** switch on **✎ Paint** and paint on the shown frame: left button =
-  sky, right button = foreground, mouse wheel = brush size. **All sky**,
-  **Invert**, **Clear** and **Soft edge** (how softly the two looks blend at
-  the border). One mask serves every frame, because on a tripod the
-  foreground does not move. Sky is tinted blue, foreground orange (**Show
-  mask**).
-- **Video and output:** kind, deflicker, steadying, starting from the
-  Post-processing look, slow zoom, format, frame rate, resolution, 16:9 crop,
-  quality, and how long the video would run (frames ÷ frame rate).
+**Look:** the same light and colour sliders as in Post-processing (exposure,
+contrast, highlights, midtones, shadows, whites, blacks, temperature, tint,
+saturation, vibrance), set separately for the **Whole frame**, the **Sky**
+and the **Foreground**. Sky and foreground come on top of the whole-frame
+look, only inside their part of the mask; • marks the parts you changed. The
+selected frame shows the look (**Show the look**; off shows the frame as it
+is). Deflicker and the camera move show only in the video.
+
+**Mask:** as in Post-processing (chapter 16): **✎ Paint**, **◎ Detect sky**,
+**All sky**, **Invert**, **Clear**, **Soft edge**, **Show mask**. One mask
+serves every frame, because on a tripod the foreground does not move.
+
+For an all-sky timelapse with a circular fisheye pointing up, **◯ Fisheye
+circle** finds the lit image circle and makes the sky a disc in its middle;
+the ring outside it (horizon, trees, lights) is foreground. **Sky circle**
+sets how much of the circle's radius is sky, and a large **Soft edge** (up to
+25 %) turns the border into a radial gradient. Correct the rest with the
+brush, e.g. a telescope or a person reaching into the sky.
+
+**Video:**
+
+| Setting | What it does |
+|---|---|
+| **Deflicker** | Evens out brightness and colour jumps between frames (exposure steps, changing light, the camera's white balance). **Light** compares each frame with its neighbours (**Smoothing**, in frames); **Strong** uses three times as many. Slow changes such as dusk stay. **Colour too** evens out each colour on its own; **Region by region** does it on a coarse grid across the frame, so large-scale changes in one part (light pollution, a passing light, dawn on one side) are evened out where they happen. Both work for ordinary and fisheye lenses. Measuring reads every frame once more. |
+| **Start from the Post-processing tab's look** | Every frame first gets the settings of the image open in Post-processing (stretch, white balance, light, curves, colour, detail; not its turn and crop), then the look set here. Values measured by the automatic stretch come from the first frame and serve all, so the video does not flicker. |
+| **Slider move** | As if the camera rode on a motorised slider: the video shows a part of the frame this many percent smaller (up to 20 %) and moves it across the frame, **Left → right**, **Right → left**, **Up** or **Down**. The move is smooth, not in whole-pixel steps. |
+| **Slow zoom in** | Zooms in slowly over the whole video; can be combined with the slider move. |
+| **Start and stop gently** | The move and the zoom speed up at the start and slow down at the end; off: the same speed all the way. The preview outlines where the video starts (bright) and ends (faint). |
+
+**Output:**
+
+| Setting | What it does |
+|---|---|
+| **Format** | **MP4** (H.264) and **WebM** (VP9) are made with ffmpeg. Install it (ffmpeg.org; Windows: `winget install ffmpeg`; Linux: the package manager; macOS: Homebrew) or put it next to the program; the tab says where it found it. **Animated GIF** and **Numbered images** (TIFF or PNG 16-bit, JPEG) need nothing else. GIFs of star fields are large (about 1 MB per frame at 720p; MP4 is 5–10 times smaller), so they suit short clips. |
+| **Frame rate** | 12–60 frames per second. |
+| **Resolution** | As the frames, 4K, 1440p, 1080p or 720p; never scaled up. Up to 1080p, camera RAW frames are read at half size, which is quicker and still sharp enough. |
+| **Crop to 16:9** | Cuts the 3:2 camera frame to a widescreen video; the preview outlines the cut. |
+| **Quality** | For MP4, WebM and JPEG images: higher = better picture, bigger file. |
+| **Play forward, then back** | The frames again in reverse at the end, so the video loops smoothly. |
+| **Hold last frame** | Keeps the last frame on for a few seconds. |
+
+Below the settings: how many frames, how long the video runs and its size in
+pixels. **▶ Make video** works in the background, four frames at a time, with
+a progress bar (time elapsed and time left) and **✖ Cancel** (nothing is
+kept). A report then shows the frames, the video's size, frame rate and
+length, the time it took, and the file with its size, or what went wrong.
+For example, 69 RAW frames (24 MP) became a 1080p MP4 with deflicker in about
+half a minute on a desktop PC.

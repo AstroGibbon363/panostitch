@@ -343,6 +343,49 @@ fn stitch_three_crops() {
     assert_eq!(r, ((2, 9), (3, 7)));
 }
 
+#[test]
+fn panorama_in_bands_matches_one_piece() {
+    // Three overlapping crops placed by translation; one with a "moved" patch for the deghosting.
+    let sc = smooth_scene(700, 1300, 8);
+    let mut crops: Vec<Img> = (0..3).map(|k| sc.crop(0, 700, k * 400, k * 400 + 500)).collect();
+    for y in 300..360 {
+        for x in 420..480 {
+            crops[1].px[y * 500 + x] = [0.9, 0.1, 0.1];
+        }
+    }
+    let (h, w) = (700, 500);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let g: Vec<st::M3> = (0..3).map(|k| st::M3::new(1.0, 0.0, 400.0 * k as f64, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)).collect();
+    let o: Vec<_> = g.iter().map(|gi| st::outline(gi, h, w, st::Projection::Cylindrical, 900.0, c, (0.0, 900.0), 24)).collect();
+    let box_ = st::bounds(&o);
+    let refs: Vec<&Img> = crops.iter().collect();
+    // The same photos kept in half precision.
+    let halves: Vec<panostitch::image::HalfImg> = crops.iter().map(panostitch::image::HalfImg::from_img).collect();
+    let hrefs: Vec<&panostitch::image::HalfImg> = halves.iter().collect();
+    let sizes = vec![(h, w); 3];
+    for blend in [st::Blend::Feather, st::Blend::Smart] {
+        let cp = st::ComposeParams { projection: st::Projection::Cylindrical, f: 900.0, c, blend, sharpness: 3.0, ..Default::default() };
+        let (whole, _) = st::compose(&refs, &g, box_, &cp, &[1.0; 3], &[1.0; 3], &sizes, false);
+        let mut banded = Img::new(whole.h, whole.w);
+        let mut nb = 0;
+        let (bw, bh) = st::compose_bands(&hrefs, &g, box_, &cp, &[1.0; 3], &[1.0; 3], &sizes, 128, &mut |y0, band| {
+            banded.px[y0 * band.w..(y0 + band.h) * band.w].copy_from_slice(&band.px);
+            nb += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!((bw, bh), (whole.w, whole.h));
+        assert!(nb >= 5, "{nb} bands");
+        let diff: Vec<f32> = whole.px.iter().zip(&banded.px).map(|(a, b)| (0..3).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max)).collect();
+        let max = diff.iter().cloned().fold(0.0, f32::max);
+        let mean = diff.iter().sum::<f32>() / diff.len() as f32;
+        eprintln!("{blend:?}: max {max:.4}, mean {mean:.6}");
+        // Feathering is the same pixel for pixel (up to half precision); the smart blend nearly so.
+        let (lim_max, lim_mean) = if blend == st::Blend::Feather { (0.002, 0.0005) } else { (0.05, 0.002) };
+        assert!(max < lim_max && mean < lim_mean, "{blend:?}: max {max}, mean {mean}");
+    }
+}
+
 // --------------------------------------------------------------------------
 // File formats
 // --------------------------------------------------------------------------

@@ -156,3 +156,70 @@ fn display_modes_change_only_the_view() {
     let mean = |img: &Img| img.px.iter().map(|c| c[1] as f64).sum::<f64>() / img.len() as f64;
     assert!(mean(&fin::display(&img, Display::AutoStretch)) > mean(&img));
 }
+
+#[test]
+fn source_point_undoes_geometry() {
+    // Every pixel holds its own position, so the output shows where it came from.
+    let (w, h) = (90usize, 60usize);
+    let img: Img = Image::from_fn(h, w, |y, x| [x as f32, y as f32, 0.0]);
+    for quarter in 0..4u8 {
+        for flip_h in [false, true] {
+            for angle in [0.0, 6.0] {
+                let p = FinishParams { quarter, flip_h, angle, crop: [0.1, 0.05, 0.0, 0.2], ..FinishParams::default() };
+                let out = fin::geometry(&img, &p);
+                assert_eq!(fin::geometry_size(w, h, &p), (out.w, out.h));
+                for (y, x) in [(2usize, 3usize), (out.h / 2, out.w / 2), (out.h - 3, out.w - 4)] {
+                    let (sx, sy) = fin::source_point(w, h, &p, x as f64 + 0.5, y as f64 + 0.5);
+                    let c = out.at(y, x);
+                    assert!((sx - 0.5 - c[0] as f64).abs() < 0.02 && (sy - 0.5 - c[1] as f64).abs() < 0.02, "q{quarter} flip {flip_h} {angle}°: ({x},{y}) → ({sx:.2},{sy:.2}), holds {c:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn sky_and_foreground_looks() {
+    use panostitch::finish::Local;
+    let img = Image::filled(60, 90, [0.4f32; 3]);
+    let mut local = Local { mask: Local::empty_mask(90, 60), feather: 0.0, ..Local::default() };
+    assert!(!local.used(), "no look yet");
+    // Sky: the top half of the source image, made darker; the foreground brighter.
+    let (mh, mw) = (local.mask.h, local.mask.w);
+    for y in 0..mh / 2 {
+        for x in 0..mw {
+            local.mask.set(y, x, true);
+        }
+    }
+    local.sky.exposure = -1.0;
+    local.ground.shadows = 1.0;
+    assert!(local.used());
+    let p = FinishParams::default();
+    let out = fin::with_local(img.clone(), 90, 60, &p, &local, 1.0);
+    assert!(out.at(5, 45)[0] < 0.3, "sky not darker: {:?}", out.at(5, 45));
+    assert!(out.at(55, 45)[0] > 0.45, "foreground not brighter: {:?}", out.at(55, 45));
+    // Turned upside down, the mask goes with the image: the sky is now at the bottom.
+    let p = FinishParams { quarter: 2, ..FinishParams::default() };
+    let turned = fin::with_local(fin::geometry(&img, &p), 90, 60, &p, &local, 1.0);
+    assert!(turned.at(55, 45)[0] < 0.3 && turned.at(5, 45)[0] > 0.45, "mask did not turn with the image");
+    // A soft edge blends: the middle row is between the two.
+    local.feather = 0.1;
+    let soft = fin::with_local(img, 90, 60, &FinishParams::default(), &local, 1.0);
+    let mid = soft.at(30, 45)[0];
+    assert!(mid > out.at(5, 45)[0] + 0.02 && mid < out.at(55, 45)[0] - 0.02, "edge not soft: {mid}");
+}
+
+#[test]
+fn fisheye_circle_found() {
+    // A lit disc (radius 50 at (82, 60)) in a dark 160 × 120 frame, with a dark tree line at its rim.
+    let img: Img = Image::from_fn(120, 160, |y, x| {
+        let d = ((x as f64 - 82.0).powi(2) + (y as f64 - 60.0).powi(2)).sqrt();
+        if d > 50.0 { [0.002; 3] } else if d > 46.0 && y > 80 { [0.01; 3] } else { [0.08, 0.09, 0.12] }
+    });
+    let (cx, cy, r) = fin::fisheye_circle(&img).expect("circle");
+    assert!((cx * 160.0 - 82.0).abs() < 3.0 && (cy * 160.0 - 60.0).abs() < 3.0 && (r * 160.0 - 50.0).abs() < 3.0, "{cx} {cy} {r}");
+    let m = fin::circle_mask(120, 160, 160, 120, cx, cy, r * 0.5);
+    assert!(m.at(60, 82) && !m.at(60, 30) && !m.at(5, 5));
+    // An ordinary frame (no dark corners): no circle.
+    assert!(fin::fisheye_circle(&Image::filled(120, 160, [0.1f32; 3])).is_none());
+}

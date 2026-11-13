@@ -4,12 +4,14 @@
 //! preview; the full image is processed when saving.
 
 use super::dialogs::{self, Picked};
+use super::mask::MaskEditor;
 use super::{image_view, texture, View};
-use crate::finish::{self, identity_curve, Display, FinishParams, Measured, StretchMode};
+use crate::finish::{self, identity_curve, Display, FinishParams, Local, Measured, StretchMode};
 use crate::image::Img;
 use crate::io::{self, basename};
 use crate::sys::gb;
 use egui::{Color32, Pos2, Rect, Stroke};
+use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
@@ -37,12 +39,38 @@ struct Preview {
     curve_hist: [Vec<f32>; 4],
     /// Black point and symmetry point at the sky background (linear data).
     background: (f64, f64),
+    /// The sky and foreground looks applied (None: not used).
+    local: Option<Local>,
 }
 
 enum Msg {
     Loaded(u64, Result<Loaded, String>),
     Preview(u64, Result<Box<Preview>, String>),
-    Saved(Result<(String, Box<FinishParams>), String>),
+    Saved(Result<(String, Box<Settings>), String>),
+}
+
+/// All settings of a result: the adjustments and the sky / foreground looks.
+type Settings = (FinishParams, Option<Local>);
+/// What undo and redo restore.
+type Snap = (FinishParams, Local);
+
+/// A saved look: everything but turning, cropping and the export size.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct Preset {
+    look: FinishParams,
+    sky: FinishParams,
+    ground: FinishParams,
+    feather: f64,
+}
+
+/// Which part of the crop frame a drag moves.
+#[derive(Clone, Copy, PartialEq)]
+enum CropGrip {
+    New,
+    Move,
+    /// Left, top, right, bottom edges.
+    Edges([bool; 4]),
 }
 
 pub struct FinishTab {
@@ -71,7 +99,22 @@ pub struct FinishTab {
     status: String,
     out: String,
     /// Settings of the last save.
-    saved: Option<FinishParams>,
+    saved: Option<Settings>,
+    /// The sky / foreground mask and looks.
+    mask: MaskEditor,
+    /// Which of them the sliders show: 0 sky, 1 foreground.
+    local_k: usize,
+    // Undo / redo: the last recorded state, a change waiting to settle, the steps.
+    committed: Option<Snap>,
+    pending: Option<(Snap, std::time::Instant)>,
+    undo: Vec<(Snap, String)>,
+    redo: Vec<(Snap, String)>,
+    // Presets.
+    presets: Option<Vec<String>>,
+    preset_name: String,
+    // Cropping on the image: on, and the drag going on (grip, frame at its start, start point).
+    cropping: bool,
+    crop_drag: Option<(CropGrip, [f64; 4], (f64, f64))>,
     dialog: Option<(Receiver<Picked>, &'static str)>,
     /// White balance sampling: on, and the rectangle being dragged (image coordinates).
     sampling: bool,
@@ -111,6 +154,16 @@ impl Default for FinishTab {
             sampling: false,
             sample_from: None,
             curve_ch: 0,
+            mask: MaskEditor::new(false),
+            local_k: 0,
+            committed: None,
+            pending: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            presets: None,
+            preset_name: String::new(),
+            cropping: false,
+            crop_drag: None,
         }
     }
 }
@@ -123,12 +176,21 @@ impl FinishTab {
     pub fn busy(&self) -> bool {
         self.loading || self.previewing || self.saving
     }
+    pub fn has_image(&self) -> bool {
+        self.full.is_some()
+    }
     pub fn saving(&self) -> bool {
         self.saving
     }
     /// Changes not saved to a file yet.
     pub fn unsaved(&self) -> bool {
-        self.full.is_some() && self.saved.as_ref() != Some(&self.p) && self.p != FinishParams::for_input(self.linear)
+        let now = (self.p.clone(), self.local());
+        self.full.is_some() && self.saved.as_ref() != Some(&now) && now != (FinishParams::for_input(self.linear), None)
+    }
+
+    /// The sky and foreground looks, if they change anything.
+    fn local(&self) -> Option<Local> {
+        self.mask.local.used().then(|| self.mask.local.clone())
     }
 
     /// Load an image (in the background).
@@ -175,7 +237,10 @@ impl FinishTab {
                             self.linear = io::is_astro(&l.path);
                             if !self.keep || self.full.is_none() {
                                 self.p = FinishParams::for_input(self.linear);
+                                self.mask.local = Local::default();
                             }
+                            // The mask lies on the image; another shape needs a new one.
+                            self.mask.fit(l.proxy.w, l.proxy.h);
                             self.status = format!(
                                 "Opened {} ({}×{} px){}. Adjust on the left, save on the right.",
                                 basename(&l.path),
@@ -194,6 +259,11 @@ impl FinishTab {
                             self.before_tex = None;
                             self.saved = None;
                             self.view.fit = true;
+                            self.undo.clear();
+                            self.redo.clear();
+                            self.committed = None;
+                            self.pending = None;
+                            self.cropping = false;
                         }
                         Err(e) => self.status = format!("Cannot open: {e}"),
                     }
@@ -230,6 +300,10 @@ impl FinishTab {
                 }
             }
         }
+        self.mask.poll();
+        if let Some(m) = self.mask.message.take() {
+            self.status = m;
+        }
         if let Some((rx, what)) = &self.dialog {
             if let Ok(r) = rx.try_recv() {
                 let what = *what;
@@ -262,11 +336,13 @@ impl FinishTab {
     /// Start a preview when the settings differ from the shown ones.
     fn kick(&mut self) {
         let Some(px) = self.proxy.clone() else { return };
-        if self.previewing || self.shown.as_ref().is_some_and(|s| s.params == self.p) {
+        let local = self.local();
+        let want = self.shown_params();
+        if self.previewing || self.shown.as_ref().is_some_and(|s| s.params == want && s.local == local) {
             return;
         }
         self.previewing = true;
-        let (p, scale, tx, gen) = (self.p.clone(), self.scale, self.tx.clone(), self.gen);
+        let (p, scale, tx, gen) = (want, self.scale, self.tx.clone(), self.gen);
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| {
                 let mut m = Measured::default();
@@ -275,7 +351,10 @@ impl FinishTab {
                 let background = finish::background_points(&balanced);
                 let stretched = finish::stretch(&balanced, &p, &mut m);
                 let curve_hist = finish::curve_input_histograms(&stretched, &p);
-                let result = finish::finish_tone(stretched, &p, scale);
+                let mut result = finish::finish_tone(stretched, &p, scale);
+                if let Some(l) = &local {
+                    result = finish::with_local(result, px.w, px.h, &p, l, scale);
+                }
                 let sp = finish::starting_point(&p);
                 let before = if sp == p {
                     result.clone()
@@ -283,11 +362,131 @@ impl FinishTab {
                     let mut m0 = Measured::default();
                     finish::finish_tone(finish::stretch(&prepared, &sp, &mut m0), &sp, scale)
                 };
-                Box::new(Preview { params: p, prepared, before, result, measured: m, curve_hist, background })
+                Box::new(Preview { params: p, prepared, before, result, measured: m, curve_hist, background, local })
             })
             .map_err(|_| panic_text());
             let _ = tx.send(Msg::Preview(gen, r));
         });
+    }
+
+    /// The settings the preview shows: while cropping, the whole image (no crop).
+    fn shown_params(&self) -> FinishParams {
+        if self.cropping {
+            FinishParams { crop: [0.0; 4], ..self.p.clone() }
+        } else {
+            self.p.clone()
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Undo / redo
+    // ----------------------------------------------------------------------
+
+    fn snap(&self) -> Snap {
+        (self.p.clone(), self.mask.local.clone())
+    }
+
+    /// Record the state once a change has stayed the same for a moment (a slider
+    /// drag or a brush stroke counts once).
+    fn check_undo(&mut self) {
+        if self.full.is_none() || self.loading {
+            return;
+        }
+        let now = self.snap();
+        let Some(c) = &self.committed else {
+            self.committed = Some(now);
+            return;
+        };
+        if *c == now {
+            self.pending = None;
+            return;
+        }
+        match &self.pending {
+            Some((p, t)) if *p == now => {
+                if t.elapsed() > std::time::Duration::from_millis(400) {
+                    self.commit(now);
+                }
+            }
+            _ => self.pending = Some((now, std::time::Instant::now())),
+        }
+    }
+
+    fn commit(&mut self, new: Snap) {
+        if let Some(old) = self.committed.take() {
+            let label = change_label(&old, &new);
+            self.undo.push((old, label));
+            if self.undo.len() > 100 {
+                self.undo.remove(0);
+            }
+            self.redo.clear();
+        }
+        self.committed = Some(new);
+        self.pending = None;
+    }
+
+    fn step(&mut self, redo: bool) {
+        if self.full.is_none() {
+            return;
+        }
+        // A change still settling counts first.
+        let now = self.snap();
+        if self.committed.as_ref().is_some_and(|c| *c != now) {
+            self.commit(now);
+        }
+        let from = if redo { &mut self.redo } else { &mut self.undo };
+        let Some((state, label)) = from.pop() else { return };
+        let cur = self.committed.take().unwrap_or_else(|| self.snap());
+        if redo { self.undo.push((cur, label.clone())) } else { self.redo.push((cur, label.clone())) }
+        self.p = state.0.clone();
+        self.mask.set_local(state.1.clone());
+        self.committed = Some(state);
+        self.pending = None;
+        self.status = format!("{}: {label}. ({} undo / {} redo steps left)", if redo { "Redone" } else { "Undone" }, self.undo.len(), self.redo.len());
+    }
+
+    // ----------------------------------------------------------------------
+    // Presets
+    // ----------------------------------------------------------------------
+
+    fn preset_list(&mut self) -> Vec<String> {
+        self.presets.get_or_insert_with(list_presets).clone()
+    }
+
+    fn save_preset(&mut self) {
+        let name = self.preset_name.trim().to_string();
+        let geo = FinishParams::default();
+        let pr = Preset {
+            look: FinishParams { quarter: geo.quarter, flip_h: geo.flip_h, angle: geo.angle, auto_crop: geo.auto_crop, crop: geo.crop, long_edge: geo.long_edge, jpeg_quality: geo.jpeg_quality, ..self.p.clone() },
+            sky: self.mask.local.sky.clone(),
+            ground: self.mask.local.ground.clone(),
+            feather: self.mask.local.feather,
+        };
+        let r = toml::to_string(&pr).map_err(|e| e.to_string()).and_then(|t| {
+            let dir = presets_dir();
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(dir.join(format!("{}.toml", file_name(&name))), t).map_err(|e| e.to_string())
+        });
+        self.status = match r {
+            Ok(()) => format!("Preset “{name}” saved: the look without turning, cropping and size."),
+            Err(e) => format!("Preset not saved: {e}"),
+        };
+        self.presets = None;
+        self.preset_name.clear();
+    }
+
+    fn apply_preset(&mut self, name: &str) {
+        let r = std::fs::read_to_string(presets_dir().join(format!("{name}.toml"))).map_err(|e| e.to_string()).and_then(|t| toml::from_str::<Preset>(&t).map_err(|e| e.to_string()));
+        match r {
+            Ok(pr) => {
+                let c = &self.p;
+                self.p = FinishParams { quarter: c.quarter, flip_h: c.flip_h, angle: c.angle, auto_crop: c.auto_crop, crop: c.crop, long_edge: c.long_edge, jpeg_quality: c.jpeg_quality, ..pr.look };
+                let mut l = self.mask.local.clone();
+                (l.sky, l.ground, l.feather) = (pr.sky, pr.ground, pr.feather);
+                self.mask.set_local(l);
+                self.status = format!("Preset “{name}” applied (Ctrl+Z undoes it).");
+            }
+            Err(e) => self.status = format!("Cannot read preset “{name}”: {e}"),
+        }
     }
 
     fn ask_open(&mut self) {
@@ -323,7 +522,8 @@ impl FinishTab {
             self.status = format!("Not saved: {e}");
             return;
         }
-        let need = (full.w * full.h) as f64 * SAVE_BYTES_PER_PX;
+        let local = self.local();
+        let need = self.save_memory(&full);
         let dir = std::path::Path::new(&out).parent().map(|d| d.to_path_buf()).unwrap_or_default();
         let (mem, _) = crate::sys::free_cached(&dir);
         let avail = mem - crate::sys::memory_reserve();
@@ -335,17 +535,27 @@ impl FinishTab {
         self.status = format!("Saving {} …", basename(&out));
         let (p, scale, tx) = (self.p.clone(), self.scale, self.tx.clone());
         crate::sys::background(move || {
-            let r = std::panic::catch_unwind(|| -> Result<(String, Box<FinishParams>), String> {
+            let r = std::panic::catch_unwind(|| -> Result<(String, Box<Settings>), String> {
                 // Measure on the preview copy, as shown, so the saved file looks the same.
                 let mut m = Measured::default();
                 let _ = finish::process(&proxy, &p, scale, &mut m);
-                let img = finish::export_size(&finish::process(&full, &p, 1.0, &mut m), &p);
+                let mut img = finish::process(&full, &p, 1.0, &mut m);
+                if let Some(l) = &local {
+                    img = finish::with_local(img, full.w, full.h, &p, l, 1.0);
+                }
+                let img = finish::export_size(&img, &p);
                 io::save_image(&out, &img, p.jpeg_quality)?;
-                Ok((format!("Saved {out} ({}×{} px; {}).", img.w, img.h, finish::summary(&p)), Box::new(p)))
+                let extra = if local.is_some() { ", sky and foreground looks" } else { "" };
+                Ok((format!("Saved {out} ({}×{} px; {}{extra}).", img.w, img.h, finish::summary(&p)), Box::new((p, local))))
             })
             .unwrap_or_else(|_| Err(panic_text()));
             let _ = tx.send(Msg::Saved(r));
         });
+    }
+
+    /// Working memory for saving the full image.
+    fn save_memory(&self, full: &Img) -> f64 {
+        (full.w * full.h) as f64 * SAVE_BYTES_PER_PX * if self.mask.local.used() { 1.5 } else { 1.0 }
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -364,12 +574,21 @@ impl FinishTab {
         if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.is_none()) {
             self.view.fit = true;
         }
+        if !ctx.egui_wants_keyboard_input() {
+            let (z, y, sh) = ctx.input(|i| (i.modifiers.command && i.key_pressed(Key::Z), i.modifiers.command && i.key_pressed(Key::Y), i.modifiers.shift));
+            if z {
+                self.step(sh);
+            } else if y {
+                self.step(true);
+            }
+        }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         self.poll(ctx);
         self.shortcuts(ctx);
         self.kick();
+        self.check_undo();
         egui::Panel::left("finish_left").default_size(400.0).size_range(340.0..=650.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("fl").show(ui, |ui| self.left(ui));
         });
@@ -396,6 +615,35 @@ impl FinishTab {
             }
         });
         ui.checkbox(&mut self.keep, "Keep settings for the next image").on_hover_text("Give several images (e.g. panorama panels) the same look: open the next one without resetting the adjustments");
+        if self.full.is_some() {
+            let list = self.preset_list();
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Preset");
+                let mut chosen = None;
+                egui::ComboBox::from_id_salt("fin_preset").selected_text(if list.is_empty() { "none saved yet" } else { "apply…" }).show_ui(ui, |ui| {
+                    for n in &list {
+                        if ui.selectable_label(false, n).clicked() {
+                            chosen = Some(n.clone());
+                        }
+                    }
+                }).response.on_hover_text("Apply a saved look: stretch, white balance, light, curves, colour, detail and the sky / foreground looks (not the turn, crop or size)");
+                if let Some(n) = chosen {
+                    self.apply_preset(&n);
+                }
+                let r = ui.add(egui::TextEdit::singleline(&mut self.preset_name).desired_width(110.0).hint_text("name"));
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let ok = !self.preset_name.trim().is_empty();
+                if ui.add_enabled(ok, egui::Button::new("Save")).on_hover_text("Save the current look under this name").clicked() || (enter && ok) {
+                    self.save_preset();
+                }
+                if list.iter().any(|n| *n == file_name(self.preset_name.trim())) && ui.small_button("Delete").on_hover_text("Delete the preset with this name").clicked() {
+                    let _ = std::fs::remove_file(presets_dir().join(format!("{}.toml", file_name(self.preset_name.trim()))));
+                    self.status = format!("Preset “{}” deleted.", self.preset_name.trim());
+                    self.presets = None;
+                    self.preset_name.clear();
+                }
+            });
+        }
         if self.full.is_some() {
             ui.horizontal_wrapped(|ui| {
                 let mut lin = self.p.stretch != StretchMode::Off;
@@ -508,24 +756,50 @@ impl FinishTab {
         });
 
         section(ui, "Detail", !self.simple, |ui| {
-            egui::Grid::new("fin_det").num_columns(2).show(ui, |ui| {
-                slider(ui, "Noise reduction", &mut self.p.noise, 0.0..=1.0, "Smooths grain in flat areas (sky), keeps edges and stars");
-                slider(ui, "Colour noise", &mut self.p.color_noise, 0.0..=1.0, "Removes coloured speckles from high-ISO images, keeps the brightness detail");
-                slider(ui, "Star reduction", &mut self.p.star_reduce, 0.0..=1.0, "Makes stars smaller so the Milky Way or nebula stands out");
-                slider(ui, "Sharpen", &mut self.p.sharpen, 0.0..=2.0, "Unsharp mask; check at 1:1 zoom");
-                if !self.simple {
-                    ui.label("Sharpen radius (px)");
-                    ui.add(egui::Slider::new(&mut self.p.sharpen_radius, 0.5..=5.0).step_by(0.1));
-                    ui.end_row();
-                }
-            });
+            detail_controls(ui, &mut self.p, "fin_det", self.simple);
         });
+
+        let edited = if self.mask.local.used() { " •" } else { "" };
+        section(ui, &format!("Sky and foreground{edited}"), false, |ui| self.local_ui(ui));
 
         ui.add_space(6.0);
         if ui.button("↺ Reset all adjustments").clicked() {
             let keep = (self.p.long_edge, self.p.jpeg_quality);
             self.p = FinishParams::for_input(self.linear);
             (self.p.long_edge, self.p.jpeg_quality) = keep;
+        }
+    }
+
+    /// The mask and the sky / foreground looks.
+    fn local_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Adjust the sky and the foreground separately, on top of everything above: e.g. less noise and smaller stars in the sky, a brighter, warmer foreground. Paint or detect the mask, then set the looks.").weak().size(12.0));
+        if self.mask.painting {
+            self.sampling = false;
+        }
+        self.mask.controls(ui, self.proxy.clone());
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Adjust:");
+            for (k, t) in ["Sky", "Foreground"].iter().enumerate() {
+                let q = if k == 0 { &self.mask.local.sky } else { &self.mask.local.ground };
+                let edited = finish::look_used(q);
+                if ui.selectable_label(self.local_k == k, if edited { format!("{t} •") } else { t.to_string() }).clicked() {
+                    self.local_k = k;
+                }
+            }
+        });
+        if !self.mask.has_sky() {
+            ui.colored_label(Color32::from_rgb(230, 150, 30), "Nothing is sky yet: paint the mask or detect the sky.");
+        }
+        let k = self.local_k;
+        let id = ["fin_sky", "fin_fg"][k];
+        let q = if k == 0 { &mut self.mask.local.sky } else { &mut self.mask.local.ground };
+        light_controls(ui, q, &format!("{id}_light"));
+        temperature_controls(ui, q, &format!("{id}_temp"));
+        colour_controls(ui, q, &format!("{id}_col"));
+        detail_controls(ui, q, &format!("{id}_det"), self.simple);
+        if ui.small_button(if k == 0 { "Reset the sky look" } else { "Reset the foreground look" }).clicked() {
+            *q = FinishParams::default();
         }
     }
 
@@ -691,7 +965,7 @@ impl FinishTab {
                 self.ask_save();
             }
         });
-        let need = (full.w * full.h) as f64 * SAVE_BYTES_PER_PX;
+        let need = self.save_memory(&full);
         let dir = std::path::Path::new(&self.out).parent().map(|d| d.to_path_buf()).unwrap_or_default();
         let (mem, _) = crate::sys::free_cached(&dir);
         let txt = format!("Saving needs ≈ {} memory ({} free).", gb(need), gb(mem.max(0.0)));
@@ -701,7 +975,8 @@ impl FinishTab {
             ui.label(egui::RichText::new(txt).weak().size(12.0));
         }
         ui.separator();
-        ui.label(egui::RichText::new(format!("In use: {}", finish::summary(&self.p))).weak().size(12.0));
+        let extra = if self.mask.local.used() { ", sky and foreground looks" } else { "" };
+        ui.label(egui::RichText::new(format!("In use: {}{extra}", finish::summary(&self.p))).weak().size(12.0));
     }
 
     // ----------------------------------------------------------------------
@@ -717,6 +992,22 @@ impl FinishTab {
             if ui.button("1:1").on_hover_text("One preview pixel per screen pixel").clicked() {
                 self.view.zoom = 1.0;
             }
+            let tip = |v: &Vec<(Snap, String)>, key: &str| format!("{} ({key})", v.last().map(|u| u.1.clone()).unwrap_or_else(|| "nothing".into()));
+            if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("↶ Undo")).on_hover_text(tip(&self.undo, "Ctrl+Z")).on_disabled_hover_text("Nothing to undo").clicked() {
+                self.step(false);
+            }
+            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("↷ Redo")).on_hover_text(tip(&self.redo, "Ctrl+Y")).on_disabled_hover_text("Nothing to redo").clicked() {
+                self.step(true);
+            }
+            let crop_txt = if self.cropping { "✂ Crop: done" } else { "✂ Crop" };
+            if ui.selectable_label(self.cropping, crop_txt).on_hover_text("Crop on the image: drag a frame, drag its edges or corners to adjust it, drag inside it to move it. Click again when done").clicked() {
+                self.cropping = !self.cropping;
+                self.crop_drag = None;
+                if self.cropping {
+                    self.mask.painting = false;
+                    self.sampling = false;
+                }
+            }
             let c = ui.button("◐ Compare").on_hover_text("Hold to see the image before white balance, light, curves, colour and detail (or hold B)");
             compare = c.is_pointer_button_down_on() || (!ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_down(egui::Key::B)));
             ui.separator();
@@ -728,6 +1019,13 @@ impl FinishTab {
             }).response.on_hover_text("How the preview is shown. Only the view changes, never the saved image (as Siril's display modes)");
             if self.display != Display::Linear {
                 ui.colored_label(Color32::from_rgb(230, 150, 30), "view only");
+            }
+            if self.mask.painting {
+                self.cropping = false;
+                ui.colored_label(Color32::from_rgb(120, 170, 255), "Painting the mask: left = sky, right = foreground, wheel = brush size");
+            }
+            if self.cropping {
+                ui.colored_label(Color32::from_rgb(255, 210, 0), "Cropping: the whole image is shown");
             }
             if self.busy() {
                 ui.spinner();
@@ -750,8 +1048,22 @@ impl FinishTab {
             self.before_tex = Some(texture(ctx, "finish_before", &finish::display(&s.before, self.display)));
         }
         let tex = if compare { self.before_tex.as_ref() } else { self.tex.as_ref() };
-        let Some(tex) = tex else { return };
-        let shown = image_view(ui, &mut self.view, (w, h), &[(tex, [0.5, w + 0.5, 0.5, h + 0.5])], !self.sampling);
+        let Some(tex) = tex.cloned() else { return };
+        // The mask on the shown (turned and cropped) image; it lies on the source image.
+        let (src, geo, out) = (self.proxy.as_ref().map_or((1, 1), |p| (p.w, p.h)), s.params.clone(), (s.result.w, s.result.h));
+        self.mask.wheel(ui);
+        let ov = if compare { None } else { self.mask.overlay(ctx, src, &geo, out) };
+        let b = [0.5, w + 0.5, 0.5, h + 0.5];
+        let mut layers = vec![(&tex, b)];
+        if let Some(t) = &ov {
+            layers.push((t, b));
+        }
+        let shown = image_view(ui, &mut self.view, (w, h), &layers, !self.sampling && !self.mask.painting && !self.cropping);
+        self.mask.input(ui, &shown, src, &geo, out);
+        if self.cropping && s.params.crop == [0.0; 4] {
+            self.crop_input(ui, &shown, w, h);
+        }
+        let Some(s) = &self.shown else { return };
         if compare {
             ui.painter().text(shown.rect.left_top() + egui::vec2(8.0, 8.0), egui::Align2::LEFT_TOP, "Before", egui::FontId::proportional(16.0), Color32::WHITE);
         }
@@ -782,6 +1094,168 @@ impl FinishTab {
     }
 }
 
+impl FinishTab {
+    /// Crop on the shown (uncropped) image of `w × h`: draw, resize or move the frame.
+    fn crop_input(&mut self, ui: &egui::Ui, s: &super::Shown, w: f64, h: f64) {
+        let c = self.p.crop;
+        let mut f = [c[0], c[1], 1.0 - c[2], 1.0 - c[3]]; // x0, y0, x1, y1 as fractions
+        let to_frac = |p: Pos2| {
+            let (x, y) = s.to_image(p);
+            (((x - 0.5) / w).clamp(0.0, 1.0), ((y - 0.5) / h).clamp(0.0, 1.0))
+        };
+        let screen = |f: &[f64; 4]| Rect::from_min_max(s.to_screen(f[0] * w + 0.5, f[1] * h + 0.5), s.to_screen(f[2] * w + 0.5, f[3] * h + 0.5));
+        let r = screen(&f);
+        let grip_at = |p: Pos2| -> CropGrip {
+            let near = 8.0;
+            let inside_y = p.y > r.top() - near && p.y < r.bottom() + near;
+            let inside_x = p.x > r.left() - near && p.x < r.right() + near;
+            let e = [(p.x - r.left()).abs() < near && inside_y, (p.y - r.top()).abs() < near && inside_x, (p.x - r.right()).abs() < near && inside_y, (p.y - r.bottom()).abs() < near && inside_x];
+            if e.iter().any(|v| *v) {
+                CropGrip::Edges(e)
+            } else if r.contains(p) && c != [0.0; 4] {
+                CropGrip::Move
+            } else {
+                CropGrip::New
+            }
+        };
+        if let Some(p) = s.resp.hover_pos() {
+            let icon = match self.crop_drag.map(|d| d.0).unwrap_or_else(|| grip_at(p)) {
+                CropGrip::Edges([l, t, rr, b]) if (l && t) || (rr && b) => egui::CursorIcon::ResizeNwSe,
+                CropGrip::Edges([l, t, rr, b]) if (rr && t) || (l && b) => egui::CursorIcon::ResizeNeSw,
+                CropGrip::Edges([l, _, rr, _]) if l || rr => egui::CursorIcon::ResizeHorizontal,
+                CropGrip::Edges(_) => egui::CursorIcon::ResizeVertical,
+                CropGrip::Move => egui::CursorIcon::Grab,
+                CropGrip::New => egui::CursorIcon::Crosshair,
+            };
+            ui.ctx().set_cursor_icon(icon);
+        }
+        if s.resp.drag_started_by(egui::PointerButton::Primary) {
+            if let Some(p) = s.resp.interact_pointer_pos() {
+                self.crop_drag = Some((grip_at(p), f, to_frac(p)));
+            }
+        }
+        if let (Some((grip, f0, a)), Some(p)) = (self.crop_drag, s.resp.interact_pointer_pos()) {
+            let b = to_frac(p);
+            let min = 0.02;
+            match grip {
+                CropGrip::New => f = [a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)],
+                CropGrip::Move => {
+                    let dx = (b.0 - a.0).clamp(-f0[0], 1.0 - f0[2]);
+                    let dy = (b.1 - a.1).clamp(-f0[1], 1.0 - f0[3]);
+                    f = [f0[0] + dx, f0[1] + dy, f0[2] + dx, f0[3] + dy];
+                }
+                CropGrip::Edges(e) => {
+                    f = f0;
+                    if e[0] {
+                        f[0] = b.0.min(f0[2] - min);
+                    }
+                    if e[1] {
+                        f[1] = b.1.min(f0[3] - min);
+                    }
+                    if e[2] {
+                        f[2] = b.0.max(f0[0] + min);
+                    }
+                    if e[3] {
+                        f[3] = b.1.max(f0[1] + min);
+                    }
+                }
+            }
+            if f[2] - f[0] >= min && f[3] - f[1] >= min {
+                self.p.crop = [f[0], f[1], 1.0 - f[2], 1.0 - f[3]].map(|v| (v.clamp(0.0, 1.0) * 1e4).round() / 1e4);
+            }
+        }
+        if s.resp.drag_stopped() {
+            self.crop_drag = None;
+        }
+        // The frame: everything outside it dimmed.
+        let c = self.p.crop;
+        let r = screen(&[c[0], c[1], 1.0 - c[2], 1.0 - c[3]]);
+        let all = Rect::from_min_max(s.to_screen(0.5, 0.5), s.to_screen(w + 0.5, h + 0.5));
+        let p = ui.painter().with_clip_rect(s.rect);
+        let dim = Color32::from_black_alpha(140);
+        for part in [
+            Rect::from_min_max(all.min, Pos2::new(all.max.x, r.top())),
+            Rect::from_min_max(Pos2::new(all.min.x, r.bottom()), all.max),
+            Rect::from_min_max(Pos2::new(all.min.x, r.top()), Pos2::new(r.left(), r.bottom())),
+            Rect::from_min_max(Pos2::new(r.right(), r.top()), Pos2::new(all.max.x, r.bottom())),
+        ] {
+            if part.is_positive() {
+                p.rect_filled(part, 0.0, dim);
+            }
+        }
+        p.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::from_rgb(255, 210, 0)), egui::StrokeKind::Middle);
+        for k in 1..3 {
+            let t = k as f32 / 3.0;
+            let thin = Stroke::new(0.7, Color32::from_rgba_unmultiplied(255, 210, 0, 90));
+            p.line_segment([Pos2::new(r.left() + r.width() * t, r.top()), Pos2::new(r.left() + r.width() * t, r.bottom())], thin);
+            p.line_segment([Pos2::new(r.left(), r.top() + r.height() * t), Pos2::new(r.right(), r.top() + r.height() * t)], thin);
+        }
+    }
+}
+
+/// What changed between two states, for the undo labels.
+fn change_label(a: &Snap, b: &Snap) -> String {
+    let (p, q) = (&a.0, &b.0);
+    let mut v: Vec<&str> = Vec::new();
+    if (p.quarter, p.flip_h, p.angle, p.auto_crop) != (q.quarter, q.flip_h, q.angle, q.auto_crop) {
+        v.push("turn");
+    }
+    if p.crop != q.crop {
+        v.push("crop");
+    }
+    if (p.stretch, p.inverse, p.keep_colour, p.target, p.unlinked, p.black, p.mid, p.white, p.asinh, p.bg_extraction, p.color_calibration) != (q.stretch, q.inverse, q.keep_colour, q.target, q.unlinked, q.black, q.mid, q.white, q.asinh, q.bg_extraction, q.color_calibration)
+        || (p.ghs_d, p.ghs_b, p.ghs_sp, p.ghs_lp, p.ghs_hp) != (q.ghs_d, q.ghs_b, q.ghs_sp, q.ghs_lp, q.ghs_hp)
+    {
+        v.push("stretch");
+    }
+    if (p.wb, p.neutral_bg, p.temperature, p.tint) != (q.wb, q.neutral_bg, q.temperature, q.tint) {
+        v.push("white balance");
+    }
+    if (p.exposure, p.contrast, p.highlights, p.midtones, p.shadows, p.whites, p.blacks) != (q.exposure, q.contrast, q.highlights, q.midtones, q.shadows, q.whites, q.blacks) {
+        v.push("light");
+    }
+    if p.curves != q.curves {
+        v.push("curves");
+    }
+    if (p.saturation, p.vibrance) != (q.saturation, q.vibrance) {
+        v.push("colour");
+    }
+    if (p.noise, p.color_noise, p.star_reduce, p.sharpen, p.sharpen_radius) != (q.noise, q.color_noise, q.star_reduce, q.sharpen, q.sharpen_radius) {
+        v.push("detail");
+    }
+    if (p.long_edge, p.jpeg_quality) != (q.long_edge, q.jpeg_quality) {
+        v.push("size");
+    }
+    if a.1.mask != b.1.mask || a.1.feather != b.1.feather {
+        v.push("mask");
+    }
+    if a.1.sky != b.1.sky {
+        v.push("sky look");
+    }
+    if a.1.ground != b.1.ground {
+        v.push("foreground look");
+    }
+    if v.is_empty() { "a change".into() } else { v.join(", ") }
+}
+
+fn presets_dir() -> std::path::PathBuf {
+    super::config_dir().join("presets")
+}
+
+/// Saved presets, by name.
+fn list_presets() -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(presets_dir())
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "toml")).filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().to_string())).collect())
+        .unwrap_or_default();
+    v.sort_by_key(|s| s.to_lowercase());
+    v
+}
+
+/// A preset name made safe as a file name.
+fn file_name(name: &str) -> String {
+    name.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '_' }).collect::<String>().trim_matches('.').to_string()
+}
+
 /// The light sliders (exposure, contrast, highlights, midtones, shadows, whites,
 /// blacks) and their reset; shared by the Post-processing and Timelapse tabs.
 pub(crate) fn light_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str) {
@@ -799,6 +1273,21 @@ pub(crate) fn light_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str) 
     if ui.small_button("Reset light").clicked() {
         (p.exposure, p.contrast, p.highlights, p.midtones, p.shadows, p.whites, p.blacks) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     }
+}
+
+/// The detail sliders (noise, colour noise, stars, sharpening).
+pub(crate) fn detail_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str, simple: bool) {
+    egui::Grid::new(id).num_columns(2).show(ui, |ui| {
+        slider(ui, "Noise reduction", &mut p.noise, 0.0..=1.0, "Smooths grain in flat areas (sky), keeps edges and stars");
+        slider(ui, "Colour noise", &mut p.color_noise, 0.0..=1.0, "Removes coloured speckles from high-ISO images, keeps the brightness detail");
+        slider(ui, "Star reduction", &mut p.star_reduce, 0.0..=1.0, "Makes stars smaller so the Milky Way or nebula stands out");
+        slider(ui, "Sharpen", &mut p.sharpen, 0.0..=2.0, "Unsharp mask; check at 1:1 zoom");
+        if !simple {
+            ui.label("Sharpen radius (px)");
+            ui.add(egui::Slider::new(&mut p.sharpen_radius, 0.5..=5.0).step_by(0.1));
+            ui.end_row();
+        }
+    });
 }
 
 /// Temperature and tint sliders.
@@ -939,10 +1428,39 @@ impl FinishTab {
         self.shown.as_ref().map(|s| (s.result.w, s.result.h))
     }
     pub fn t_shown_current(&self) -> bool {
-        self.shown.as_ref().is_some_and(|s| s.params == self.p)
+        self.shown.as_ref().is_some_and(|s| s.params == self.shown_params() && s.local == self.local())
     }
     pub fn t_set_out(&mut self, p: &str) {
         self.out = p.to_string();
+    }
+    pub fn t_local(&mut self) -> &mut Local {
+        &mut self.mask.local
+    }
+    /// Paint at (x, y) of the shown image (continuous pixel coordinates).
+    pub fn t_paint(&mut self, x: f64, y: f64, sky: bool) {
+        if let (Some(s), Some(px)) = (&self.shown, &self.proxy) {
+            let (src, geo, out) = ((px.w, px.h), s.params.clone(), (s.result.w, s.result.h));
+            self.mask.paint(x, y, src, &geo, out, sky);
+        }
+    }
+    pub fn t_step(&mut self, redo: bool) {
+        self.step(redo);
+    }
+    pub fn t_undo_len(&self) -> (usize, usize) {
+        (self.undo.len(), self.redo.len())
+    }
+    pub fn t_save_preset(&mut self, name: &str) {
+        self.preset_name = name.into();
+        self.save_preset();
+    }
+    pub fn t_presets(&mut self) -> Vec<String> {
+        self.preset_list()
+    }
+    pub fn t_apply_preset(&mut self, name: &str) {
+        self.apply_preset(name);
+    }
+    pub fn t_cropping(&mut self, on: bool) {
+        self.cropping = on;
     }
     pub fn t_save(&mut self) {
         self.save();

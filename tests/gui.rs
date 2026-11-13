@@ -27,7 +27,9 @@ impl Win {
             ..Default::default()
         };
         let app = &mut self.app;
-        let _ = self.ctx.run_ui(input, |ui| app.frame(ui));
+        // No screen: the texture updates are dropped (egui checks that this is deliberate).
+        let mut out = self.ctx.run_ui(input, |ui| app.frame(ui));
+        out.textures_delta.clear();
     }
     /// Run frames until `done` (or fail after `secs`).
     fn until(&mut self, what: &str, secs: u64, done: impl Fn(&App) -> bool) {
@@ -326,7 +328,7 @@ fn button_symbols_have_glyphs() {
     w.frame();
     w.frame();
     let mut used: Vec<char> = Vec::new();
-    for f in ["src/gui/mod.rs", "src/gui/stitch.rs", "src/gui/stack.rs", "src/gui/finish.rs", "src/gui/timelapse.rs"] {
+    for f in ["src/gui/mod.rs", "src/gui/stitch.rs", "src/gui/stack.rs", "src/gui/finish.rs", "src/gui/timelapse.rs", "src/gui/mask.rs"] {
         let s = std::fs::read_to_string(f).unwrap();
         used.extend(s.chars().filter(|c| ('\u{2190}'..='\u{2BFF}').contains(c)));
     }
@@ -342,6 +344,8 @@ fn button_symbols_have_glyphs() {
 #[test]
 fn post_processing_tab() {
     let dir = tempfile::tempdir().unwrap();
+    // Presets go to a temporary settings folder, not the user's.
+    std::env::set_var("PANOSTITCH_CONFIG", dir.path().join("config"));
     let d = dir.path().to_string_lossy().to_string();
     let src = pj(&d, "stack.fits");
     // A dark, linear "stack": FITS opens with the automatic stretch.
@@ -377,6 +381,61 @@ fn post_processing_tab() {
     let saved = panostitch::io::load_plain(&out).unwrap();
     assert_eq!((saved.w, saved.h), (167, 200));
     assert!(w.app.close_reasons().is_empty(), "{:?}", w.app.close_reasons());
+
+    // Sky and foreground: paint the top of the shown (turned, cropped) image as
+    // sky and darken it. The mask lies on the source image, so on the source the
+    // painted part is near the left (turned clockwise: the left edge goes to the top).
+    let (mh, mw) = (w.app.finish.t_local().mask.h, w.app.finish.t_local().mask.w);
+    assert_eq!((mh, mw), (427, 640));
+    w.app.finish.t_paint(150.0, 10.0, true);
+    let m = &w.app.finish.t_local().mask;
+    assert!(m.count() > 500, "painted {}", m.count());
+    // Shown (150, 10) → source (55, 150): 45 px cropped off the top of the shown image, i.e. the source's left.
+    assert!(m.at(mh / 2, 55 * mw / 450) && !m.at(mh / 2, mw - 10), "the mask is not at the source's left");
+    w.app.finish.t_local().sky.exposure = -1.0;
+    w.idle("preview with sky look");
+    w.idle("preview with sky look again");
+    assert!(w.app.finish.t_shown_current());
+    assert!(!w.app.close_reasons().is_empty(), "the sky look is not saved yet");
+    w.app.finish.t_save();
+    w.idle("save with sky look");
+    assert!(w.app.finish.t_status().contains("sky and foreground"), "{}", w.app.finish.t_status());
+    assert!(w.app.close_reasons().is_empty(), "{:?}", w.app.close_reasons());
+
+    // Undo and redo: a change counts once it has held for a moment.
+    w.settle();
+    let before = w.app.finish.p.contrast;
+    w.app.finish.p.contrast = 0.5;
+    w.settle();
+    let (u, _) = w.app.finish.t_undo_len();
+    assert!(u >= 1, "nothing recorded");
+    w.app.finish.t_step(false);
+    assert_eq!(w.app.finish.p.contrast, before, "{}", w.app.finish.t_status());
+    assert!(w.app.finish.t_status().starts_with("Undone: light"), "{}", w.app.finish.t_status());
+    w.app.finish.t_step(true);
+    assert_eq!(w.app.finish.p.contrast, 0.5);
+
+    // Presets: the look is saved and applied, the turn and crop stay.
+    w.app.finish.p.saturation = 1.4;
+    w.app.finish.t_save_preset("Milky Way/test");
+    assert!(w.app.finish.t_presets().contains(&"Milky Way_test".to_string()), "{:?} {}", w.app.finish.t_presets(), w.app.finish.t_status());
+    w.app.finish.p.saturation = 1.0;
+    w.app.finish.p.crop = [0.05; 4];
+    w.app.finish.t_local().sky.exposure = 0.0;
+    w.app.finish.t_apply_preset("Milky Way_test");
+    assert_eq!((w.app.finish.p.saturation, w.app.finish.p.crop, w.app.finish.p.quarter), (1.4, [0.05; 4], 1));
+    assert_eq!(w.app.finish.t_local().sky.exposure, -1.0, "sky look not in the preset");
+
+    // Cropping on the image shows the whole (turned) image.
+    w.app.finish.t_cropping(true);
+    w.idle("whole image for cropping");
+    w.idle("whole image for cropping again");
+    assert!(w.app.finish.t_shown_current());
+    assert_eq!(w.app.finish.t_shown(), Some((300, 450)));
+    w.app.finish.t_cropping(false);
+    w.idle("cropped again");
+    w.idle("cropped again 2");
+    assert_eq!(w.app.finish.t_shown(), Some((270, 405)));
 }
 
 #[test]
@@ -396,16 +455,38 @@ fn timelapse_tab_mask() {
     w.until("frame preview", 30, |a| a.timelapse.t_shown().is_some());
     assert_eq!(w.app.timelapse.t_shown(), Some((300, 200)));
     let (mh, mw, n) = w.app.timelapse.t_mask();
-    assert_eq!((mh, mw, n), (320, 480, 0));
+    assert_eq!((mh, mw, n), (427, 640, 0));
     // Paint sky at the top, then take a bit back as foreground.
     w.app.timelapse.t_paint(150.0, 20.0, true);
     let (_, _, sky) = w.app.timelapse.t_mask();
     assert!(sky > 1000, "painted {sky}");
     w.app.timelapse.t_paint(150.0, 20.0, false);
     assert_eq!(w.app.timelapse.t_mask().2, 0);
-    // Looks per region are kept apart.
-    w.app.timelapse.t_look(1).exposure = 0.5;
+    // Looks per region are kept apart; the frame shows the look.
+    w.app.timelapse.t_paint(150.0, 20.0, true);
+    w.app.timelapse.t_look(1).exposure = -0.5;
     assert_eq!(w.app.timelapse.t_look(2).exposure, 0.0);
+    w.until("look preview", 30, |a| a.timelapse.t_look_shown());
+
+    // Make an animated GIF from the three frames.
+    let out = pj(&d, "t.gif");
+    {
+        let s = w.app.timelapse.t_settings();
+        s.format = panostitch::timelapse::Format::Gif;
+        s.resolution = panostitch::timelapse::Resolution::Hd;
+        s.out = out.clone();
+    }
+    w.app.timelapse.t_make();
+    assert!(w.app.timelapse.t_running(), "{}", w.app.timelapse.t_status());
+    assert!(w.app.close_reasons().iter().any(|r| r.contains("video")), "{:?}", w.app.close_reasons());
+    w.until("video", 60, |a| !a.timelapse.t_running());
+    let rep = w.app.timelapse.t_report().expect("report").clone();
+    assert!(rep.ok && rep.title == "Video made", "{rep:?} / {}", w.app.timelapse.t_status());
+    let row = |k: &str| rep.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).unwrap_or_default();
+    assert_eq!(row("Frames"), "3");
+    assert!(row("Video").starts_with("300 × 168 px, 25 fps"), "{}", row("Video"));
+    assert!(row("File").starts_with("t.gif ("), "{}", row("File"));
+    assert!(std::path::Path::new(&out).exists());
     for _ in 0..3 {
         w.frame();
     }

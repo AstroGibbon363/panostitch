@@ -136,33 +136,43 @@ pub fn save_image(path: &str, img: &Img, jpeg_quality: u8) -> Result<(), String>
     if is_xisf(path) {
         return xisf::write_xisf(path, img);
     }
-    let c01 = |x: f32| if x.is_nan() { 0.0 } else { x.clamp(0.0, 1.0) };
     let e = ext_of(path);
-    let (w, h) = (img.w as u32, img.h as u32);
-    let res = match e.as_str() {
-        "tif" | "tiff" | "png" => {
-            let mut buf: Vec<u16> = Vec::with_capacity(img.len() * 3);
-            for p in &img.px {
-                for c in p {
-                    buf.push((c01(*c) * 65535.0).round() as u16);
-                }
-            }
-            let im: image::ImageBuffer<image::Rgb<u16>, Vec<u16>> =
-                image::ImageBuffer::from_raw(w, h, buf).ok_or("bad buffer")?;
-            im.save(path)
+    let (w, h) = (img.w, img.h);
+    match e.as_str() {
+        "tif" | "tiff" | "png" => save_rgb16(path, w, h, to_rgb16(img)),
+        _ => save_rgb8(path, w, h, to_rgb8(img), jpeg_quality),
+    }
+}
+
+/// 16-bit RGB samples (clamped to 0…1).
+pub fn to_rgb16(img: &Img) -> Vec<u16> {
+    let mut buf: Vec<u16> = Vec::with_capacity(img.len() * 3);
+    for p in &img.px {
+        for c in p {
+            buf.push((if c.is_nan() { 0.0 } else { c.clamp(0.0, 1.0) } * 65535.0).round() as u16);
         }
+    }
+    buf
+}
+
+/// Save 16-bit RGB samples (`w × h`, row by row) as TIFF or PNG.
+pub fn save_rgb16(path: &str, w: usize, h: usize, buf: Vec<u16>) -> Result<(), String> {
+    let im: image::ImageBuffer<image::Rgb<u16>, Vec<u16>> = image::ImageBuffer::from_raw(w as u32, h as u32, buf).ok_or("bad buffer")?;
+    im.save(path).map_err(|e| format!("Cannot save {}: {e}", basename(path)))
+}
+
+/// Save 8-bit RGB bytes (`w × h`, row by row) as JPEG (with the quality, 1…100), BMP, or another 8-bit type.
+pub fn save_rgb8(path: &str, w: usize, h: usize, buf: Vec<u8>, jpeg_quality: u8) -> Result<(), String> {
+    let res = match ext_of(path).as_str() {
         "jpg" | "jpeg" => {
-            let buf = to_rgb8(img);
             let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
             let mut wr = std::io::BufWriter::new(file);
             let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut wr, jpeg_quality.clamp(1, 100));
             use image::ImageEncoder;
-            enc.write_image(&buf, w, h, image::ExtendedColorType::Rgb8)
+            enc.write_image(&buf, w as u32, h as u32, image::ExtendedColorType::Rgb8)
         }
         _ => {
-            let buf = to_rgb8(img);
-            let im: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
-                image::ImageBuffer::from_raw(w, h, buf).ok_or("bad buffer")?;
+            let im: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> = image::ImageBuffer::from_raw(w as u32, h as u32, buf).ok_or("bad buffer")?;
             im.save(path)
         }
     };

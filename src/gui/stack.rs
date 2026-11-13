@@ -1647,15 +1647,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         if self.running {
             let p = self.progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let f = if p.total > 0.0 { (p.done / p.total) as f32 } else { 0.0 };
-            let left = match p.start {
-                Some(t) => {
-                    let el = t.elapsed().as_secs_f64();
-                    let left = if f > 0.03 && f < 1.0 { format!(", about {} left", super::duration((el * (1.0 - f as f64) / f as f64).max(1.0))) } else { String::new() };
-                    format!(" – {} elapsed{left}", super::duration(el))
-                }
-                None => String::new(),
-            };
-            ui.add(egui::ProgressBar::new(f).show_percentage().text(format!("{}{left}", p.msg)));
+            super::progress_bar(ui, &p.msg, f, p.start);
         } else {
             egui::ScrollArea::vertical().id_salt("kstatus").show(ui, |ui| ui.colored_label(col, &self.status));
         }

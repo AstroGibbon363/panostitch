@@ -15,7 +15,7 @@
 //! what they measured in `Measured`; saving the full image reuses those values
 //! so the saved file matches the preview.
 
-use crate::image::{blur, luminance, quantiles, resize, Gray, Image, Img, Rgb};
+use crate::image::{blur, luminance, quantiles, resize, Bits, Gray, Image, Img, Rgb};
 use crate::stacker::{calibrate_color, extract_background, linear_to_srgb, srgb_to_linear};
 use crate::stitcher::mtf;
 use serde::{Deserialize, Serialize};
@@ -374,26 +374,73 @@ pub fn geometry(img: &Img, p: &FinishParams) -> Img {
     if p.flip_h {
         out = out.flip_cols();
     }
-    let mut box_ = [0.0, 0.0, 1.0, 1.0]; // x0, y0, x1, y1 as fractions
     if p.angle.abs() > 1e-6 {
         out = rotate(&out, p.angle);
-        if p.auto_crop {
-            let k = inscribed_scale(out.w as f64, out.h as f64, p.angle);
-            let m = (1.0 - k) / 2.0;
-            box_ = [m, m, 1.0 - m, 1.0 - m];
-        }
     }
-    let (bw, bh) = (box_[2] - box_[0], box_[3] - box_[1]);
-    let c = p.crop.map(|v| v.clamp(0.0, 0.49));
-    let (w, h) = (out.w as f64, out.h as f64);
-    let x0 = ((box_[0] + c[0] * bw) * w).round() as usize;
-    let y0 = ((box_[1] + c[1] * bh) * h).round() as usize;
-    let x1 = (((box_[2] - c[2] * bw) * w).round() as usize).clamp(x0 + 1, out.w);
-    let y1 = (((box_[3] - c[3] * bh) * h).round() as usize).clamp(y0 + 1, out.h);
+    let (x0, y0, x1, y1) = crop_box(out.w, out.h, p);
     if x0 == 0 && y0 == 0 && x1 == out.w && y1 == out.h {
         out
     } else {
         out.crop(y0, y1, x0, x1)
+    }
+}
+
+/// The crop fractions (left, top, right, bottom), kept so that at least 2 % of
+/// the width and height remain.
+fn crop_sides(p: &FinishParams) -> [f64; 4] {
+    let mut c = p.crop.map(|v| if v.is_finite() { v.clamp(0.0, 0.98) } else { 0.0 });
+    c[2] = c[2].min(0.98 - c[0]);
+    c[3] = c[3].min(0.98 - c[1]);
+    c
+}
+
+/// The part kept by `geometry` (x0, y0, x1, y1 in pixels) of the turned image (w × h).
+fn crop_box(w: usize, h: usize, p: &FinishParams) -> (usize, usize, usize, usize) {
+    let mut box_ = [0.0, 0.0, 1.0, 1.0]; // x0, y0, x1, y1 as fractions
+    if p.angle.abs() > 1e-6 && p.auto_crop {
+        let k = inscribed_scale(w as f64, h as f64, p.angle);
+        let m = (1.0 - k) / 2.0;
+        box_ = [m, m, 1.0 - m, 1.0 - m];
+    }
+    let (bw, bh) = (box_[2] - box_[0], box_[3] - box_[1]);
+    let c = crop_sides(p);
+    let (wf, hf) = (w as f64, h as f64);
+    let x0 = ((box_[0] + c[0] * bw) * wf).round() as usize;
+    let y0 = ((box_[1] + c[1] * bh) * hf).round() as usize;
+    let x1 = (((box_[2] - c[2] * bw) * wf).round() as usize).clamp(x0 + 1, w.max(x0 + 1));
+    let y1 = (((box_[3] - c[3] * bh) * hf).round() as usize).clamp(y0 + 1, h.max(y0 + 1));
+    (x0, y0, x1, y1)
+}
+
+/// Size (w, h) of `geometry`'s output for a source of `w × h`, exactly.
+pub fn geometry_size(w: usize, h: usize, p: &FinishParams) -> (usize, usize) {
+    let (tw, th) = if p.quarter % 2 == 1 { (h, w) } else { (w, h) };
+    let (x0, y0, x1, y1) = crop_box(tw, th, p);
+    (x1 - x0, y1 - y0)
+}
+
+/// Where the point (x, y) of `geometry`'s output comes from in the source
+/// image (w × h). Positions are continuous: pixel i covers i … i + 1.
+pub fn source_point(w: usize, h: usize, p: &FinishParams, x: f64, y: f64) -> (f64, f64) {
+    let (tw, th) = if p.quarter % 2 == 1 { (h, w) } else { (w, h) };
+    let (x0, y0, _, _) = crop_box(tw, th, p);
+    // Undo the crop, the fine rotation, the mirror, then the quarter turns.
+    let (mut u, mut v) = (x + x0 as f64, y + y0 as f64);
+    if p.angle.abs() > 1e-6 {
+        let (s, c) = p.angle.to_radians().sin_cos();
+        let (cx, cy) = (tw as f64 / 2.0, th as f64 / 2.0);
+        let (dx, dy) = (u - cx, v - cy);
+        (u, v) = (c * dx + s * dy + cx, -s * dx + c * dy + cy);
+    }
+    if p.flip_h {
+        u = tw as f64 - u;
+    }
+    let (w, h) = (w as f64, h as f64);
+    match p.quarter % 4 {
+        1 => (v, h - u),
+        2 => (w - u, h - v),
+        3 => (w - v, u),
+        _ => (u, v),
     }
 }
 
@@ -871,7 +918,7 @@ pub fn export_size(img: &Img, p: &FinishParams) -> Img {
 pub fn cropped_size(w: usize, h: usize, p: &FinishParams) -> (usize, usize) {
     let (w, h) = if p.quarter % 2 == 1 { (h, w) } else { (w, h) };
     let k = if p.angle.abs() > 1e-6 && p.auto_crop { inscribed_scale(w as f64, h as f64, p.angle) } else { 1.0 };
-    let c = p.crop.map(|v| v.clamp(0.0, 0.49));
+    let c = crop_sides(p);
     (((w as f64 * k * (1.0 - c[0] - c[2])).round() as usize).max(1), ((h as f64 * k * (1.0 - c[1] - c[3])).round() as usize).max(1))
 }
 
@@ -953,4 +1000,184 @@ pub fn summary(p: &FinishParams) -> String {
         v.push("sharpened".into());
     }
     if v.is_empty() { "no changes".into() } else { v.join(", ") }
+}
+
+// --------------------------------------------------------------------------
+// Sky and foreground: their own looks, through a painted mask
+// --------------------------------------------------------------------------
+
+/// Width of a sky mask grid; its height follows the image's shape.
+pub const MASK_W: usize = 640;
+
+/// Looks of their own for the sky and for the foreground, on top of the main
+/// settings. The mask (true = sky) lies on the source image, before turning and
+/// cropping, so it stays in place when those change.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Local {
+    pub mask: Bits,
+    /// Width of the soft edge between sky and foreground, as a fraction of the image width.
+    pub feather: f64,
+    pub sky: FinishParams,
+    pub ground: FinishParams,
+}
+
+impl Default for Local {
+    fn default() -> Self {
+        Self { mask: Bits::new(0, 0), feather: 0.02, sky: FinishParams::default(), ground: FinishParams::default() }
+    }
+}
+
+impl Local {
+    /// Rows of the mask for an image of `w × h`.
+    pub fn mask_rows(w: usize, h: usize) -> usize {
+        ((MASK_W as f64 * h as f64 / w.max(1) as f64).round() as usize).max(1)
+    }
+    /// A mask of the right shape for an image of `w × h` (nothing is sky).
+    pub fn empty_mask(w: usize, h: usize) -> Bits {
+        Bits::new(Self::mask_rows(w, h), MASK_W)
+    }
+    /// The mask has the shape for an image of `w × h`.
+    pub fn fits(&self, w: usize, h: usize) -> bool {
+        (self.mask.h, self.mask.w) == (Self::mask_rows(w, h), MASK_W)
+    }
+    /// Either look changes something (and there is a mask to apply it through).
+    pub fn used(&self) -> bool {
+        !self.mask.is_empty() && (look_used(&self.sky) || look_used(&self.ground))
+    }
+}
+
+/// Only the look of `p`: white balance, light, curves, colour and detail (no
+/// turning, cropping or stretch), for an image that already looks right.
+pub fn look_part(p: &FinishParams) -> FinishParams {
+    let d = FinishParams::default();
+    FinishParams {
+        wb: p.wb,
+        temperature: p.temperature,
+        tint: p.tint,
+        exposure: p.exposure,
+        contrast: p.contrast,
+        highlights: p.highlights,
+        midtones: p.midtones,
+        shadows: p.shadows,
+        whites: p.whites,
+        blacks: p.blacks,
+        curves: p.curves.clone(),
+        saturation: p.saturation,
+        vibrance: p.vibrance,
+        noise: p.noise,
+        color_noise: p.color_noise,
+        star_reduce: p.star_reduce,
+        sharpen: p.sharpen,
+        sharpen_radius: p.sharpen_radius,
+        ..d
+    }
+}
+
+/// `look_part(p)` changes something.
+pub fn look_used(p: &FinishParams) -> bool {
+    look_part(p) != FinishParams::default()
+}
+
+/// The mask with its soft edge (1 = sky), at the mask's resolution.
+pub fn soft_mask(mask: &Bits, feather: f64) -> Gray {
+    blur(&mask.to_gray(), feather * mask.w as f64 / 4.0)
+}
+
+/// Sky weight (1 = sky) for each pixel of an `out_w × out_h` image that shows
+/// `geometry(src, p)` (resized to that size), for a source of `src_w × src_h`.
+pub fn sky_weight(soft: &Gray, src_w: usize, src_h: usize, p: &FinishParams, out_w: usize, out_h: usize) -> Gray {
+    let (gw, gh) = geometry_size(src_w, src_h, p);
+    let (kx, ky) = (gw as f64 / out_w.max(1) as f64, gh as f64 / out_h.max(1) as f64);
+    let (mx, my) = (soft.w as f64 / src_w.max(1) as f64, soft.h as f64 / src_h.max(1) as f64);
+    let p = p.clone();
+    Gray::from_fn(out_h, out_w, move |y, x| {
+        let (sx, sy) = source_point(src_w, src_h, &p, (x as f64 + 0.5) * kx, (y as f64 + 0.5) * ky);
+        crate::image::bilinear(soft, sy * my + 0.5, sx * mx + 0.5)
+    })
+}
+
+/// The sky and foreground looks of `local` on `img` (a finished image, e.g. the
+/// output of `process`), blended by the sky weight `wt` (from `sky_weight`).
+pub fn apply_local(img: &Img, local: &Local, wt: &Gray, scale: f64) -> Img {
+    let run = |q: &FinishParams| look_used(q).then(|| process(img, &look_part(q), scale, &mut Measured::default()));
+    let (sky, ground) = rayon::join(|| run(&local.sky), || run(&local.ground));
+    let s = sky.as_ref().unwrap_or(img);
+    let g = ground.as_ref().unwrap_or(img);
+    Image::from_vec(
+        img.h,
+        img.w,
+        s.px.iter().zip(&g.px).zip(&wt.px).map(|((a, b), &t)| {
+            let t = t.clamp(0.0, 1.0);
+            [0, 1, 2].map(|k| a[k] * t + b[k] * (1.0 - t))
+        }).collect(),
+    )
+}
+
+/// `img` (the output of `geometry(src, p)`, `scale` × full size) with the looks of `local` applied.
+pub fn with_local(img: Img, src_w: usize, src_h: usize, p: &FinishParams, local: &Local, scale: f64) -> Img {
+    if !local.used() {
+        return img;
+    }
+    let wt = sky_weight(&soft_mask(&local.mask, local.feather), src_w, src_h, p, img.w, img.h);
+    apply_local(&img, local, &wt, scale)
+}
+
+/// The image circle of a circular fisheye (lit disc, dark corners): centre
+/// (x, y) and radius, all as fractions of the image width. None when the corners
+/// are not dark (not a circular fisheye).
+pub fn fisheye_circle(img: &Img) -> Option<(f64, f64, f64)> {
+    let long = img.w.max(img.h);
+    let small = if long > 400 { resize(img, 400.0 / long as f64) } else { img.clone() };
+    let l = blur(&small.luminance(), 1.5);
+    let (w, h) = (l.w, l.h);
+    if w < 8 || h < 8 {
+        return None;
+    }
+    let patch = |x0: usize, y0: usize, pw: usize, ph: usize| -> f32 {
+        crate::image::median_of((y0..y0 + ph).flat_map(|y| (x0..x0 + pw).map(move |x| (y, x))).map(|(y, x)| l.at(y, x)))
+    };
+    let (cw, ch) = ((w / 20).max(2), (h / 20).max(2));
+    let corners = [patch(0, 0, cw, ch), patch(w - cw, 0, cw, ch), patch(0, h - ch, cw, ch), patch(w - cw, h - ch, cw, ch)];
+    let corner = corners.iter().cloned().fold(f32::MIN, f32::max);
+    let centre = patch(w * 2 / 5, h * 2 / 5, w / 5, h / 5);
+    if centre <= corner * 2.0 + 1e-4 {
+        return None;
+    }
+    let t = corner + 0.3 * (centre - corner);
+    // The lit area's extent: columns and rows with at least a few lit pixels.
+    let (mut cols, mut rows) = (vec![0usize; w], vec![0usize; h]);
+    for (y, r) in rows.iter_mut().enumerate() {
+        for (x, c) in cols.iter_mut().enumerate() {
+            if l.at(y, x) > t {
+                *c += 1;
+                *r += 1;
+            }
+        }
+    }
+    let span = |v: &[usize], need: usize| -> Option<(usize, usize)> {
+        let a = v.iter().position(|&c| c >= need)?;
+        let b = v.len() - 1 - v.iter().rev().position(|&c| c >= need)?;
+        Some((a, b + 1))
+    };
+    let (x0, x1) = span(&cols, (h / 50).max(2))?;
+    let (y0, y1) = span(&rows, (w / 50).max(2))?;
+    let (bw, bh) = ((x1 - x0) as f64, (y1 - y0) as f64);
+    // A circle cut by the top and bottom edges: the width gives the radius, the frame's middle the height.
+    let cy = if bh > 0.92 * bw { (y0 + y1) as f64 / 2.0 } else { h as f64 / 2.0 };
+    let (cx, r) = ((x0 + x1) as f64 / 2.0, bw.max(bh) / 2.0);
+    if r < 0.15 * w as f64 {
+        return None;
+    }
+    Some((cx / w as f64, cy / w as f64, r / w as f64))
+}
+
+/// A mask (`rows × cols`, for a `w × h` image) that is sky inside the circle
+/// at (cx, cy) with radius r (fractions of the image width).
+pub fn circle_mask(rows: usize, cols: usize, w: usize, h: usize, cx: f64, cy: f64, r: f64) -> Bits {
+    let (w, h) = (w as f64, h as f64);
+    Bits::from_fn(rows, cols, |y, x| {
+        let px = (x as f64 + 0.5) / cols as f64 * w;
+        let py = (y as f64 + 0.5) / rows as f64 * h;
+        (px - cx * w).powi(2) + (py - cy * w).powi(2) <= (r * w).powi(2)
+    })
 }

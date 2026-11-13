@@ -598,6 +598,16 @@ demselben Rat ab, statt den Speicher zu füllen, wodurch der ganze Computer
 nicht mehr reagieren würde. Das Laden hält bei fast vollem Speicher früher an
 und meldet es.
 
+Ein großes Panorama, das nicht auf einmal in den Speicher passt, wird in
+Streifen von Zeilen berechnet; die Statuszeile zählt dann die Streifen. Ganz
+gehalten wird nur das fertige Panorama, im Format der Datei (3 Byte pro Pixel
+für JPEG, 6 für 16-Bit-TIFF und PNG), und Fotos, die in voller Größe neu
+gelesen werden, in halber Genauigkeit. Ein 16-Bit-TIFF mit 20 000 × 8 000 px
+braucht so etwa 1 GB plus einen Streifen und die Fotos, wo es früher etwa
+8 GB brauchte. Beim Überblenden **Smart** wird jeder Streifen mit Überlappung
+berechnet, sodass die Streifen ohne sichtbare Stufe aneinander anschließen.
+Das Speichern nutzt nie mehr als 85 % des Speichers.
+
 Panoramen, die breiter oder höher als 60 000 px würden, werden abgelehnt. Das
 bedeutet fast immer, dass ein Paar falsch zugeordnet ist oder die Projektion
 ungeeignet ist; probieren Sie cylindrical oder spherical.
@@ -992,6 +1002,7 @@ Die Schritte laufen immer in dieser Reihenfolge, links von oben nach unten:
 | **Curves** | Eine Kurve für alle Farben (**RGB**) und je eine für **Red**, **Green**, **Blue**. Klicken fügt einen Punkt hinzu, Ziehen verschiebt ihn, Rechtsklick entfernt ihn. Das Histogramm hinter der Kurve zeigt, was in sie hineingeht. • markiert geänderte Kurven. |
 | **Colour** | **Saturation** (0 = schwarzweiß) und **Vibrance** (blasse Farben mehr als kräftige). |
 | **Detail** | **Noise reduction** (glättet flache Bereiche, erhält Kanten und Sterne), **Colour noise**, **Star reduction** (kleinere Sterne), **Sharpen** und sein Radius. Radien sind in Pixeln des ganzen Bildes, daher entspricht die Vorschau dem gespeicherten Ergebnis. |
+| **Sky and foreground** | Eigene Looks für Himmel und Vordergrund, zusätzlich zu allem oben, über eine Maske (siehe unten). |
 
 **Streckmethoden:**
 
@@ -1034,35 +1045,107 @@ mehreren Bildern denselben Look, z. B. den Teilen eines Panoramas.
 | Strg+Umschalt+S | Speichern unter… |
 | F | Vorschau einpassen |
 | B (halten) | Mit dem Ausgangspunkt vergleichen |
+| Strg+Z, Strg+Y | Rückgängig, wiederholen |
 
-Noch nicht: Rückgängig, Einstellungen als Vorgabe speichern, Zuschneiden durch Ziehen im Bild.
+**Sky and foreground** (Himmel und Vordergrund; anfangs zugeklappt): Eine
+Landschaft unter den Sternen braucht oft für beide Teile Verschiedenes, z. B.
+weniger Rauschen und kleinere Sterne am Himmel, einen helleren, wärmeren
+Vordergrund. Die Maske mit **✎ Paint** malen (linke Taste = Himmel, rechte
+Taste = Vordergrund, Mausrad = Pinselgröße) oder von **◎ Detect sky** finden
+lassen (Himmel oben; mit dem Pinsel korrigieren; für ein Zirkular-Fisheye
+**◯ Fisheye circle**, Kapitel 17); **All sky**, **Invert** und
+**Clear** fangen neu an. Dann **Sky** oder **Foreground** wählen und Licht,
+Temperatur, Farbe und Detail einstellen. **Soft edge** lässt die beiden Looks
+an der Grenze ineinander übergehen; **Show mask** tönt den Himmel blau und
+den Vordergrund orange (beim Malen immer). Die Maske liegt auf dem Bild
+selbst und bleibt daher beim Drehen oder Zuschneiden an ihrem Platz. Die
+gespeicherte Datei bekommt dieselben Looks; ein • hinter dem Namen des
+Abschnitts zeigt, dass sie verwendet werden.
+
+**↶ Undo** und **↷ Redo** (Strg+Z, Strg+Y oder Strg+Umschalt+Z) gehen durch
+die Änderungen zurück und vor; ein Reglerzug oder ein Pinselstrich zählt als
+ein Schritt, und der Tooltip der Taste sagt, was sie rückgängig macht.
+
+**✂ Crop** schneidet im Bild zu: Das ganze Bild wird mit einem Rahmen
+gezeigt; ziehen zeichnet einen neuen Rahmen, Ziehen an Kanten oder Ecken
+passt ihn an, Ziehen im Inneren verschiebt ihn. **✂ Crop: done** zeigt das
+Ergebnis. Die Formattasten und Zuschnittregler in **Turn and crop** setzen
+denselben Rahmen.
+
+**Vorgaben** (oben, unter dem Bild): einen Namen eingeben und **Save**
+speichert den aktuellen Look: Streckung, Weißabgleich, Licht, Kurven, Farbe,
+Detail und die Looks für Himmel und Vordergrund, aber nicht Drehen, Zuschnitt
+und Exportgröße (die gehören zu einem Bild). **Preset** wendet einen
+gespeicherten Look auf das offene Bild an (Strg+Z macht es rückgängig);
+**Delete** löscht die Vorgabe mit dem eingegebenen Namen. Vorgaben liegen im
+Einstellungsordner (`presets`).
 
 ## 17. Zeitraffer
 
-*Entsteht für 0.4.* Der Tab **Timelapse** wird aus einer Bildfolge ein Video
-machen: einen normalen Zeitraffer, wachsende Strichspuren oder verblassende
-Spuren im Kometenstil, mit Entflackern, Beruhigen, dem Look aus dem Tab
-Post-processing auf jedem Bild und Ausgabe als MP4, WebM, GIF oder
-nummerierte Bilder.
+*Neu in 0.4 (in Entwicklung).* Der Tab **Timelapse** macht aus einer
+Bildfolge ein Video: eine Landschaft unter dem Nachthimmel, vom Stativ
+aufgenommen, mit dem Himmel, der über einem ruhigen Vordergrund zieht. Ein
+langsamer Zoom oder eine Fahrt wie auf einem Slider bringt Kamerabewegung.
 
-Vorerst gibt es nur die Bedienelemente; auf die Bilder wird noch nichts
-angewendet und kein Video erstellt (**▶ Make video** ist ausgegraut):
+**Bilder:** Dateien oder einen Ordner hinzufügen; sie laufen in der
+Reihenfolge der Dateinamen (Kameranummerierung). Ein Klick zeigt das Bild in
+der Mitte; ◀ ▶ blättern. Bei Kamera-RAW-Bildern wählt **RAW via**, wie sie
+gelesen werden: **built-in** (Standard) ist schnell und behandelt alle Bilder
+gleich; **rawtherapee** übernimmt die Bearbeitungen aus den `.pp3`-Dateien
+von RawTherapee neben den Bildern, braucht aber mehrere Sekunden pro Bild
+(etwa zehnmal so lange); **auto** nimmt RawTherapee nur für Bilder mit einer
+`.pp3`-Datei. Der Tab zeigt, wie viele Bilder eine haben. RawTherapee legt
+für jedes Foto, das in seinem Dateibrowser geöffnet wurde, eine `.pp3` an;
+sie bedeutet also nicht, dass das Foto bearbeitet wurde.
 
-- **Bilder:** Dateien oder einen Ordner hinzufügen; sie laufen in der
-  Reihenfolge der Dateinamen. Ein Klick zeigt das Bild in der Mitte (◀ ▶
-  blättern).
-- **Look:** dieselben Licht- und Farbregler wie in Post-processing
-  (Belichtung, Kontrast, Lichter, Mitteltöne, Schatten, Weiß, Schwarz,
-  Temperatur, Tönung, Sättigung, Dynamik), getrennt für **Whole frame** (das
-  ganze Bild), **Sky** (Himmel) und **Foreground** (Vordergrund). Himmel und
-  Vordergrund kommen zum Look des ganzen Bildes hinzu, nur in ihrem Teil der
-  Maske; • markiert geänderte Teile.
-- **Maske:** **✎ Paint** einschalten und auf das gezeigte Bild malen: linke
-  Taste = Himmel, rechte Taste = Vordergrund, Mausrad = Pinselgröße. **All
-  sky**, **Invert**, **Clear** und **Soft edge** (wie weich die beiden Looks
-  an der Grenze ineinander übergehen). Eine Maske gilt für alle Bilder, denn
-  auf dem Stativ bewegt sich der Vordergrund nicht. Himmel ist blau getönt,
-  Vordergrund orange (**Show mask**).
-- **Video und Ausgabe:** Art, Entflackern, Beruhigen, Start vom Look aus
-  Post-processing, langsamer Zoom, Format, Bildrate, Auflösung, 16:9-Zuschnitt,
-  Qualität und wie lang das Video würde (Bilder ÷ Bildrate).
+**Look:** dieselben Licht- und Farbregler wie in Post-processing (Belichtung,
+Kontrast, Lichter, Mitteltöne, Schatten, Weiß, Schwarz, Temperatur, Tönung,
+Sättigung, Dynamik), getrennt für **Whole frame** (das ganze Bild), **Sky**
+(Himmel) und **Foreground** (Vordergrund). Himmel und Vordergrund kommen zum
+Look des ganzen Bildes hinzu, nur in ihrem Teil der Maske; • markiert
+geänderte Teile. Das gewählte Bild zeigt den Look (**Show the look**; aus =
+das Bild, wie es ist). Entflackern und Kamerabewegung sieht man nur im Video.
+
+**Maske:** wie in Post-processing (Kapitel 16): **✎ Paint**,
+**◎ Detect sky**, **All sky**, **Invert**, **Clear**, **Soft edge**,
+**Show mask**. Eine Maske gilt für alle Bilder, denn auf dem Stativ bewegt
+sich der Vordergrund nicht.
+
+Für einen Allsky-Zeitraffer mit einem nach oben gerichteten
+Zirkular-Fisheye findet **◯ Fisheye circle** den hellen Bildkreis und macht
+den Himmel zu einer Scheibe in seiner Mitte; der Ring außen (Horizont, Bäume,
+Lichter) ist Vordergrund. **Sky circle** legt fest, wie viel des Kreisradius
+Himmel ist, und ein großer **Soft edge** (bis 25 %) macht die Grenze zu einem
+radialen Verlauf. Den Rest mit dem Pinsel korrigieren, z. B. ein Teleskop oder
+eine Person, die in den Himmel ragt.
+
+**Video:**
+
+| Einstellung | Was sie tut |
+|---|---|
+| **Deflicker** | Gleicht Helligkeits- und Farbsprünge zwischen Bildern aus (Belichtungsstufen, wechselndes Licht, der Weißabgleich der Kamera). **Light** vergleicht jedes Bild mit seinen Nachbarn (**Smoothing**, in Bildern); **Strong** nimmt dreimal so viele. Langsame Änderungen wie die Dämmerung bleiben. **Colour too** gleicht jede Farbe für sich aus; **Region by region** tut es auf einem groben Raster über das Bild, sodass großräumige Änderungen in einem Teil (Lichtverschmutzung, ein vorbeiziehendes Licht, Dämmerung auf einer Seite) dort ausgeglichen werden, wo sie entstehen. Beides funktioniert für normale Objektive und Fisheye. Das Messen liest jedes Bild ein weiteres Mal. |
+| **Start from the Post-processing tab's look** | Jedes Bild bekommt zuerst die Einstellungen des in Post-processing geöffneten Bildes (Streckung, Weißabgleich, Licht, Kurven, Farbe, Detail; nicht dessen Drehen und Zuschnitt), dann den hier eingestellten Look. Werte der automatischen Streckung werden am ersten Bild gemessen und gelten für alle, sodass das Video nicht flackert. |
+| **Slider move** | Als liefe die Kamera auf einem motorisierten Slider: Das Video zeigt einen um so viele Prozent kleineren Ausschnitt (bis 20 %) und bewegt ihn über das Bild, **Left → right** (von links nach rechts), **Right → left**, **Up** (nach oben) oder **Down** (nach unten). Die Bewegung ist fließend, nicht in ganzen Pixeln. |
+| **Slow zoom in** | Zoomt langsam über das ganze Video hinein; mit der Slider-Fahrt kombinierbar. |
+| **Start and stop gently** | Fahrt und Zoom laufen am Anfang sanft an und bremsen am Ende; aus: immer gleich schnell. Die Vorschau umrandet, wo das Video beginnt (hell) und endet (schwach). |
+
+**Ausgabe:**
+
+| Einstellung | Was sie tut |
+|---|---|
+| **Format** | **MP4** (H.264) und **WebM** (VP9) macht ffmpeg. Installieren (ffmpeg.org; Windows: `winget install ffmpeg`; Linux: Paketverwaltung; macOS: Homebrew) oder neben das Programm legen; der Tab zeigt, wo er es gefunden hat. **Animated GIF** und **Numbered images** (nummerierte Bilder TIFF oder PNG 16 Bit, JPEG) brauchen nichts weiter. GIFs von Sternfeldern sind groß (etwa 1 MB pro Bild bei 720p; MP4 ist 5–10-mal kleiner), sie eignen sich also für kurze Clips. |
+| **Frame rate** | 12–60 Bilder pro Sekunde. |
+| **Resolution** | Wie die Bilder, 4K, 1440p, 1080p oder 720p; nie vergrößert. Bis 1080p werden Kamera-RAWs in halber Größe gelesen, das ist schneller und immer noch scharf genug. |
+| **Crop to 16:9** | Schneidet das 3:2-Kamerabild auf ein Breitbildvideo zu; die Vorschau umrandet den Zuschnitt. |
+| **Quality** | Für MP4, WebM und JPEG-Bilder: höher = besseres Bild, größere Datei. |
+| **Play forward, then back** | Am Ende die Bilder noch einmal rückwärts, sodass das Video nahtlos in Schleife läuft. |
+| **Hold last frame** | Lässt das letzte Bild einige Sekunden stehen. |
+
+Unter den Einstellungen: wie viele Bilder, wie lange das Video läuft und seine
+Größe in Pixeln. **▶ Make video** arbeitet im Hintergrund, je vier Bilder
+gleichzeitig, mit Fortschrittsbalken (vergangene und verbleibende Zeit) und
+**✖ Cancel** (nichts bleibt erhalten). Danach zeigt ein Bericht die Bilder,
+Größe, Bildrate und Länge des Videos, die benötigte Zeit und die Datei mit
+ihrer Größe, oder was schiefging. Zum Beispiel wurden 69 RAW-Bilder (24 MP)
+mit Entflackern in etwa einer halben Minute auf einem Desktop-PC zu einem
+1080p-MP4.

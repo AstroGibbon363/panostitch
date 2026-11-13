@@ -67,6 +67,8 @@ fn fail(msg: String) -> ! {
 }
 
 fn main() {
+    // Leave part of the CPU to the rest of the system (85 % of the cores).
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(panostitch::sys::work_threads()).build_global();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
         print!("{HELP}");

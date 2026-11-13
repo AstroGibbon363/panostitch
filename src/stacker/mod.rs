@@ -507,6 +507,14 @@ impl FrameStore {
         Ok(Self { w, h, k, data: Storage::Map(map, keep), ptr, len: n, place })
     }
 
+    /// Memory the frames will take when kept in memory (0 on disk).
+    pub fn ram_bytes(&self) -> f64 {
+        match self.data {
+            Storage::Ram(_) => 2.0 * self.len as f64,
+            Storage::Map(..) => 0.0,
+        }
+    }
+
     /// Where the frames are kept (for the log).
     pub fn place(&self) -> &str {
         &self.place
@@ -725,17 +733,30 @@ pub fn master(paths: &[String], load: Loader, dir: &std::path::Path, progress: P
     if paths.is_empty() {
         return Ok(None);
     }
+    progress(&format!("Master {what}: 1/{} {}", paths.len(), crate::io::basename(&paths[0])))?;
     let first = load(&paths[0])?;
     let (h, w) = (first.h, first.w);
-    let mut d = FrameStore::new(h, w, paths.len(), dir)?;
-    for (k, p) in paths.iter().enumerate() {
-        progress(&format!("Master {what}: {}/{} {}", k + 1, paths.len(), crate::io::basename(p)))?;
-        let img = if k == 0 { first.clone() } else { load(p)? };
-        if (img.h, img.w) != (h, w) {
-            return Err(format!("{} is {}×{}, not {}×{}.", crate::io::basename(p), img.w, img.h, w, h));
-        }
-        d.store(k, &img);
-    }
+    let d = FrameStore::new(h, w, paths.len(), dir)?;
+    d.store_shared(0, &first);
+    drop(first);
+    // The others several at a time, as many as the free memory allows (decoding needs a few full-size copies).
+    let n = crate::sys::jobs_for_memory(24.0 * (h * w) as f64, d.ram_bytes());
+    let pool = crate::sys::low_priority_pool(n)?;
+    let done = std::sync::atomic::AtomicUsize::new(1);
+    let rest: Vec<usize> = (1..paths.len()).collect();
+    pool.install(|| {
+        use rayon::prelude::*;
+        rest.par_iter().try_for_each(|&k| -> Result<(), String> {
+            let p = &paths[k];
+            let img = load(p)?;
+            if (img.h, img.w) != (h, w) {
+                return Err(format!("{} is {}×{}, not {}×{}.", crate::io::basename(p), img.w, img.h, w, h));
+            }
+            d.store_shared(k, &img);
+            let m = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            progress(&format!("Master {what}: {m}/{} {}", paths.len(), crate::io::basename(p)))
+        })
+    })?;
     let ks: Vec<usize> = (0..paths.len()).collect();
     Ok(Some(d.reduce(&ks, |v| median(v))))
 }

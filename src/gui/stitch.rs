@@ -9,7 +9,7 @@
 
 use super::dialogs::{self, Picked};
 use super::{combo, image_view, slider, texture, View};
-use crate::image::{luminance, quantiles, resize, Bits, Img};
+use crate::image::{luminance, quantiles, resize, Bits, HalfImg, Img, Source};
 use crate::io::{self, basename, LoadOptions, RawDecoder};
 use crate::stitcher::*;
 use egui::{Color32, Pos2, Stroke};
@@ -167,6 +167,26 @@ enum ViewKind {
     Image,
     Pair,
     Pano,
+}
+
+/// Fewest rows of a band when the panorama is rendered in bands to save memory.
+const BAND_MIN: f64 = 1024.0;
+
+/// Memory per pixel of the finished panorama kept for saving: 8-bit for JPEG,
+/// 16-bit for TIFF / PNG, 32-bit float for FITS / XISF.
+fn out_bytes_per_px(ext: &str) -> f64 {
+    match ext {
+        "jpg" | "jpeg" | "bmp" => 3.0,
+        "fits" | "fit" | "fts" | "xisf" => 12.0,
+        _ => 6.0,
+    }
+}
+
+/// The finished panorama as it is saved.
+enum OutBuf {
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    F32(Img),
 }
 
 /// What saving the panorama needs (bytes), for the estimate and the check before saving.
@@ -808,7 +828,7 @@ impl StitchTab {
         let uncropped = self.crop.is_none();
         self.spawn("Rendering preview…", move |_| {
             let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12 };
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None };
             let (img, cov) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, uncropped);
             Ok(Msg::Preview(img, box_, scale, outlines, cov))
         });
@@ -835,7 +855,7 @@ impl StitchTab {
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| {
                 let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12 };
+                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12, levels: None };
                 compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, false).0
             });
             let _ = tx.send(match r {
@@ -1174,15 +1194,18 @@ impl StitchTab {
         let scale = self.out_scale();
         let nat = self.layout.as_ref().and_then(|l| self.items.get(l.ref_)).map(|it| it.native).unwrap_or(1.0);
         let (w0, h0) = (box_.1 - box_.0 + 1.0, box_.3 - box_.2 + 1.0);
-        let reread = if scale > 1.0 { self.visible().iter().map(|&i| &self.items[i]).filter(|it| it.native > 1.0).map(|it| (it.img.w * it.img.h) as f64 * it.native.powi(2) * 12.0).sum() } else { 0.0 };
-        // Rendering (the smart blend keeps several layers per pixel), then the copy that is saved.
-        let per_px = if self.p.blend == Blend::Smart { 64.0 } else { 32.0 } + 18.0;
+        // Photos read again at full size are kept in half precision (6 bytes per pixel).
+        let reread = if scale > 1.0 { self.visible().iter().map(|&i| &self.items[i]).filter(|it| it.native > 1.0).map(|it| (it.img.w * it.img.h) as f64 * it.native.powi(2) * 6.0).sum() } else { 0.0 };
+        let (w, h) = ((w0 * scale).round().max(1.0), (h0 * scale).round().max(1.0));
+        // The panorama is kept in the file's own format and rendered in bands of
+        // at least BAND_MIN rows (the smart blend keeps several layers per pixel).
+        let work = if self.p.blend == Blend::Smart { 64.0 } else { 32.0 };
+        let per_px = out_bytes_per_px(ext) + work * (BAND_MIN / h).min(1.0);
         let bpp = match ext {
             "jpg" | "jpeg" => 1.0,
             "fits" | "fit" | "fts" | "xisf" => 12.0,
             _ => 6.0, // 16-bit TIFF / PNG, uncompressed at most
         };
-        let (w, h) = ((w0 * scale).round().max(1.0), (h0 * scale).round().max(1.0));
         SaveNeeds { w, h, w0, h0, nat, reread, per_px, mem: reread + w * h * per_px, file: w * h * bpp + 50e6 }
     }
 
@@ -1211,7 +1234,7 @@ impl StitchTab {
             self.status = format!("The panorama would be {w}×{h} px; lower the output size, check the pairs or use another projection.");
             return;
         }
-        let (mut imgs, mut scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
+        let (imgs, mut scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         // Above the loaded resolution, read RAWs loaded at half size again at full size.
         let reread: Vec<(usize, String)> = vis.iter().enumerate().filter(|(_, &i)| self.items[i].native > 1.0 && scale > 1.0).map(|(k, &i)| (k, self.items[i].path.clone())).collect();
         if let Err(e) = crate::sys::check_writable(&out) {
@@ -1220,7 +1243,8 @@ impl StitchTab {
         }
         // Enough memory and disk space? Running out would make the whole system stop responding.
         let dir = std::path::Path::new(&out).parent().filter(|d| !d.as_os_str().is_empty()).map(|d| d.to_path_buf()).unwrap_or_else(|| ".".into());
-        let nd = self.save_needs(box_, &io::ext_of(&out));
+        let ext = io::ext_of(&out);
+        let nd = self.save_needs(box_, &ext);
         if let Err(e) = nd.check(&dir, true) {
             self.status = e;
             return;
@@ -1230,6 +1254,7 @@ impl StitchTab {
         let meta = (vis.len(), self.items.len(), cropped);
         let out_name = out.clone();
         let started = self.spawn("Rendering the panorama…", move |tx| {
+            let mut srcs: Vec<Source> = imgs.into_iter().map(Source::Full).collect();
             let nre = reread.len();
             for (n, (k, path)) in reread.iter().enumerate() {
                 let _ = tx.send(Msg::Status(format!("Reading {}/{nre} at full size: {}", n + 1, basename(path))));
@@ -1238,19 +1263,54 @@ impl StitchTab {
                     let (rx, ry) = (full.w as f64 / w0 as f64, full.h as f64 / h0 as f64);
                     // Only if it is the same picture, just larger (same orientation and aspect).
                     if rx > 1.0 && (rx - ry).abs() < 0.02 * rx {
-                        imgs[*k] = Arc::new(full);
+                        srcs[*k] = Source::Half(HalfImg::from_img(&full));
                         scales[*k] = rx;
                     }
                 }
             }
-            let _ = tx.send(Msg::Status(format!("Rendering the panorama ({w}×{h} px)…")));
-            let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12 };
-            let (img, _) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, false);
-            let (w, h) = (img.w, img.h);
+            let refs: Vec<&Source> = srcs.iter().collect();
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None };
+            let (wu, hu) = (w as usize, h as usize);
             let astro = io::is_astro(&out);
-            io::save_panorama(&out, &if astro { img } else { look(&img, 1.0, &p) })?;
-            Ok(Msg::Done(format!("Saved {out} ({w}×{h} px, {} images{}{}).", refs.len(), if cropped { ", cropped" } else { "" }, if astro { ", linear 32-bit" } else if p.stretched() { ", stretched as shown" } else { "" })))
+            // The panorama in the file's own format, filled band by band.
+            let mut buf = match out_bytes_per_px(&io::ext_of(&out)) as usize {
+                3 => OutBuf::U8(vec![0; wu * hu * 3]),
+                6 => OutBuf::U16(vec![0; wu * hu * 3]),
+                _ => OutBuf::F32(Img::new(hu, wu)),
+            };
+            // Bands as large as half the free memory allows (one band = the whole panorama when it fits).
+            let work = if p.blend == Blend::Smart { 64.0 } else { 32.0 };
+            let free = (crate::sys::available_memory() - crate::sys::memory_reserve()).max(0.0);
+            let band_rows = ((0.5 * free / (work * wu as f64)) as usize).max(BAND_MIN as usize);
+            let bands = hu.div_ceil(band_rows.min(hu).max(1));
+            let mut done_rows = 0usize;
+            let (wc, hc) = compose_bands(&refs, &gv, box_, &cp, &gains, &scales, &sizes, band_rows, &mut |y0, img| {
+                let img = if astro { img } else { look(&img, 1.0, &p) };
+                if img.w != wu || y0 + img.h > hu {
+                    return Err(format!("internal error: band {}×{} at row {y0} of {wu}×{hu}", img.w, img.h));
+                }
+                let (a, b) = (y0 * wu * 3, (y0 + img.h) * wu * 3);
+                match &mut buf {
+                    OutBuf::U8(v) => v[a..b].copy_from_slice(&io::to_rgb8(&img)),
+                    OutBuf::U16(v) => v[a..b].copy_from_slice(&io::to_rgb16(&img)),
+                    OutBuf::F32(full) => full.px[y0 * wu..(y0 + img.h) * wu].copy_from_slice(&img.px),
+                }
+                done_rows += img.h;
+                if bands > 1 {
+                    let _ = tx.send(Msg::Status(format!("Rendering the panorama ({w}×{h} px) in {bands} bands: {} %", 100 * done_rows / hu)));
+                }
+                Ok(())
+            })?;
+            if (wc, hc) != (wu, hu) {
+                return Err(format!("internal error: rendered {wc}×{hc} px, expected {wu}×{hu}"));
+            }
+            let _ = tx.send(Msg::Status(format!("Writing {}…", basename(&out))));
+            match buf {
+                OutBuf::U8(v) => io::save_rgb8(&out, wu, hu, v, 95)?,
+                OutBuf::U16(v) => io::save_rgb16(&out, wu, hu, v)?,
+                OutBuf::F32(img) => io::save_panorama(&out, &img)?,
+            }
+            Ok(Msg::Done(format!("Saved {out} ({wu}×{hu} px, {} images{}{}).", refs.len(), if cropped { ", cropped" } else { "" }, if astro { ", linear 32-bit" } else if p.stretched() { ", stretched as shown" } else { "" })))
         });
         if started {
             self.job_is_save = true;

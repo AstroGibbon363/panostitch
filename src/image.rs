@@ -318,6 +318,36 @@ pub fn resize<T: Px>(a: &Image<T>, ratio: f64) -> Image<T> {
     Image::from_fn(hh, ww, |i, j| bilinear(s, (i as f64 + 0.5) / ratio + 0.5, (j as f64 + 0.5) / ratio + 0.5))
 }
 
+/// Resize to exactly `hh × ww` (anti-aliased when shrinking; the two
+/// directions may scale a little differently).
+pub fn resize_exact<T: Px>(a: &Image<T>, hh: usize, ww: usize) -> Image<T> {
+    if (a.h, a.w) == (hh, ww) || a.is_empty() {
+        return a.clone();
+    }
+    crop_resize(a, 0.0, 0.0, a.w as f64, a.h as f64, hh, ww)
+}
+
+/// The window `cw × ch` at (x0, y0) of `a` (pixels, fractions allowed: no
+/// rounding, so a window moved by a fraction of a pixel moves smoothly), resized
+/// to exactly `hh × ww` (anti-aliased when shrinking).
+pub fn crop_resize<T: Px>(a: &Image<T>, x0: f64, y0: f64, cw: f64, ch: f64, hh: usize, ww: usize) -> Image<T> {
+    let r = (ww as f64 / cw).min(hh as f64 / ch);
+    let mut src = std::borrow::Cow::Borrowed(a);
+    let k = if r < 1.0 { (1.0 / r).floor() as usize } else { 1 };
+    if k >= 2 {
+        src = std::borrow::Cow::Owned(block_average(a, k));
+    }
+    let rr = r * k as f64;
+    if rr < 1.0 {
+        src = std::borrow::Cow::Owned(blur(&src, 0.5 * (1.0 / rr - 1.0)));
+    }
+    let s: &Image<T> = &src;
+    let kf = k as f64;
+    let (ky, kx) = (ch / hh as f64 / kf, cw / ww as f64 / kf);
+    let (ox, oy) = (x0 / kf, y0 / kf);
+    Image::from_fn(hh, ww, |i, j| bilinear(s, oy + (i as f64 + 0.5) * ky + 0.5, ox + (j as f64 + 0.5) * kx + 0.5))
+}
+
 /// Pixel centre in a ratio-`s` resized image → pixel centre in the original.
 #[inline]
 pub fn to_full(v: f64, s: f64) -> f64 {
@@ -499,5 +529,74 @@ impl Bits {
     }
     pub fn to_gray(&self) -> Gray {
         Gray::from_vec(self.h, self.w, self.v.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect())
+    }
+}
+
+// --------------------------------------------------------------------------
+// Half-precision images (for keeping many large photos in memory)
+// --------------------------------------------------------------------------
+
+/// An RGB image in half-precision floats: 6 bytes per pixel instead of 12.
+/// About three significant digits (relative steps of 1/2048), plenty for photos
+/// that are only sampled again (stitching at full size).
+pub struct HalfImg {
+    pub w: usize,
+    pub h: usize,
+    px: Vec<[half::f16; 3]>,
+}
+
+impl HalfImg {
+    pub fn from_img(a: &Img) -> Self {
+        Self { w: a.w, h: a.h, px: a.px.par_iter().map(|c| c.map(half::f16::from_f32)).collect() }
+    }
+    #[inline]
+    fn at(&self, y: usize, x: usize) -> Rgb {
+        self.px[y * self.w + x].map(|v| v.to_f32())
+    }
+}
+
+/// An image that can be sampled between pixels, in full or half precision.
+pub trait Sample: Sync {
+    /// Bilinear interpolation at 1-based (y, x), as `bilinear`.
+    fn sample_at(&self, y: f64, x: f64) -> Rgb;
+}
+
+impl Sample for Img {
+    #[inline]
+    fn sample_at(&self, y: f64, x: f64) -> Rgb {
+        bilinear(self, y, x)
+    }
+}
+
+impl Sample for HalfImg {
+    #[inline]
+    fn sample_at(&self, y: f64, x: f64) -> Rgb {
+        let (h, w) = (self.h as i64, self.w as i64);
+        let y0 = (y.floor() as i64).clamp(1, (h - 1).max(1));
+        let x0 = (x.floor() as i64).clamp(1, (w - 1).max(1));
+        let (y1, x1) = ((y0 + 1).min(h), (x0 + 1).min(w));
+        let dy = ((y - y0 as f64) as f32).clamp(0.0, 1.0);
+        let dx = ((x - x0 as f64) as f32).clamp(0.0, 1.0);
+        let p = |yy: i64, xx: i64| self.at((yy - 1) as usize, (xx - 1) as usize);
+        let top = p(y0, x0).scale(1.0 - dx).add(p(y0, x1).scale(dx));
+        let bot = p(y1, x0).scale(1.0 - dx).add(p(y1, x1).scale(dx));
+        top.scale(1.0 - dy).add(bot.scale(dy))
+    }
+}
+
+/// A photo to stitch: as loaded (shared with the window), or re-read at full
+/// size and kept in half precision.
+pub enum Source {
+    Full(std::sync::Arc<Img>),
+    Half(HalfImg),
+}
+
+impl Sample for Source {
+    #[inline]
+    fn sample_at(&self, y: f64, x: f64) -> Rgb {
+        match self {
+            Source::Full(a) => bilinear(a, y, x),
+            Source::Half(a) => a.sample_at(y, x),
+        }
     }
 }

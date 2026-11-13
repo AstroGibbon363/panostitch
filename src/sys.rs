@@ -11,9 +11,28 @@ pub fn total_memory() -> f64 {
     System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::everything())).total_memory() as f64
 }
 
-/// Free memory to leave to the system and the window (bytes): 1 GB, or 10 % on large machines.
+/// Share of the CPU cores and of the memory long jobs may use: the rest stays
+/// for the system and other programs, so the PC keeps responding.
+pub const MAX_SHARE: f64 = 0.85;
+
+/// Free memory to leave to the system and the window (bytes): 15 % of the
+/// memory, at least 1 GB.
 pub fn memory_reserve() -> f64 {
-    1e9_f64.max(0.1 * total_memory())
+    1e9_f64.max((1.0 - MAX_SHARE) * total_memory())
+}
+
+/// Threads for long jobs: 85 % of the CPU cores (at least one).
+pub fn work_threads() -> usize {
+    let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    ((n as f64 * MAX_SHARE).floor() as usize).max(1)
+}
+
+/// How many jobs needing `per_job` bytes each can run at once: as many as the
+/// free memory allows without going past the reserve, at most `work_threads()`
+/// and at least one. `committed` is memory about to be taken by other means.
+pub fn jobs_for_memory(per_job: f64, committed: f64) -> usize {
+    let budget = available_memory() - memory_reserve() - committed;
+    ((budget / per_job.max(1.0)).floor().max(1.0) as usize).min(work_threads())
 }
 
 pub fn gb(bytes: f64) -> String {
@@ -46,8 +65,9 @@ pub fn lower_this_thread() {
     }
 }
 
-/// A thread pool of `n` low-priority threads (0 = one per CPU core).
+/// A thread pool of `n` low-priority threads (0 = `work_threads()`).
 pub fn low_priority_pool(n: usize) -> Result<rayon::ThreadPool, String> {
+    let n = if n == 0 { work_threads() } else { n };
     rayon::ThreadPoolBuilder::new().num_threads(n).thread_name(|i| format!("work-{i}")).start_handler(|_| lower_this_thread()).build().map_err(|e| e.to_string())
 }
 

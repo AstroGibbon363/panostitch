@@ -19,7 +19,7 @@ name = "panostack"
 path = "src/bin/panostack.rs"
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "bmp", "gif"] }
 rayon = "1.10"
 nalgebra = "0.33"
 rand = "0.8"

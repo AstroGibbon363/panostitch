@@ -564,6 +564,15 @@ najetí myší ukáže, co dělat. Uložení pak odmítne se stejnou radou, mís
 zaplnilo paměť a celý počítač přestal reagovat. Načítání se při téměř plné
 paměti zastaví dřív a ohlásí to.
 
+Velká panorama, která se do paměti nevejde najednou, se vykreslí po pásech
+řádků; stavový řádek pak pásy počítá. Celé se drží jen hotové panorama, a to
+ve formátu souboru (3 bajty na pixel pro JPEG, 6 pro 16bitový TIFF a PNG), a
+snímky znovu načtené v plné velikosti se drží v poloviční přesnosti. 16bitový
+TIFF o 20 000 × 8 000 px tak potřebuje asi 1 GB plus jeden pás a snímky, kde
+dřív potřeboval asi 8 GB. Při prolínání **Smart** se každý pás vykreslí s
+přesahem, takže na sebe pásy navazují bez viditelného schodu. Uložení nikdy
+nepoužije víc než 85 % paměti.
+
 Panoramy širší nebo vyšší než 60 000 px se odmítnou. Téměř vždy to znamená, že
 je některá dvojice spárovaná špatně nebo že projekce není vhodná; zkuste
 cylindrical nebo spherical.
@@ -935,6 +944,7 @@ Kroky běží vždy v tomto pořadí, vlevo shora dolů:
 | **Curves** | Jedna křivka pro všechny barvy (**RGB**) a po jedné pro **Red**, **Green**, **Blue**. Kliknutím přidáte bod, tažením ho posunete, pravým tlačítkem odeberete. Histogram za křivkou je histogram toho, co do ní vstupuje. • označuje změněné křivky. |
 | **Colour** | **Saturation** (0 = černobílé) a **Vibrance** (mdlé barvy víc než sytré). |
 | **Detail** | **Noise reduction** (vyhladí plochá místa, zachová hrany a hvězdy), **Colour noise**, **Star reduction** (menší hvězdy), **Sharpen** a jeho poloměr. Poloměry jsou v pixelech celého snímku, takže náhled odpovídá uloženému výsledku. |
+| **Sky and foreground** | Vlastní vzhled pro oblohu a pro popředí, navíc ke všemu výše, přes masku (viz níže). |
 
 **Metody roztažení:**
 
@@ -975,33 +985,100 @@ několika snímkům stejný vzhled, např. dílům panoramy.
 | Ctrl+Shift+S | Uložit jako… |
 | F | Celý náhled do okna |
 | B (držet) | Porovnat s výchozím bodem |
+| Ctrl+Z, Ctrl+Y | Zpět, znovu |
 
-Zatím chybí: zpět (undo), uložení nastavení jako předvolby, ořez tažením v obraze.
+**Sky and foreground** (obloha a popředí; na začátku zavřené): krajina pod
+hvězdami často potřebuje obě části upravit jinak, např. méně šumu a menší
+hvězdy na obloze, světlejší a teplejší popředí. Masku namalujte pomocí
+**✎ Paint** (levé tlačítko = obloha, pravé = popředí, kolečko myši = velikost
+štětce) nebo ji nechte najít **◎ Detect sky** (obloha nahoře; opravte ji
+štětcem; pro kruhové rybí oko **◯ Fisheye circle**, kapitola 17); **All sky**, **Invert** a **Clear** začnou znovu. Pak zvolte
+**Sky** nebo **Foreground** a nastavte jejich světla, teplotu, barvy a
+detail. **Soft edge** prolne oba vzhledy na hranici; **Show mask** obarví
+oblohu modře a popředí oranžově (při malování vždy). Maska leží na samotném
+snímku, takže při otočení nebo ořezu zůstane na místě. Uložený soubor dostane
+stejné úpravy; • za názvem oddílu ukazuje, že se používají.
+
+**↶ Undo** a **↷ Redo** (Ctrl+Z, Ctrl+Y nebo Ctrl+Shift+Z) vracejí a
+opakují změny; tažení posuvníku nebo tah štětcem je jeden krok a popisek
+tlačítka říká, co vrátí.
+
+**✂ Crop** ořízne přímo v obraze: ukáže se celý snímek s rámečkem; tažením
+nakreslíte nový rámeček, tažením za hrany nebo rohy ho upravíte, tažením
+uvnitř ho posunete. **✂ Crop: done** ukáže výsledek. Tlačítka tvarů a
+posuvníky ořezu v **Turn and crop** nastavují tentýž rámeček.
+
+**Předvolby** (nahoře, pod snímkem): napište název a **Save** uloží současný
+vzhled: roztažení, vyvážení bílé, světla, křivky, barvy, detail a vzhled oblohy
+a popředí, ale ne otočení, ořez a velikost exportu (ty patří k jednomu
+snímku). **Preset** použije uložený vzhled na otevřený snímek (Ctrl+Z ho
+vrátí); **Delete** smaže předvolbu s napsaným názvem. Předvolby jsou ve složce
+nastavení (`presets`).
 
 ## 17. Timelapse
 
-*Připravuje se pro verzi 0.4.* Karta **Timelapse** bude ze série snímků
-dělat video: běžný časosběr, rostoucí hvězdné stopy nebo stopy ve stylu komet
-(s doznívajícími konci), s odstraněním blikání, stabilizací, vzhledem z karty
-Post-processing na každém snímku a výstupem MP4, WebM, GIF nebo číslovaných
-snímků.
+*Novinka ve verzi 0.4 (ve vývoji).* Karta **Timelapse** dělá ze série snímků
+video: krajinu pod noční oblohou fotografovanou ze stativu, kde se obloha
+otáčí nad nehybným popředím. Pomalý zoom nebo posun přes snímek, jako by
+fotoaparát jel na slideru, dodá pohyb kamery.
 
-Zatím jsou tu jen ovládací prvky; na snímky se nic nepoužije a video se
-zatím nevytvoří (**▶ Make video** je šedé):
+**Snímky:** přidejte soubory nebo složku; přehrávají se v pořadí názvů
+souborů (číslování fotoaparátu). Kliknutím se snímek zobrazí uprostřed;
+◀ ▶ listují. U snímků RAW volba **RAW via** určuje, jak se načtou:
+**built-in** (výchozí) je rychlý a zachází se všemi snímky stejně;
+**rawtherapee** použije úpravy uložené v souborech `.pp3` programu
+RawTherapee vedle snímků, ale trvá několik sekund na snímek (asi desetkrát
+déle); **auto** použije RawTherapee jen u snímků, které soubor `.pp3` mají.
+Karta ukazuje, kolik snímků ho má. RawTherapee zapisuje `.pp3` ke každé
+fotce otevřené v jeho prohlížeči souborů, takže soubor neznamená, že fotka
+byla upravena.
 
-- **Snímky:** přidejte soubory nebo složku; přehrávají se v pořadí názvů
-  souborů. Kliknutím se snímek zobrazí uprostřed (◀ ▶ listují).
-- **Look (vzhled):** stejné posuvníky světla a barev jako v Post-processing
-  (expozice, kontrast, světla, střední tóny, stíny, bílé, černé, teplota,
-  odstín, sytost, živost), zvlášť pro **Whole frame** (celý snímek), **Sky**
-  (oblohu) a **Foreground** (popředí). Obloha a popředí se přidávají k
-  vzhledu celého snímku, jen ve své části masky; • označuje změněné části.
-- **Maska:** zapněte **✎ Paint** a malujte na zobrazený snímek: levé tlačítko
-  = obloha, pravé = popředí, kolečko myši = velikost štětce. **All sky**,
-  **Invert**, **Clear** a **Soft edge** (jak měkce se oba vzhledy na hranici
-  prolnou). Jedna maska platí pro všechny snímky, protože na stativu se
-  popředí nehýbe. Obloha je obarvená modře, popředí oranžově (**Show mask**).
-- **Video a výstup:** druh, odstranění blikání, stabilizace, začátek od
-  vzhledu z Post-processing, pomalý zoom, formát, snímková frekvence,
-  rozlišení, ořez na 16:9, kvalita a jak dlouhé by video bylo (počet snímků ÷
-  snímková frekvence).
+**Look (vzhled):** stejné posuvníky světla a barev jako v Post-processing
+(expozice, kontrast, světla, střední tóny, stíny, bílé, černé, teplota,
+odstín, sytost, živost), zvlášť pro **Whole frame** (celý snímek), **Sky**
+(oblohu) a **Foreground** (popředí). Obloha a popředí se přidávají k vzhledu
+celého snímku, jen ve své části masky; • označuje změněné části. Vybraný
+snímek ukazuje vzhled (**Show the look**; vypnuto = snímek tak, jak je).
+Odstranění blikání a pohyb kamery jsou vidět jen ve videu.
+
+**Maska:** jako v Post-processing (kapitola 16): **✎ Paint**,
+**◎ Detect sky**, **All sky**, **Invert**, **Clear**, **Soft edge**,
+**Show mask**. Jedna maska platí pro všechny snímky, protože na stativu se
+popředí nehýbe.
+
+Pro celooblohový timelapse s kruhovým rybím okem namířeným nahoru najde
+**◯ Fisheye circle** osvětlený obrazový kruh a oblohou udělá kotouč uprostřed;
+prstenec kolem (obzor, stromy, světla) je popředí. **Sky circle** nastaví,
+kolik poloměru kruhu je obloha, a velká hodnota **Soft edge** (až 25 %) udělá
+z hranice radiální přechod. Zbytek opravte štětcem, např. dalekohled nebo
+člověka, který zasahuje do oblohy.
+
+**Video:**
+
+| Nastavení | Co dělá |
+|---|---|
+| **Deflicker** | Vyrovná skoky jasu i barvy mezi snímky (kroky expozice, měnící se světlo, vyvážení bílé fotoaparátu). **Light** porovná každý snímek se sousedy (**Smoothing**, ve snímcích); **Strong** jich použije třikrát víc. Pomalé změny, jako soumrak, zůstanou. **Colour too** vyrovná každou barvu zvlášť; **Region by region** to dělá na hrubé mřížce přes snímek, takže změny ve velkém měřítku v jedné části (světelné znečištění, projíždějící světlo, svítání na jedné straně) se vyrovnají tam, kde vznikly. Obojí funguje pro běžné objektivy i rybí oko. Měření přečte každý snímek ještě jednou. |
+| **Start from the Post-processing tab's look** | Každý snímek nejdřív dostane nastavení snímku otevřeného v Post-processing (roztažení, vyvážení bílé, světla, křivky, barvy, detail; ne jeho otočení a ořez), potom vzhled nastavený zde. Hodnoty měřené automatickým roztažením se vezmou z prvního snímku a platí pro všechny, takže video nebliká. |
+| **Slider move** | Jako by fotoaparát jel na motorizovaném slideru: video ukazuje část snímku o tolik procent menší (až 20 %) a posouvá ji přes snímek, **Left → right** (zleva doprava), **Right → left**, **Up** (nahoru) nebo **Down** (dolů). Posun je plynulý, ne po celých pixelech. |
+| **Slow zoom in** | Pomalé přiblížení během celého videa; lze kombinovat s posunem. |
+| **Start and stop gently** | Posun i zoom se na začátku rozjedou a na konci zpomalí; vypnuto: stále stejnou rychlostí. Náhled ukáže obrys začátku (jasný) a konce (slabý) videa. |
+
+**Výstup:**
+
+| Nastavení | Co dělá |
+|---|---|
+| **Format** | **MP4** (H.264) a **WebM** (VP9) vyrábí ffmpeg. Nainstalujte ho (ffmpeg.org; Windows: `winget install ffmpeg`; Linux: správce balíčků; macOS: Homebrew) nebo ho dejte vedle programu; karta ukáže, kde ho našla. **Animated GIF** a **Numbered images** (číslované snímky TIFF nebo PNG 16 bitů, JPEG) nic dalšího nepotřebují. GIFy hvězdných polí jsou velké (asi 1 MB na snímek při 720p; MP4 je 5–10× menší), hodí se tedy na krátké ukázky. |
+| **Frame rate** | 12–60 snímků za sekundu. |
+| **Resolution** | Jako snímky, 4K, 1440p, 1080p nebo 720p; nikdy se nezvětšuje. Do 1080p se snímky RAW čtou v poloviční velikosti, což je rychlejší a stále dost ostré. |
+| **Crop to 16:9** | Ořízne snímek 3:2 na širokoúhlé video; náhled ukáže obrys ořezu. |
+| **Quality** | Pro MP4, WebM a snímky JPEG: vyšší = lepší obraz, větší soubor. |
+| **Play forward, then back** | Na konci snímky ještě jednou pozpátku, takže video plynule navazuje ve smyčce. |
+| **Hold last frame** | Nechá poslední snímek pár sekund stát. |
+
+Pod nastavením: kolik je snímků, jak dlouho video poběží a jeho velikost v
+pixelech. **▶ Make video** pracuje na pozadí, po čtyřech snímcích, s
+ukazatelem průběhu (uplynulý a zbývající čas) a **✖ Cancel** (nic se
+neponechá). Potom zpráva ukáže snímky, velikost, snímkovou frekvenci a délku
+videa, jak dlouho to trvalo a soubor s jeho velikostí, případně co se
+nepovedlo. Například z 69 snímků RAW (24 MP) vzniklo video MP4 1080p s
+odstraněním blikání asi za půl minuty na stolním PC.

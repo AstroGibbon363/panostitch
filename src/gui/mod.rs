@@ -3,6 +3,7 @@
 
 pub mod dialogs;
 pub mod finish;
+pub mod mask;
 pub mod notes;
 pub mod stack;
 pub mod stitch;
@@ -186,6 +187,19 @@ pub fn duration(secs: f64) -> String {
     }
 }
 
+/// A progress bar with the time elapsed and an estimate of the time left.
+pub fn progress_bar(ui: &mut egui::Ui, msg: &str, f: f32, start: Option<std::time::Instant>) {
+    let left = match start {
+        Some(t) => {
+            let el = t.elapsed().as_secs_f64();
+            let left = if f > 0.03 && f < 1.0 { format!(", about {} left", duration((el * (1.0 - f as f64) / f as f64).max(1.0))) } else { String::new() };
+            format!(" – {} elapsed{left}", duration(el))
+        }
+        None => String::new(),
+    };
+    ui.add(egui::ProgressBar::new(f).show_percentage().text(format!("{msg}{left}")));
+}
+
 /// Size of a file on disk, for reports ("38 MB"), or "?" if it cannot be read.
 pub fn file_size(path: &str) -> String {
     std::fs::metadata(path).map(|m| crate::sys::gb(m.len() as f64)).unwrap_or_else(|_| "?".into())
@@ -321,7 +335,7 @@ impl eframe::App for App {
 
 impl App {
     pub fn busy(&self) -> bool {
-        self.stitch.busy() || self.stack.busy() || self.finish.busy()
+        self.stitch.busy() || self.stack.busy() || self.finish.busy() || self.timelapse.busy()
     }
     /// Show the Post-processing tab.
     pub fn show_finish(&mut self) {
@@ -377,6 +391,7 @@ impl App {
         self.stack.simple = self.prefs.simple;
         self.finish.simple = self.prefs.simple;
         self.timelapse.simple = self.prefs.simple;
+        self.timelapse.finish_look = self.finish.has_image().then(|| self.finish.p.clone());
         match self.tab {
             Tab::Stitch => self.stitch.ui(ui, &ctx),
             Tab::Stack => self.stack.ui(ui, &ctx),
@@ -398,6 +413,8 @@ impl App {
             r.push("The stitcher is still working (rendering or saving).".to_string());
         } else if self.finish.saving() {
             r.push("Post-processing is still saving the image.".to_string());
+        } else if self.timelapse.busy() {
+            r.push("A video is being made; it will be stopped and not kept.".to_string());
         }
         if self.stitch.unsaved() {
             r.push("Panorama stitcher: changes not saved in a project.".to_string());
@@ -469,6 +486,10 @@ impl App {
 
 /// Folder for the program's settings.
 pub fn config_dir() -> std::path::PathBuf {
+    // PANOSTITCH_CONFIG points elsewhere (tests, a portable copy).
+    if let Some(d) = std::env::var_os("PANOSTITCH_CONFIG") {
+        return d.into();
+    }
     dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("panostitch")
 }
 fn load_prefs() -> Prefs {

@@ -233,8 +233,21 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     let base_stars = infos[base_i].detected.clone();
     let done = std::sync::atomic::AtomicUsize::new(1);
     let ncand = cand.len();
-    // Load several frames at once (RAW decoding is the slow part), a few at a time to bound the memory.
-    let nthreads = rayon::current_num_threads().div_ceil(2).clamp(1, 4);
+    // Load several frames at once (RAW decoding is the slow part): as many as the
+    // free memory allows (a frame being decoded, calibrated and measured needs
+    // several full-size copies), at most 85 % of the cores.
+    let per_frame = 48.0 * (h * w) as f64 * if cfg.merge4 { 4.0 } else { 1.0 };
+    let nthreads = crate::sys::jobs_for_memory(per_frame, store.ram_bytes());
+    note(
+        &mut log,
+        format!(
+            "Loading {nthreads} frames at a time ({} each; {} memory free, {} kept for the system; {} cores in use at most)",
+            crate::sys::gb(per_frame),
+            crate::sys::gb(crate::sys::available_memory()),
+            crate::sys::gb(crate::sys::memory_reserve()),
+            crate::sys::work_threads()
+        ),
+    );
     let results: Vec<(usize, FrameInfo)> = {
         let jobs: Vec<(usize, usize)> = cand.iter().enumerate().filter(|(k, _)| *k != bi).map(|(k, &i)| (k, i)).collect();
         let pool = crate::sys::low_priority_pool(nthreads)?;

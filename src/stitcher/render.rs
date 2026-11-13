@@ -6,7 +6,7 @@
 //! (u, v) = f·(a, b), so one unit ≈ one reference pixel near the centre.
 
 use super::{inv, kmat, Pt, M3};
-use crate::image::{bilinear, blur, luminance, Bits, Gray, Image, Img, Px, Rgb};
+use crate::image::{bilinear, blur, luminance, Bits, Gray, Image, Img, Px, Rgb, Sample};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -371,17 +371,20 @@ pub struct ComposeParams {
     pub sharpness: f64,
     /// Relative brightness difference above which `Smart` treats photos as disagreeing.
     pub deghost: f64,
+    /// Smart blending: pyramid levels (None = from the output size). Set when
+    /// rendering in bands, so every band blends alike.
+    pub levels: Option<usize>,
 }
 
 impl Default for ComposeParams {
     fn default() -> Self {
-        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12 }
+        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12, levels: None }
     }
 }
 
 /// Output pixel centre px (1-based) ↔ u = (px-0.5)/scale + umin - 0.5.
-struct Sampler<'a> {
-    imgs: &'a [&'a Img],
+struct Sampler<'a, S: Sample> {
+    imgs: &'a [&'a S],
     ms: Vec<M3>,
     sizes: &'a [(usize, usize)],
     scales: &'a [f64],
@@ -392,7 +395,7 @@ struct Sampler<'a> {
     vmin: f64,
 }
 
-impl Sampler<'_> {
+impl<S: Sample> Sampler<'_, S> {
     /// Colour, blending weight and distance from the border (full-resolution px)
     /// of image i at output pixel (x, y) (1-based), or None.
     #[inline]
@@ -419,7 +422,7 @@ impl Sampler<'_> {
         let dist = ox.min(w as f64 - ox + 1.0).min(oy).min(h as f64 - oy + 1.0);
         let wt = if p.blend == Blend::Average { 1.0f32 } else { (dist as f32 / 100.0).powf(p.sharpness as f32) };
         let s = self.scales[i];
-        let col = bilinear(self.imgs[i], (oy - 0.5) * s + 0.5, (ox - 0.5) * s + 0.5).scale(self.gains[i] as f32);
+        let col = self.imgs[i].sample_at((oy - 0.5) * s + 0.5, (ox - 0.5) * s + 0.5).scale(self.gains[i] as f32);
         Some((col, wt, dist))
     }
 }
@@ -448,7 +451,7 @@ fn outline_box(o: &[Pt], umin: f64, vmin: f64, scale: f64, wc: usize, hc: usize)
 /// - `imgs[i]`: the pixels to sample, which may be image i resized by `scales[i]`; `sizes[i]` the full size (h, w)
 /// - `coverage`: also return the mask of the output pixels any photo covers
 #[allow(clippy::too_many_arguments)]
-pub fn compose(imgs: &[&Img], g: &[M3], box_: (f64, f64, f64, f64), p: &ComposeParams, gains: &[f64], scales: &[f64], sizes: &[(usize, usize)], coverage: bool) -> (Img, Option<Bits>) {
+pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: &ComposeParams, gains: &[f64], scales: &[f64], sizes: &[(usize, usize)], coverage: bool) -> (Img, Option<Bits>) {
     let (umin, umax, vmin, vmax) = box_;
     let wc = (((umax - umin + 1.0) * p.scale).round() as usize).max(1);
     let hc = (((vmax - vmin + 1.0) * p.scale).round() as usize).max(1);
@@ -586,6 +589,61 @@ pub fn compose(imgs: &[&Img], g: &[M3], box_: (f64, f64, f64, f64), p: &ComposeP
     (multiband(&s, n, &sel, &wsum, hc, wc, &outlines), cover)
 }
 
+/// Pyramid levels of the smart blend for an output of `hc × wc`.
+fn pyramid_levels(hc: usize, wc: usize) -> usize {
+    ((hc.min(wc) as f64 / 16.0).log2().floor() as i64).clamp(0, 7) as usize
+}
+
+/// As `compose` (without the coverage), but rendered in bands of about
+/// `band_rows` rows: `band(y0, img)` receives each band (output rows y0 …) in
+/// turn, so only one band is in memory at a time. Smart blending also renders
+/// a margin above and below each band (its deghosting and the blend across the
+/// photos' seams reach that far), so the bands join without a visible step.
+/// Returns the output size (w, h).
+#[allow(clippy::too_many_arguments)]
+pub fn compose_bands<S: Sample>(
+    imgs: &[&S],
+    g: &[M3],
+    box_: (f64, f64, f64, f64),
+    p: &ComposeParams,
+    gains: &[f64],
+    scales: &[f64],
+    sizes: &[(usize, usize)],
+    band_rows: usize,
+    band: &mut dyn FnMut(usize, Img) -> Result<(), String>,
+) -> Result<(usize, usize), String> {
+    let (umin, umax, vmin, vmax) = box_;
+    let wc = (((umax - umin + 1.0) * p.scale).round() as usize).max(1);
+    let hc = (((vmax - vmin + 1.0) * p.scale).round() as usize).max(1);
+    let smart = p.blend == Blend::Smart;
+    let mut p2 = p.clone();
+    // Bands and margins in steps of the coarsest pyramid level, so the levels line up across bands.
+    let unit = 128;
+    let pad = if smart {
+        let l = p.levels.unwrap_or_else(|| pyramid_levels(hc, wc));
+        p2.levels = Some(l);
+        (4usize << l).div_ceil(unit) * unit
+    } else {
+        0
+    };
+    let rows = (band_rows.max(unit) / unit) * unit;
+    let mut y0 = 0;
+    while y0 < hc {
+        let n = rows.min(hc - y0);
+        let (a, b) = (y0.saturating_sub(pad), (y0 + n + pad).min(hc));
+        let top = vmin + a as f64 / p.scale;
+        let sub = (umin, umax, top, top + (b - a) as f64 / p.scale - 1.0);
+        let (img, _) = compose(imgs, g, sub, &p2, gains, scales, sizes, false);
+        if img.h != b - a || img.w != wc {
+            return Err(format!("internal error: band of {}×{} px, expected {wc}×{}", img.w, img.h, b - a));
+        }
+        let core = if (a, b) == (y0, y0 + n) { img } else { img.crop(y0 - a, y0 - a + n, 0, wc) };
+        band(y0, core)?;
+        y0 += n;
+    }
+    Ok((wc, hc))
+}
+
 /// Largest axis-aligned rectangle of `true` cells in `m`, as (row range, column
 /// range; 0-based, inclusive), or None. Used for auto-crop.
 pub fn largest_rectangle(m: &Bits) -> Option<((usize, usize), (usize, usize))> {
@@ -634,9 +692,9 @@ fn pyr_up<T: Px>(a: &Image<T>, h: usize, w: usize) -> Image<T> {
 /// Multi-band blending (Burt & Adelson): fine detail comes from the photo chosen
 /// in `sel` for each output pixel, coarser brightness variations are blended
 /// over wider and wider zones.
-fn multiband(s: &Sampler, n: usize, sel: &[i32], covered: &Gray, hc: usize, wc: usize, outlines: &[Vec<Pt>]) -> Img {
-    let lmax = ((hc.min(wc) as f64 / 16.0).log2().floor() as i64).clamp(0, 7) as usize;
+fn multiband<S: Sample>(s: &Sampler<S>, n: usize, sel: &[i32], covered: &Gray, hc: usize, wc: usize, outlines: &[Vec<Pt>]) -> Img {
     let p = s.p;
+    let lmax = p.levels.unwrap_or_else(|| pyramid_levels(hc, wc));
     if lmax == 0 {
         return Img::from_fn(hc, wc, |y, x| {
             let k = sel[y * wc + x];
