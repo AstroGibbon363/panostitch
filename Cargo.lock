@@ -2218,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "panostitch"
-version = "0.4.0-dev"
+version = "0.4.0-beta1"
 dependencies = [
  "chrono",
  "dirs",

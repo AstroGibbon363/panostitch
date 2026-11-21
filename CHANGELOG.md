@@ -1,6 +1,8 @@
 # Changes
 
-## v0.4.0 (in development)
+## v0.4.0-beta1
+
+Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release.
 
 ### Post-processing tab (new)
 - The last steps on a stacked or stitched image in one place: turn and crop (any angle, empty corners cut away, crop to 3:2 / 16:9 / 1:1 …), stretch, white balance, light, curves, colour, noise, star reduction, sharpening, and saving at a chosen size (e.g. 2048 px for forums) with JPEG quality.
@@ -57,6 +59,14 @@
 ### Reports and times
 - After stacking and after saving a panorama, a short report: photos / frames used, time taken, result size, file and its size, or what went wrong.
 - The stacking progress bar shows the time elapsed next to the time left; the stitcher's status line shows the time elapsed while it works.
+
+## v0.3.2
+
+Bug fixes for star stacking.
+
+- **RAW white balance in stacking:** *Average of image* and *Daylight* gave wrong colours with the built-in RAW decoder. The grey-world average could miss the blue pixels entirely, and Daylight applied no white balance at all, because the camera colour matrix was read from a field the RAW library no longer fills. Both now match LibRaw. *Camera* falls back to the daylight balance for files without one.
+- **Alignment:** a frame whose star match was degenerate (the same few stars matched over and over) could be accepted with a folded, mirrored transform and smeared across the whole stack, tinting it (for example red from car lights). Alignments that flip the frame or scale it beyond 0.6–1.6× are now refused, and the frame is reported as failed.
+- Sorting star distances and fit errors cannot crash on an invalid number (NaN) any more.
 
 ## v0.3.1
 

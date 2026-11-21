@@ -1,7 +1,8 @@
 # Tests and builds PanoStitch on Linux and Windows. (No macOS builds: GitHub's
 # Mac runners were often unavailable and held up releases; build from source.)
 # Pushing a tag such as v0.3.1 also publishes a GitHub release with one zip
-# per system (the two programs, the manuals and the licenses).
+# per system (the two programs, the manuals and the licenses). A tag with a
+# suffix such as v0.4.0-beta1 becomes a pre-release.
 name: build
 
 on:
@@ -86,5 +87,9 @@ jobs:
             # This version's section of CHANGELOG.md, without its heading
             awk -v v="## $GITHUB_REF_NAME" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md
           } > notes.md
+          # A tag with a suffix (v0.4.0-beta1) is a test version: published as a
+          # pre-release, so the newest stable release stays "Latest".
+          extra=""
+          case "$GITHUB_REF_NAME" in *-*) extra="--prerelease --latest=false" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/*.zip --repo "$GITHUB_REPOSITORY" \
-            --title "PanoStitch $GITHUB_REF_NAME" --notes-file notes.md
+            --title "PanoStitch $GITHUB_REF_NAME" --notes-file notes.md $extra
