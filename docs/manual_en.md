@@ -1,6 +1,6 @@
 # Panorama Stitcher: User Manual
 
-*Other languages: [Česky](manual_cs.md) · [Deutsch](manual_de.md)*
+*Other languages: [Česky](manual_cs.md) · [Deutsch](manual_de.md) · [Español](manual_es.md) · [Français](manual_fr.md) · [Polski](manual_pl.md)*
 
 A desktop program that joins overlapping photos into one panorama or mosaic:
 JPEG, TIFF, PNG, camera RAW and astronomical FITS images. Every step runs only
@@ -66,11 +66,13 @@ You can also list photos or a project file to open straight away:
 panostitch ~/Pictures/pano/*.NEF
 panostitch my_pano.panoproj
 panostitch night.stackproj          # opens in the Star stacking tab
+panostitch night.tlproj             # opens in the Timelapse tab
 ```
 
 Notes:
 
-- The program uses all CPU cores automatically.
+- The program uses the CPU cores automatically. Long jobs use at most 85 % of
+  them and leave 15 % of the memory free, so the computer stays usable.
 - The window opens within a second or two; nothing has to be prepared first.
 - If no window appears, start the program from a terminal: error messages
   are shown there.
@@ -78,6 +80,24 @@ Notes:
   settings folder: `~/.config/panostitch` on Linux,
   `~/Library/Application Support/panostitch` on macOS,
   `%APPDATA%\panostitch` on Windows.
+- **Language:** the window speaks English, Czech, German, Spanish, French or
+  Polish; the menu at the
+  top right switches at once (the first start follows the system's language).
+- **Help:** **? Help** at the top right (or F1) opens this manual inside the
+  program, with contents, search and links; F1 opens the chapter of the tab
+  on show.
+- **Remembered between sessions:** the tab you were in, the stacking
+  settings, the timelapse's video settings (deflicker, camera move, output,
+  RAW via) and the stitcher's RAW settings. Files, masks and looks are not
+  remembered; a project file keeps those.
+- **Drag and drop:** drop images or a folder onto the window to add them to
+  the tab on show (Post-processing opens the first image). A dropped project
+  file opens in its own tab.
+- **Recent projects** (top bar) lists the projects you opened or saved last,
+  of every kind; a click opens one in its tab.
+- File dialogs start in the folder you used last.
+- After saving, **Show in folder** (in the report, or next to Save in
+  Post-processing) opens the folder in the file manager.
 
 ---
 
@@ -890,10 +910,11 @@ Star stacking from code: fill a `stacker::StackConfig` (start from
 |---|---|
 | `panostitch` (`panostitch.exe`) | The program (the window). |
 | `panostack` (`panostack.exe`) | Star stacking from the command line (`panostack --help`). |
-| `*.panoproj`, `*.stackproj` | Your project files (wherever you save them). |
+| `*.panoproj`, `*.stackproj`, `*.tlproj` | Your project files (wherever you save them). |
 | `ui.toml` in the settings folder | The appearance switches (see [Starting the program](#2-starting-the-program)). |
+| `remembered/`, `recent_projects.txt`, `last_folder.txt` in the settings folder | The settings kept for the next session, the recent projects, the folder file dialogs start in. Delete them to start afresh. |
 | `docs/manual_en.md` | This manual (English). |
-| `docs/manual_cs.md`, `docs/manual_de.md` | The manual in Czech and German. |
+| `docs/manual_cs.md`, `docs/manual_de.md`, `docs/manual_es.md`, `docs/manual_fr.md`, `docs/manual_pl.md` | The manual in Czech, German, Spanish, French and Polish. |
 
 Source code (to build the program yourself):
 
@@ -904,7 +925,7 @@ Source code (to build the program yourself):
 | `src/stitcher/` | Stitching: features, matching, placement, refinement, projections, blending. |
 | `src/stacker/` | Star stacking. |
 | `src/finish.rs` | Post-processing: geometry, stretches (MTF, arcsinh, GHS), white balance, light, curves, colour, detail. |
-| `src/gui/` | The window: the four tabs and the file dialogs. |
+| `src/gui/` | The window: the four tabs, the file dialogs, the built-in manual and the window's texts in six languages (`i18n_*.rs`). |
 | `src/bin/` | The two programs, `panostitch` and `panostack`. |
 | `tests/` | Tests: stacking on synthetic night scenes, stitching, post-processing, file formats, and the tabs of the window. Run them with `cargo test --release`. |
 | `examples/scripted.rs` | Using the stitcher from your own Rust code. |
@@ -1023,6 +1044,13 @@ sequence of frames: a landscape under the night sky shot from a tripod,
 with the sky turning over a still foreground. A slow zoom or a slider-like
 move across the frame can give it a camera move.
 
+**Projects:** **⬇ Save project…** keeps the frames, the looks, the mask
+(and fisheye circle) and every video setting in a `.tlproj` file;
+**⇪ Open project…** (Ctrl+O) brings it all back, also after the folder was
+moved. Ctrl+S saves to the open project at once. "Start from the
+Post-processing tab's look" is kept as a switch: it uses the image open in
+Post-processing at the time.
+
 **Frames:** add files or a folder; they play in file-name order (camera
 numbering). Click one to show it in the middle; ◀ ▶ step through them.
 With camera RAW frames, **RAW via** chooses how they are read: **built-in**
@@ -1069,13 +1097,14 @@ brush, e.g. a telescope or a person reaching into the sky.
 | **Format** | **MP4** (H.264) and **WebM** (VP9) are made with ffmpeg. Install it (ffmpeg.org; Windows: `winget install ffmpeg`; Linux: the package manager; macOS: Homebrew) or put it next to the program; the tab says where it found it. **Animated GIF** and **Numbered images** (TIFF or PNG 16-bit, JPEG) need nothing else. GIFs of star fields are large (about 1 MB per frame at 720p; MP4 is 5–10 times smaller), so they suit short clips. |
 | **Frame rate** | 12–60 frames per second. |
 | **Resolution** | As the frames, 4K, 1440p, 1080p or 720p; never scaled up. Up to 1080p, camera RAW frames are read at half size, which is quicker and still sharp enough. |
-| **Crop to 16:9** | Cuts the 3:2 camera frame to a widescreen video; the preview outlines the cut. |
+| **Shape** | The video's shape; the frame is cut to it and the preview outlines the cut. **As the frames** (no cut), **16:9**, **3:2** and **4:3** (these follow the frames' orientation), **1:1 square** (the whole circle of an all-sky fisheye) or **9:16 vertical** (phones). At 1080p: 1920 × 1080, 1620 × 1080, 1440 × 1080, 1080 × 1080 and 1080 × 1920. With a fisheye circle, the tab warns when a shape cuts off part of the sky. |
 | **Quality** | For MP4, WebM and JPEG images: higher = better picture, bigger file. |
 | **Play forward, then back** | The frames again in reverse at the end, so the video loops smoothly. |
 | **Hold last frame** | Keeps the last frame on for a few seconds. |
 
 Below the settings: how many frames, how long the video runs and its size in
-pixels. **▶ Make video** works in the background, four frames at a time, with
+pixels. **▶ Make video** works in the background, up to eight frames at a
+time (fewer when memory is short), with
 a progress bar (time elapsed and time left) and **✖ Cancel** (nothing is
 kept). A report then shows the frames, the video's size, frame rate and
 length, the time it took, and the file with its size, or what went wrong.

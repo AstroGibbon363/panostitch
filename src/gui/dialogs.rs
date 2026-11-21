@@ -8,6 +8,64 @@ use std::sync::mpsc::{channel, Receiver};
 
 pub const NO_DIALOG: &str = "No file dialog available (install zenity or kdialog on Linux): type a path into the box instead.";
 
+/// The folder the last file was chosen in (kept in the settings folder), so the
+/// next dialog starts there; else the home folder.
+pub fn start_folder() -> String {
+    let saved = std::fs::read_to_string(super::config_dir().join("last_folder.txt")).unwrap_or_default();
+    let saved = saved.trim();
+    if !saved.is_empty() && std::path::Path::new(saved).is_dir() {
+        return saved.to_string();
+    }
+    dirs::home_dir().unwrap_or_default().to_string_lossy().to_string()
+}
+
+/// Remember the folder of a chosen file (or the folder itself).
+pub fn remember_folder(path: &str) {
+    let p = std::path::Path::new(path);
+    let d = if p.is_dir() { Some(p) } else { p.parent() };
+    if let Some(d) = d.filter(|d| d.is_dir()) {
+        let _ = std::fs::create_dir_all(super::config_dir());
+        let _ = std::fs::write(super::config_dir().join("last_folder.txt"), d.to_string_lossy().as_bytes());
+    }
+}
+
+/// Show a file in the system's file manager (its folder; the file selected where possible).
+pub fn show_in_folder(path: &str) {
+    let p = std::path::Path::new(path);
+    let dir = if p.is_dir() { p.to_path_buf() } else { p.parent().map(|d| d.to_path_buf()).unwrap_or_default() };
+    let mut c = if cfg!(windows) {
+        let mut c = Command::new("explorer");
+        if p.is_file() {
+            // Explorer wants /select,"path" exactly; the usual argument quoting
+            // ("/select,path with spaces") makes it open the Documents folder instead.
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                c.raw_arg(format!("/select,\"{}\"", p.display()));
+            }
+        } else {
+            c.arg(&dir);
+        }
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = Command::new("open");
+        if p.is_file() {
+            c.arg("-R").arg(p);
+        } else {
+            c.arg(&dir);
+        }
+        c
+    } else {
+        let mut c = Command::new("xdg-open");
+        c.arg(&dir);
+        c
+    };
+    // Waited for on a worker thread, so no finished process is left behind.
+    std::thread::spawn(move || {
+        let _ = c.status();
+    });
+}
+
 fn tool() -> Option<&'static str> {
     use crate::io::raw::which;
     if cfg!(windows) {
@@ -38,6 +96,7 @@ const PS_HEAD: &str = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
 /// Choose files to open. None = no dialog tool; Some(empty) = cancelled.
 pub fn open_files(title: &str, multiple: bool, filter: Option<(&str, Vec<String>)>) -> Option<Vec<String>> {
     let t = tool()?;
+    let start = start_folder();
     let (name, exts) = filter.unwrap_or(("All files", vec![]));
     let globs: Vec<String> = exts.iter().flat_map(|e| [format!("*{e}"), format!("*{}", e.to_uppercase())]).collect();
     let mut c = Command::new(t);
@@ -48,6 +107,7 @@ pub fn open_files(title: &str, multiple: bool, filter: Option<(&str, Vec<String>
             } else {
                 c.args(["--file", &format!("--title={title}"), "--width=1000", "--height=650"]);
             }
+            c.arg(format!("--filename={}/", start.trim_end_matches('/')));
             if multiple {
                 c.args(["--multiple", "--separator=\n"]);
             }
@@ -56,7 +116,7 @@ pub fn open_files(title: &str, multiple: bool, filter: Option<(&str, Vec<String>
             }
         }
         "kdialog" => {
-            c.args(["--title", title, "--getopenfilename"]).arg(dirs::home_dir().unwrap_or_default());
+            c.args(["--title", title, "--getopenfilename"]).arg(&start);
             if !globs.is_empty() {
                 c.arg(format!("{name} ({})", globs.join(" ")));
             }
@@ -65,7 +125,7 @@ pub fn open_files(title: &str, multiple: bool, filter: Option<(&str, Vec<String>
             }
         }
         "osascript" => {
-            let pick = format!("choose file with prompt {}{}", applescript(title), if multiple { " with multiple selections allowed" } else { "" });
+            let pick = format!("choose file with prompt {} default location (POSIX file {}){}", applescript(title), applescript(&start), if multiple { " with multiple selections allowed" } else { "" });
             let lines: Vec<String> = if multiple {
                 vec![format!("set fs to ({pick})"), "set out to \"\"".into(), "repeat with f in fs".into(), "set out to out & POSIX path of f & linefeed".into(), "end repeat".into(), "return out".into()]
             } else {
@@ -78,20 +138,31 @@ pub fn open_files(title: &str, multiple: bool, filter: Option<(&str, Vec<String>
         _ => {
             let pats = if exts.is_empty() { "All files|*.*".to_string() } else { format!("{name}|{}|All files|*.*", exts.iter().map(|e| format!("*{e}")).collect::<Vec<_>>().join(";")) };
             let script = format!(
-                "{PS_HEAD}$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = {}; $d.Filter = {}; $d.Multiselect = ${}; if ($d.ShowDialog() -eq 'OK') {{ [Console]::Out.Write(($d.FileNames -join \"`n\")) }}",
-                ps(title), ps(&pats), multiple
+                "{PS_HEAD}$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = {}; $d.Filter = {}; $d.Multiselect = ${}; $d.InitialDirectory = {}; if ($d.ShowDialog() -eq 'OK') {{ [Console]::Out.Write(($d.FileNames -join \"`n\")) }}",
+                ps(title), ps(&pats), multiple, ps(&start)
             );
             c.args(["-NoProfile", "-STA", "-Command", &script]);
         }
     }
     let mut v: Vec<String> = run(c).map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()).unwrap_or_default();
     v.sort();
+    if let Some(f) = v.first() {
+        remember_folder(f);
+    }
     Some(v)
 }
 
 /// Choose where to save. Outer None = no dialog tool; inner None = cancelled.
 pub fn save_file(title: &str, default: &str) -> Option<Option<String>> {
     let t = tool()?;
+    // A bare name (no folder yet) goes to the folder used last.
+    let joined;
+    let default = if std::path::Path::new(default).parent().is_none_or(|d| d.as_os_str().is_empty()) {
+        joined = std::path::Path::new(&start_folder()).join(default).to_string_lossy().to_string();
+        joined.as_str()
+    } else {
+        default
+    };
     let p = std::path::Path::new(default);
     let dir = p.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -118,7 +189,11 @@ pub fn save_file(title: &str, default: &str) -> Option<Option<String>> {
             c.args(["-NoProfile", "-STA", "-Command", &script]);
         }
     }
-    Some(run(c))
+    let r = run(c);
+    if let Some(f) = &r {
+        remember_folder(f);
+    }
+    Some(r)
 }
 
 /// What a dialog thread hands back.

@@ -3,6 +3,7 @@
 //! sharpening) and saving it at the size you want. A small copy gives a live
 //! preview; the full image is processed when saving.
 
+use crate::gui::i18n::tr;
 use super::dialogs::{self, Picked};
 use super::mask::MaskEditor;
 use super::{image_view, texture, View};
@@ -100,6 +101,9 @@ pub struct FinishTab {
     out: String,
     /// Settings of the last save.
     saved: Option<Settings>,
+    /// The file being saved, and the last one saved (for "Show in folder").
+    saving_to: Option<String>,
+    last_saved: Option<String>,
     /// The sky / foreground mask and looks.
     mask: MaskEditor,
     /// Which of them the sliders show: 0 sky, 1 foreground.
@@ -147,9 +151,11 @@ impl Default for FinishTab {
             tx,
             rx,
             view: View::default(),
-            status: "Open an image (Ctrl+O), or send a result here from the other tabs.".into(),
+            status: tr("Open an image (Ctrl+O), or send a result here from the other tabs.").into(),
             out: String::new(),
             saved: None,
+            saving_to: None,
+            last_saved: None,
             dialog: None,
             sampling: false,
             sample_from: None,
@@ -169,7 +175,7 @@ impl Default for FinishTab {
 }
 
 fn panic_text() -> String {
-    format!("internal error (details in {})", super::crash_log().display())
+    crate::trf!("internal error (details in {})", super::crash_log().display())
 }
 
 impl FinishTab {
@@ -194,18 +200,25 @@ impl FinishTab {
     }
 
     /// Load an image (in the background).
+    /// Files dropped on the window: the first image opens.
+    pub fn add_dropped(&mut self, ps: Vec<String>) {
+        if let Some(p) = ps.into_iter().find(|p| io::is_image(p)) {
+            self.open(&p);
+        }
+    }
+
     pub fn open(&mut self, path: &str) {
         let path = path.trim().to_string();
         if path.is_empty() {
             return;
         }
         if self.loading || self.saving {
-            self.status = "Wait until the current image is loaded or saved.".into();
+            self.status = tr("Wait until the current image is loaded or saved.").into();
             return;
         }
         self.loading = true;
         self.gen += 1;
-        self.status = format!("Loading {} …", basename(&path));
+        self.status = crate::trf!("Loading {} …", basename(&path));
         let (tx, gen) = (self.tx.clone(), self.gen);
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| -> Result<Loaded, String> {
@@ -241,13 +254,7 @@ impl FinishTab {
                             }
                             // The mask lies on the image; another shape needs a new one.
                             self.mask.fit(l.proxy.w, l.proxy.h);
-                            self.status = format!(
-                                "Opened {} ({}×{} px){}. Adjust on the left, save on the right.",
-                                basename(&l.path),
-                                l.full.w,
-                                l.full.h,
-                                if self.linear { ", linear data: stretched automatically" } else { "" }
-                            );
+                            self.status = crate::trf!("Opened {} ({}×{} px){}. Adjust on the left, save on the right.", basename(&l.path), l.full.w, l.full.h, if self.linear { tr(", linear data: stretched automatically") } else { "" });
                             self.out = Self::default_out(&l.path, self.linear);
                             self.path_edit = l.path.clone();
                             self.path = l.path;
@@ -265,7 +272,7 @@ impl FinishTab {
                             self.pending = None;
                             self.cropping = false;
                         }
-                        Err(e) => self.status = format!("Cannot open: {e}"),
+                        Err(e) => self.status = crate::trf!("Cannot open: {}", e),
                     }
                 }
                 Msg::Loaded(..) => {}
@@ -285,7 +292,7 @@ impl FinishTab {
                             self.before_tex = None;
                             self.shown = Some(*pv);
                         }
-                        Err(e) => self.status = format!("Preview failed: {e}"),
+                        Err(e) => self.status = crate::trf!("Preview failed: {}", e),
                     }
                 }
                 Msg::Saved(r) => {
@@ -294,8 +301,9 @@ impl FinishTab {
                         Ok((s, p)) => {
                             self.status = s;
                             self.saved = Some(*p);
+                            self.last_saved = self.saving_to.take();
                         }
-                        Err(e) => self.status = format!("Not saved: {e}"),
+                        Err(e) => self.status = crate::trf!("Not saved: {}", e),
                     }
                 }
             }
@@ -441,7 +449,7 @@ impl FinishTab {
         self.mask.set_local(state.1.clone());
         self.committed = Some(state);
         self.pending = None;
-        self.status = format!("{}: {label}. ({} undo / {} redo steps left)", if redo { "Redone" } else { "Undone" }, self.undo.len(), self.redo.len());
+        self.status = crate::trf!("{}: {}. ({} undo / {} redo steps left)", if redo { tr("Redone") } else { tr("Undone") }, label, self.undo.len(), self.redo.len());
     }
 
     // ----------------------------------------------------------------------
@@ -467,8 +475,8 @@ impl FinishTab {
             std::fs::write(dir.join(format!("{}.toml", file_name(&name))), t).map_err(|e| e.to_string())
         });
         self.status = match r {
-            Ok(()) => format!("Preset “{name}” saved: the look without turning, cropping and size."),
-            Err(e) => format!("Preset not saved: {e}"),
+            Ok(()) => crate::trf!("Preset “{}” saved: the look without turning, cropping and size.", name),
+            Err(e) => crate::trf!("Preset not saved: {}", e),
         };
         self.presets = None;
         self.preset_name.clear();
@@ -483,9 +491,9 @@ impl FinishTab {
                 let mut l = self.mask.local.clone();
                 (l.sky, l.ground, l.feather) = (pr.sky, pr.ground, pr.feather);
                 self.mask.set_local(l);
-                self.status = format!("Preset “{name}” applied (Ctrl+Z undoes it).");
+                self.status = crate::trf!("Preset “{}” applied (Ctrl+Z undoes it).", name);
             }
-            Err(e) => self.status = format!("Cannot read preset “{name}”: {e}"),
+            Err(e) => self.status = crate::trf!("Cannot read preset “{}”: {}", name, e),
         }
     }
 
@@ -493,7 +501,7 @@ impl FinishTab {
         if self.dialog.is_none() {
             let (tx, rx) = channel();
             std::thread::spawn(move || {
-                let r = dialogs::open_files("Open image", false, Some(("Images", io::image_exts())));
+                let r = dialogs::open_files(tr("Open image"), false, Some((tr("Images"), io::image_exts())));
                 let _ = tx.send(r.map(Picked::Files).unwrap_or(Picked::NoTool));
             });
             self.dialog = Some((rx, "open"));
@@ -502,16 +510,16 @@ impl FinishTab {
 
     fn ask_save(&mut self) {
         if self.full.is_none() {
-            self.status = "Open an image first.".into();
+            self.status = tr("Open an image first.").into();
         } else if self.dialog.is_none() {
-            self.dialog = Some((dialogs::pick_save("Save result", &self.out), "save"));
+            self.dialog = Some((dialogs::pick_save(tr("Save result"), &self.out), "save"));
         }
     }
 
     /// Process the full image and save it to `self.out` (in the background).
     fn save(&mut self) {
         let (Some(full), Some(proxy)) = (self.full.clone(), self.proxy.clone()) else {
-            self.status = "Open an image first.".into();
+            self.status = tr("Open an image first.").into();
             return;
         };
         if self.saving {
@@ -519,20 +527,21 @@ impl FinishTab {
         }
         let out = self.out.trim().to_string();
         if let Err(e) = crate::sys::check_writable(&out) {
-            self.status = format!("Not saved: {e}");
+            self.status = crate::trf!("Not saved: {}", e);
             return;
         }
+        self.saving_to = Some(out.clone());
         let local = self.local();
         let need = self.save_memory(&full);
         let dir = std::path::Path::new(&out).parent().map(|d| d.to_path_buf()).unwrap_or_default();
         let (mem, _) = crate::sys::free_cached(&dir);
         let avail = mem - crate::sys::memory_reserve();
         if need > avail {
-            self.status = format!("Not enough free memory to finish the full image: needs ≈ {}, {} free. Close other programs, or crop the image first.", gb(need), gb(mem.max(0.0)));
+            self.status = crate::trf!("Not enough free memory to finish the full image: needs ≈ {}, {} free. Close other programs, or crop the image first.", gb(need), gb(mem.max(0.0)));
             return;
         }
         self.saving = true;
-        self.status = format!("Saving {} …", basename(&out));
+        self.status = crate::trf!("Saving {} …", basename(&out));
         let (p, scale, tx) = (self.p.clone(), self.scale, self.tx.clone());
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| -> Result<(String, Box<Settings>), String> {
@@ -545,8 +554,8 @@ impl FinishTab {
                 }
                 let img = finish::export_size(&img, &p);
                 io::save_image(&out, &img, p.jpeg_quality)?;
-                let extra = if local.is_some() { ", sky and foreground looks" } else { "" };
-                Ok((format!("Saved {out} ({}×{} px; {}{extra}).", img.w, img.h, finish::summary(&p)), Box::new((p, local))))
+                let extra = if local.is_some() { tr(", sky and foreground looks") } else { "" };
+                Ok((crate::trf!("Saved {} ({}×{} px; {}{}).", out, img.w, img.h, finish::summary(&p), extra), Box::new((p, local))))
             })
             .unwrap_or_else(|_| Err(panic_text()));
             let _ = tx.send(Msg::Saved(r));
@@ -603,22 +612,22 @@ impl FinishTab {
     // ----------------------------------------------------------------------
 
     fn left(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Image");
+        ui.heading(tr("Image"));
         ui.horizontal_wrapped(|ui| {
-            let r = ui.add(egui::TextEdit::singleline(&mut self.path_edit).desired_width(ui.available_width().min(260.0)).hint_text("file path, Enter to open"));
+            let r = ui.add(egui::TextEdit::singleline(&mut self.path_edit).desired_width(ui.available_width().min(260.0)).hint_text(tr("file path, Enter to open")));
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 let p = self.path_edit.clone();
                 self.open(&p);
             }
-            if ui.button("Open…").on_hover_text("Open an image: TIFF, PNG, JPEG, FITS, XISF or camera RAW (Ctrl+O)").clicked() {
+            if ui.button(tr("Open…")).on_hover_text(tr("Open an image: TIFF, PNG, JPEG, FITS, XISF or camera RAW (Ctrl+O)")).clicked() {
                 self.ask_open();
             }
         });
-        ui.checkbox(&mut self.keep, "Keep settings for the next image").on_hover_text("Give several images (e.g. panorama panels) the same look: open the next one without resetting the adjustments");
+        ui.checkbox(&mut self.keep, tr("Keep settings for the next image")).on_hover_text(tr("Give several images (e.g. panorama panels) the same look: open the next one without resetting the adjustments"));
         if self.full.is_some() {
             let list = self.preset_list();
             ui.horizontal_wrapped(|ui| {
-                ui.label("Preset");
+                ui.label(tr("Preset"));
                 let mut chosen = None;
                 egui::ComboBox::from_id_salt("fin_preset").selected_text(if list.is_empty() { "none saved yet" } else { "apply…" }).show_ui(ui, |ui| {
                     for n in &list {
@@ -626,19 +635,19 @@ impl FinishTab {
                             chosen = Some(n.clone());
                         }
                     }
-                }).response.on_hover_text("Apply a saved look: stretch, white balance, light, curves, colour, detail and the sky / foreground looks (not the turn, crop or size)");
+                }).response.on_hover_text(tr("Apply a saved look: stretch, white balance, light, curves, colour, detail and the sky / foreground looks (not the turn, crop or size)"));
                 if let Some(n) = chosen {
                     self.apply_preset(&n);
                 }
-                let r = ui.add(egui::TextEdit::singleline(&mut self.preset_name).desired_width(110.0).hint_text("name"));
+                let r = ui.add(egui::TextEdit::singleline(&mut self.preset_name).desired_width(110.0).hint_text(tr("name")));
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let ok = !self.preset_name.trim().is_empty();
-                if ui.add_enabled(ok, egui::Button::new("Save")).on_hover_text("Save the current look under this name").clicked() || (enter && ok) {
+                if ui.add_enabled(ok, egui::Button::new(tr("Save"))).on_hover_text(tr("Save the current look under this name")).clicked() || (enter && ok) {
                     self.save_preset();
                 }
-                if list.iter().any(|n| *n == file_name(self.preset_name.trim())) && ui.small_button("Delete").on_hover_text("Delete the preset with this name").clicked() {
+                if list.iter().any(|n| *n == file_name(self.preset_name.trim())) && ui.small_button(tr("Delete")).on_hover_text(tr("Delete the preset with this name")).clicked() {
                     let _ = std::fs::remove_file(presets_dir().join(format!("{}.toml", file_name(self.preset_name.trim()))));
-                    self.status = format!("Preset “{}” deleted.", self.preset_name.trim());
+                    self.status = crate::trf!("Preset “{}” deleted.", self.preset_name.trim());
                     self.presets = None;
                     self.preset_name.clear();
                 }
@@ -647,19 +656,19 @@ impl FinishTab {
         if self.full.is_some() {
             ui.horizontal_wrapped(|ui| {
                 let mut lin = self.p.stretch != StretchMode::Off;
-                if ui.checkbox(&mut lin, "Linear data (needs stretching)").on_hover_text("On for stacks saved as FITS / XISF (dark, unstretched). Off for images that already look right").changed() {
+                if ui.checkbox(&mut lin, tr("Linear data (needs stretching)")).on_hover_text(tr("On for stacks saved as FITS / XISF (dark, unstretched). Off for images that already look right")).changed() {
                     self.p.stretch = if lin { StretchMode::MtfAuto } else { StretchMode::Off };
                 }
             });
         }
         ui.separator();
         if self.full.is_none() {
-            ui.label(egui::RichText::new("The adjustments appear once an image is open.").weak());
+            ui.label(egui::RichText::new(tr("The adjustments appear once an image is open.")).weak());
             return;
         }
         let d = FinishParams::default();
 
-        section(ui, "Turn and crop", true, |ui| {
+        section(ui, tr("Turn and crop"), true, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("⟲ 90°").clicked() {
                     self.p.quarter = (self.p.quarter + 3) % 4;
@@ -667,14 +676,14 @@ impl FinishTab {
                 if ui.button("⟳ 90°").clicked() {
                     self.p.quarter = (self.p.quarter + 1) % 4;
                 }
-                ui.checkbox(&mut self.p.flip_h, "Mirror");
+                ui.checkbox(&mut self.p.flip_h, tr("Mirror"));
             });
             egui::Grid::new("fin_geo").num_columns(2).show(ui, |ui| {
-                super::stitch::angle(ui, "Rotate (°)", &mut self.p.angle, 45.0, true);
+                super::stitch::angle(ui, tr("Rotate (°)"), &mut self.p.angle, 45.0, true);
                 ui.label("");
-                ui.checkbox(&mut self.p.auto_crop, "Cut away the empty corners");
+                ui.checkbox(&mut self.p.auto_crop, tr("Cut away the empty corners"));
                 ui.end_row();
-                for (k, l) in ["Crop left (%)", "Crop top (%)", "Crop right (%)", "Crop bottom (%)"].iter().enumerate() {
+                for (k, l) in [tr("Crop left (%)"), tr("Crop top (%)"), tr("Crop right (%)"), tr("Crop bottom (%)")].iter().enumerate() {
                     let mut v = self.p.crop[k] * 100.0;
                     ui.label(*l);
                     if ui.add(egui::Slider::new(&mut v, 0.0..=45.0).step_by(0.5)).changed() {
@@ -684,17 +693,17 @@ impl FinishTab {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label("Shape:");
+                ui.label(tr("Shape:"));
                 for (l, r) in [("3:2", 1.5), ("4:3", 4.0 / 3.0), ("16:9", 16.0 / 9.0), ("4:5", 0.8), ("1:1", 1.0), ("2:1", 2.0)] {
-                    if ui.small_button(l).on_hover_text("Crop to this shape, centred (turned to the image's orientation)").clicked() {
+                    if ui.small_button(l).on_hover_text(tr("Crop to this shape, centred (turned to the image's orientation)")).clicked() {
                         self.crop_to(r);
                     }
                 }
-                if ui.small_button("Free").on_hover_text("No crop").clicked() {
+                if ui.small_button(tr("Free")).on_hover_text(tr("No crop")).clicked() {
                     self.p.crop = [0.0; 4];
                 }
             });
-            if ui.small_button("Reset turn and crop").clicked() {
+            if ui.small_button(tr("Reset turn and crop")).clicked() {
                 self.p.quarter = 0;
                 self.p.flip_h = false;
                 self.p.angle = 0.0;
@@ -704,33 +713,33 @@ impl FinishTab {
         });
 
         if self.p.stretch != StretchMode::Off || self.linear {
-            section(ui, "Stretch", true, |ui| self.stretch_ui(ui));
+            section(ui, tr("Stretch"), true, |ui| self.stretch_ui(ui));
         }
 
-        section(ui, "White balance", true, |ui| {
+        section(ui, tr("White balance"), true, |ui| {
             ui.horizontal_wrapped(|ui| {
-                let t = if self.sampling { "◎ Drag over a grey area…" } else { "◎ Sample grey" };
-                if ui.selectable_label(self.sampling, t).on_hover_text("Then drag a rectangle over something that should be neutral grey or white (sky background, a cloud, a wall). The colour multipliers are set from it").clicked() {
+                let t = if self.sampling { tr("◎ Drag over a grey area…") } else { tr("◎ Sample grey") };
+                if ui.selectable_label(self.sampling, t).on_hover_text(tr("Then drag a rectangle over something that should be neutral grey or white (sky background, a cloud, a wall). The colour multipliers are set from it")).clicked() {
                     self.sampling = !self.sampling;
                 }
                 if self.p.wb != [1.0; 3] {
                     ui.label(egui::RichText::new(format!("× {:.2} {:.2} {:.2}", self.p.wb[0], self.p.wb[1], self.p.wb[2])).weak());
-                    if ui.small_button("Clear").clicked() {
+                    if ui.small_button(tr("Clear")).clicked() {
                         self.p.wb = [1.0; 3];
                     }
                 }
             });
-            ui.checkbox(&mut self.p.neutral_bg, "Neutral background").on_hover_text("Make the darker half of the image (usually the sky background) neutral grey");
+            ui.checkbox(&mut self.p.neutral_bg, tr("Neutral background")).on_hover_text(tr("Make the darker half of the image (usually the sky background) neutral grey"));
             temperature_controls(ui, &mut self.p, "fin_wb");
         });
 
-        section(ui, "Light", true, |ui| {
+        section(ui, tr("Light"), true, |ui| {
             light_controls(ui, &mut self.p, "fin_tone");
         });
 
-        section(ui, "Curves", !self.simple, |ui| {
+        section(ui, tr("Curves"), !self.simple, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for (k, l) in ["RGB", "Red", "Green", "Blue"].iter().enumerate() {
+                for (k, l) in [tr("RGB"), tr("Red"), tr("Green"), tr("Blue")].iter().enumerate() {
                     let edited = self.p.curves[k] != identity_curve();
                     if ui.selectable_label(self.curve_ch == k, if edited { format!("{l} •") } else { l.to_string() }).clicked() {
                         self.curve_ch = k;
@@ -740,30 +749,30 @@ impl FinishTab {
             let k = self.curve_ch;
             let hist = self.shown.as_ref().map(|s| s.curve_hist[k].clone());
             curve_editor(ui, &mut self.p.curves[k], hist.as_deref(), CURVE_COLOURS[k]);
-            ui.label(egui::RichText::new("Click to add a point, drag to move it, right-click to remove it.").weak().size(12.0));
+            ui.label(egui::RichText::new(tr("Click to add a point, drag to move it, right-click to remove it.")).weak().size(12.0));
             ui.horizontal_wrapped(|ui| {
-                if ui.small_button("Reset this curve").clicked() {
+                if ui.small_button(tr("Reset this curve")).clicked() {
                     self.p.curves[k] = identity_curve();
                 }
-                if ui.small_button("Reset all curves").clicked() {
+                if ui.small_button(tr("Reset all curves")).clicked() {
                     self.p.curves = d.curves.clone();
                 }
             });
         });
 
-        section(ui, "Colour", true, |ui| {
+        section(ui, tr("Colour"), true, |ui| {
             colour_controls(ui, &mut self.p, "fin_col");
         });
 
-        section(ui, "Detail", !self.simple, |ui| {
+        section(ui, tr("Detail"), !self.simple, |ui| {
             detail_controls(ui, &mut self.p, "fin_det", self.simple);
         });
 
         let edited = if self.mask.local.used() { " •" } else { "" };
-        section(ui, &format!("Sky and foreground{edited}"), false, |ui| self.local_ui(ui));
+        section(ui, &crate::trf!("Sky and foreground{}", edited), false, |ui| self.local_ui(ui));
 
         ui.add_space(6.0);
-        if ui.button("↺ Reset all adjustments").clicked() {
+        if ui.button(tr("↺ Reset all adjustments")).clicked() {
             let keep = (self.p.long_edge, self.p.jpeg_quality);
             self.p = FinishParams::for_input(self.linear);
             (self.p.long_edge, self.p.jpeg_quality) = keep;
@@ -772,15 +781,15 @@ impl FinishTab {
 
     /// The mask and the sky / foreground looks.
     fn local_ui(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Adjust the sky and the foreground separately, on top of everything above: e.g. less noise and smaller stars in the sky, a brighter, warmer foreground. Paint or detect the mask, then set the looks.").weak().size(12.0));
+        ui.label(egui::RichText::new(tr("Adjust the sky and the foreground separately, on top of everything above: e.g. less noise and smaller stars in the sky, a brighter, warmer foreground. Paint or detect the mask, then set the looks.")).weak().size(12.0));
         if self.mask.painting {
             self.sampling = false;
         }
         self.mask.controls(ui, self.proxy.clone());
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.label("Adjust:");
-            for (k, t) in ["Sky", "Foreground"].iter().enumerate() {
+            ui.label(tr("Adjust:"));
+            for (k, t) in [tr("Sky"), tr("Foreground")].iter().enumerate() {
                 let q = if k == 0 { &self.mask.local.sky } else { &self.mask.local.ground };
                 let edited = finish::look_used(q);
                 if ui.selectable_label(self.local_k == k, if edited { format!("{t} •") } else { t.to_string() }).clicked() {
@@ -789,7 +798,7 @@ impl FinishTab {
             }
         });
         if !self.mask.has_sky() {
-            ui.colored_label(Color32::from_rgb(230, 150, 30), "Nothing is sky yet: paint the mask or detect the sky.");
+            ui.colored_label(Color32::from_rgb(230, 150, 30), tr("Nothing is sky yet: paint the mask or detect the sky."));
         }
         let k = self.local_k;
         let id = ["fin_sky", "fin_fg"][k];
@@ -798,60 +807,60 @@ impl FinishTab {
         temperature_controls(ui, q, &format!("{id}_temp"));
         colour_controls(ui, q, &format!("{id}_col"));
         detail_controls(ui, q, &format!("{id}_det"), self.simple);
-        if ui.small_button(if k == 0 { "Reset the sky look" } else { "Reset the foreground look" }).clicked() {
+        if ui.small_button(if k == 0 { tr("Reset the sky look") } else { tr("Reset the foreground look") }).clicked() {
             *q = FinishParams::default();
         }
     }
 
     fn stretch_ui(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("fin_str").num_columns(2).show(ui, |ui| {
-            ui.label("Method");
-            egui::ComboBox::from_id_salt("fin_stretch").selected_text(self.p.stretch.name()).show_ui(ui, |ui| {
+            ui.label(tr("Method"));
+            egui::ComboBox::from_id_salt("fin_stretch").selected_text(tr(self.p.stretch.name())).show_ui(ui, |ui| {
                 for m in StretchMode::ALL {
-                    ui.selectable_value(&mut self.p.stretch, m, m.name());
+                    ui.selectable_value(&mut self.p.stretch, m, tr(m.name()));
                 }
             });
             ui.end_row();
             match self.p.stretch {
                 StretchMode::MtfAuto => {
-                    slider(ui, "Background", &mut self.p.target, 0.05..=0.5, "Brightness of the sky background after stretching");
+                    slider(ui, tr("Background"), &mut self.p.target, 0.05..=0.5, tr("Brightness of the sky background after stretching"));
                     ui.label("");
-                    ui.checkbox(&mut self.p.unlinked, "Each colour on its own").on_hover_text("Measures red, green and blue separately: removes a colour cast, but can shift star colours");
+                    ui.checkbox(&mut self.p.unlinked, tr("Each colour on its own")).on_hover_text(tr("Measures red, green and blue separately: removes a colour cast, but can shift star colours"));
                     ui.end_row();
                 }
                 StretchMode::MtfManual => {
-                    log_slider(ui, "Black point", &mut self.p.black, 0.0..=0.5, "Everything darker becomes black");
-                    slider(ui, "Midtones", &mut self.p.mid, 0.0001..=0.9999, "Lower = brighter (the value that becomes 50 % grey)");
-                    slider(ui, "White point", &mut self.p.white, 0.1..=1.0, "Everything brighter becomes white");
+                    log_slider(ui, tr("Black point"), &mut self.p.black, 0.0..=0.5, tr("Everything darker becomes black"));
+                    slider(ui, tr("Midtones"), &mut self.p.mid, 0.0001..=0.9999, tr("Lower = brighter (the value that becomes 50 % grey)"));
+                    slider(ui, tr("White point"), &mut self.p.white, 0.1..=1.0, tr("Everything brighter becomes white"));
                 }
                 StretchMode::Asinh => {
-                    ui.label("Stretch factor");
-                    ui.add(egui::Slider::new(&mut self.p.asinh, 1.0..=10000.0).logarithmic(true)).on_hover_text("1 = almost none, 10000 = very strong. Long deep-sky stacks with a faint background need several thousand");
+                    ui.label(tr("Stretch factor"));
+                    ui.add(egui::Slider::new(&mut self.p.asinh, 1.0..=10000.0).logarithmic(true)).on_hover_text(tr("1 = almost none, 10000 = very strong. Long deep-sky stacks with a faint background need several thousand"));
                     ui.end_row();
-                    log_slider(ui, "Black point", &mut self.p.black, 0.0..=0.5, "Subtracted before stretching");
+                    log_slider(ui, tr("Black point"), &mut self.p.black, 0.0..=0.5, tr("Subtracted before stretching"));
                 }
                 StretchMode::Ghs => {
-                    slider(ui, "Stretch ln(D+1)", &mut self.p.ghs_d, 0.0..=10.0, "How strong the stretch is");
-                    slider(ui, "Local intensity b", &mut self.p.ghs_b, -5.0..=15.0, "Concentrates the stretch around the symmetry point: higher = narrower, more contrast there");
-                    log_slider(ui, "Symmetry point", &mut self.p.ghs_sp, 0.0..=1.0, "Brightness where the stretch is strongest (put it at the sky background: use the histogram)");
+                    slider(ui, tr("Stretch ln(D+1)"), &mut self.p.ghs_d, 0.0..=10.0, tr("How strong the stretch is"));
+                    slider(ui, tr("Local intensity b"), &mut self.p.ghs_b, -5.0..=15.0, tr("Concentrates the stretch around the symmetry point: higher = narrower, more contrast there"));
+                    log_slider(ui, tr("Symmetry point"), &mut self.p.ghs_sp, 0.0..=1.0, tr("Brightness where the stretch is strongest (put it at the sky background: use the histogram)"));
                     if !self.simple {
-                        log_slider(ui, "Protect shadows", &mut self.p.ghs_lp, 0.0..=1.0, "Below this the curve is a straight line: keeps dark areas from being stretched");
-                        slider(ui, "Protect highlights", &mut self.p.ghs_hp, 0.0..=1.0, "Above this the curve is a straight line: keeps stars from swelling");
+                        log_slider(ui, tr("Protect shadows"), &mut self.p.ghs_lp, 0.0..=1.0, tr("Below this the curve is a straight line: keeps dark areas from being stretched"));
+                        slider(ui, tr("Protect highlights"), &mut self.p.ghs_hp, 0.0..=1.0, tr("Above this the curve is a straight line: keeps stars from swelling"));
                     }
-                    log_slider(ui, "Black point", &mut self.p.black, 0.0..=0.5, "Subtracted before stretching");
+                    log_slider(ui, tr("Black point"), &mut self.p.black, 0.0..=0.5, tr("Subtracted before stretching"));
                 }
                 _ => {}
             }
         });
         if self.p.stretch.invertible() {
-            ui.checkbox(&mut self.p.inverse, "Inverse").on_hover_text("The inverse curve: compresses the bright end instead of lifting the dark end (undoes too strong a stretch)");
+            ui.checkbox(&mut self.p.inverse, tr("Inverse")).on_hover_text(tr("The inverse curve: compresses the bright end instead of lifting the dark end (undoes too strong a stretch)"));
         }
         if matches!(self.p.stretch, StretchMode::Asinh | StretchMode::Ghs) {
-            ui.checkbox(&mut self.p.keep_colour, "Keep star colours").on_hover_text("Stretch the brightness and keep each pixel's colour. Off: red, green and blue are stretched separately (more saturated sky, paler stars)");
+            ui.checkbox(&mut self.p.keep_colour, tr("Keep star colours")).on_hover_text(tr("Stretch the brightness and keep each pixel's colour. Off: red, green and blue are stretched separately (more saturated sky, paler stars)"));
         }
         if self.p.stretch == StretchMode::MtfAuto {
             if let Some(bm) = self.shown.as_ref().and_then(|s| s.measured.stretch) {
-                if ui.small_button("Auto → manual").on_hover_text("Continue by hand from the automatic values (the average of the three colours)").clicked() {
+                if ui.small_button(tr("Auto → manual")).on_hover_text(tr("Continue by hand from the automatic values (the average of the three colours)")).clicked() {
                     self.p.stretch = StretchMode::MtfManual;
                     self.p.black = (bm[0].0 + bm[1].0 + bm[2].0) / 3.0;
                     self.p.mid = (bm[0].1 + bm[1].1 + bm[2].1) / 3.0;
@@ -861,8 +870,8 @@ impl FinishTab {
         }
         if matches!(self.p.stretch, StretchMode::Asinh | StretchMode::Ghs | StretchMode::MtfManual) {
             if let Some((black, sp)) = self.shown.as_ref().map(|s| s.background) {
-                let tip = if self.p.stretch == StretchMode::Ghs { "Black point just below the sky background, symmetry point on it" } else { "Black point just below the sky background" };
-                if ui.small_button("Points from the background").on_hover_text(tip).clicked() {
+                let tip = if self.p.stretch == StretchMode::Ghs { tr("Black point just below the sky background, symmetry point on it") } else { tr("Black point just below the sky background") };
+                if ui.small_button(tr("Points from the background")).on_hover_text(tip).clicked() {
                     self.p.black = black;
                     if self.p.stretch == StretchMode::Ghs {
                         self.p.ghs_sp = sp;
@@ -872,8 +881,8 @@ impl FinishTab {
         }
         if self.p.stretch != StretchMode::Off {
             ui.horizontal_wrapped(|ui| {
-                ui.checkbox(&mut self.p.bg_extraction, "Background extraction").on_hover_text("Before stretching: removes smooth gradients (light pollution, moon)");
-                ui.checkbox(&mut self.p.color_calibration, "Colour calibration").on_hover_text("Before stretching: neutral sky background, average star white");
+                ui.checkbox(&mut self.p.bg_extraction, tr("Background extraction")).on_hover_text(tr("Before stretching: removes smooth gradients (light pollution, moon)"));
+                ui.checkbox(&mut self.p.color_calibration, tr("Colour calibration")).on_hover_text(tr("Before stretching: neutral sky background, average star white"));
             });
         }
     }
@@ -900,7 +909,7 @@ impl FinishTab {
     // ----------------------------------------------------------------------
 
     fn right(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Histogram");
+        ui.heading(tr("Histogram"));
         match &self.shown {
             Some(s) => super::stitch::histogram(ui, &s.result, None),
             None => {
@@ -908,19 +917,19 @@ impl FinishTab {
             }
         }
         ui.separator();
-        ui.heading("Save");
+        ui.heading(tr("Save"));
         let Some(full) = self.full.clone() else {
-            ui.label(egui::RichText::new("Open an image first.").weak());
+            ui.label(egui::RichText::new(tr("Open an image first.")).weak());
             return;
         };
         egui::Grid::new("fin_out").num_columns(2).show(ui, |ui| {
-            ui.label("Size");
+            ui.label(tr("Size"));
             let (cw, ch) = finish::cropped_size(full.w, full.h, &self.p);
             let long = cw.max(ch);
-            let txt = if self.p.long_edge == 0 || self.p.long_edge >= long { "Full size".to_string() } else { format!("{} px long side", self.p.long_edge) };
+            let txt = if self.p.long_edge == 0 || self.p.long_edge >= long { tr("Full size").to_string() } else { crate::trf!("{} px long side", self.p.long_edge) };
             egui::ComboBox::from_id_salt("fin_size").selected_text(txt).show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.p.long_edge, 0, "Full size");
-                for (v, l) in [(3840, "3840 px (4K screen)"), (2560, "2560 px"), (2048, "2048 px (web, forums)"), (1920, "1920 px (Full HD)"), (1600, "1600 px"), (1080, "1080 px (Instagram)")] {
+                ui.selectable_value(&mut self.p.long_edge, 0, tr("Full size"));
+                for (v, l) in [(3840, tr("3840 px (4K screen)")), (2560, tr("2560 px")), (2048, tr("2048 px (web, forums)")), (1920, tr("1920 px (Full HD)")), (1600, tr("1600 px")), (1080, tr("1080 px (Instagram)"))] {
                     if v < long {
                         ui.selectable_value(&mut self.p.long_edge, v, l);
                     }
@@ -928,10 +937,10 @@ impl FinishTab {
             });
             ui.end_row();
             ui.label("");
-            ui.add(egui::DragValue::new(&mut self.p.long_edge).range(0..=60000).suffix(" px").speed(10)).on_hover_text("Longest side of the saved image; 0 = full size");
+            ui.add(egui::DragValue::new(&mut self.p.long_edge).range(0..=60000).suffix(tr(" px")).speed(10)).on_hover_text(tr("Longest side of the saved image; 0 = full size"));
             ui.end_row();
             if matches!(io::ext_of(&self.out).as_str(), "jpg" | "jpeg") {
-                ui.label("JPEG quality");
+                ui.label(tr("JPEG quality"));
                 ui.add(egui::Slider::new(&mut self.p.jpeg_quality, 50..=100));
                 ui.end_row();
             }
@@ -940,9 +949,9 @@ impl FinishTab {
         ui.label(format!("→ {ow} × {oh} px ({:.1} MP)", (ow * oh) as f64 / 1e6));
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.out).desired_width(ui.available_width().min(240.0)).hint_text("output file"));
+            ui.add(egui::TextEdit::singleline(&mut self.out).desired_width(ui.available_width().min(240.0)).hint_text(tr("output file")));
             let cur = io::ext_of(&self.out);
-            egui::ComboBox::from_id_salt("fin_fmt").selected_text(if cur.is_empty() { "type".to_string() } else { cur.clone() }).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("fin_fmt").selected_text(if cur.is_empty() { tr("type").to_string() } else { cur.clone() }).show_ui(ui, |ui| {
                 for (e, l) in io::OUTPUT_FORMATS {
                     if ui.selectable_label(cur == e || (cur == "tiff" && e == "tif") || (cur == "jpeg" && e == "jpg"), l).clicked() {
                         self.out = io::with_ext(&self.out, e);
@@ -951,32 +960,37 @@ impl FinishTab {
             });
         });
         if io::is_astro(&self.out) {
-            ui.label(egui::RichText::new("FITS / XISF get the finished (stretched) image here, as 32-bit float.").weak().size(12.0));
+            ui.label(egui::RichText::new(tr("FITS / XISF get the finished (stretched) image here, as 32-bit float.")).weak().size(12.0));
         }
         if std::path::Path::new(&self.out).exists() {
-            ui.colored_label(Color32::from_rgb(230, 150, 30), "This file exists and will be replaced.");
+            ui.colored_label(Color32::from_rgb(230, 150, 30), tr("This file exists and will be replaced."));
         }
         ui.horizontal_wrapped(|ui| {
-            let save = ui.add_enabled(!self.saving, egui::Button::new(egui::RichText::new("⬇ Save").strong())).on_hover_text("Process the full image and save it (Ctrl+S)");
+            let save = ui.add_enabled(!self.saving, egui::Button::new(egui::RichText::new(tr("⬇ Save")).strong())).on_hover_text(tr("Process the full image and save it (Ctrl+S)"));
             if save.clicked() {
                 self.save();
             }
-            if ui.add_enabled(!self.saving, egui::Button::new("Save as…")).on_hover_text("Choose the file (Ctrl+Shift+S)").clicked() {
+            if ui.add_enabled(!self.saving, egui::Button::new(tr("Save as…"))).on_hover_text(tr("Choose the file (Ctrl+Shift+S)")).clicked() {
                 self.ask_save();
+            }
+            if let Some(f) = self.last_saved.as_ref().filter(|f| std::path::Path::new(f).exists()) {
+                if ui.button(tr("Show in folder")).on_hover_text(crate::trf!("Last saved: {}", f)).clicked() {
+                    dialogs::show_in_folder(f);
+                }
             }
         });
         let need = self.save_memory(&full);
         let dir = std::path::Path::new(&self.out).parent().map(|d| d.to_path_buf()).unwrap_or_default();
         let (mem, _) = crate::sys::free_cached(&dir);
-        let txt = format!("Saving needs ≈ {} memory ({} free).", gb(need), gb(mem.max(0.0)));
+        let txt = crate::trf!("Saving needs ≈ {} memory ({} free).", gb(need), gb(mem.max(0.0)));
         if need > mem - crate::sys::memory_reserve() {
-            ui.colored_label(Color32::from_rgb(230, 150, 30), format!("⚠ {txt} Close other programs or crop first."));
+            ui.colored_label(Color32::from_rgb(230, 150, 30), crate::trf!("⚠ {} Close other programs or crop first.", txt));
         } else {
             ui.label(egui::RichText::new(txt).weak().size(12.0));
         }
         ui.separator();
-        let extra = if self.mask.local.used() { ", sky and foreground looks" } else { "" };
-        ui.label(egui::RichText::new(format!("In use: {}{extra}", finish::summary(&self.p))).weak().size(12.0));
+        let extra = if self.mask.local.used() { tr(", sky and foreground looks") } else { "" };
+        ui.label(egui::RichText::new(crate::trf!("In use: {}{}", finish::summary(&self.p), extra)).weak().size(12.0));
     }
 
     // ----------------------------------------------------------------------
@@ -986,21 +1000,21 @@ impl FinishTab {
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut compare = false;
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Fit").on_hover_text("Whole image in view (F)").clicked() {
+            if ui.button(tr("Fit")).on_hover_text(tr("Whole image in view (F)")).clicked() {
                 self.view.fit = true;
             }
-            if ui.button("1:1").on_hover_text("One preview pixel per screen pixel").clicked() {
+            if ui.button("1:1").on_hover_text(tr("One preview pixel per screen pixel")).clicked() {
                 self.view.zoom = 1.0;
             }
-            let tip = |v: &Vec<(Snap, String)>, key: &str| format!("{} ({key})", v.last().map(|u| u.1.clone()).unwrap_or_else(|| "nothing".into()));
-            if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("↶ Undo")).on_hover_text(tip(&self.undo, "Ctrl+Z")).on_disabled_hover_text("Nothing to undo").clicked() {
+            let tip = |v: &Vec<(Snap, String)>, key: &str| format!("{} ({key})", v.last().map(|u| u.1.clone()).unwrap_or_else(|| tr("nothing").into()));
+            if ui.add_enabled(!self.undo.is_empty(), egui::Button::new(tr("↶ Undo"))).on_hover_text(tip(&self.undo, "Ctrl+Z")).on_disabled_hover_text(tr("Nothing to undo")).clicked() {
                 self.step(false);
             }
-            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("↷ Redo")).on_hover_text(tip(&self.redo, "Ctrl+Y")).on_disabled_hover_text("Nothing to redo").clicked() {
+            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new(tr("↷ Redo"))).on_hover_text(tip(&self.redo, "Ctrl+Y")).on_disabled_hover_text(tr("Nothing to redo")).clicked() {
                 self.step(true);
             }
-            let crop_txt = if self.cropping { "✂ Crop: done" } else { "✂ Crop" };
-            if ui.selectable_label(self.cropping, crop_txt).on_hover_text("Crop on the image: drag a frame, drag its edges or corners to adjust it, drag inside it to move it. Click again when done").clicked() {
+            let crop_txt = if self.cropping { tr("✂ Crop: done") } else { tr("✂ Crop") };
+            if ui.selectable_label(self.cropping, crop_txt).on_hover_text(tr("Crop on the image: drag a frame, drag its edges or corners to adjust it, drag inside it to move it. Click again when done")).clicked() {
                 self.cropping = !self.cropping;
                 self.crop_drag = None;
                 if self.cropping {
@@ -1008,24 +1022,24 @@ impl FinishTab {
                     self.sampling = false;
                 }
             }
-            let c = ui.button("◐ Compare").on_hover_text("Hold to see the image before white balance, light, curves, colour and detail (or hold B)");
+            let c = ui.button(tr("◐ Compare")).on_hover_text(tr("Hold to see the image before white balance, light, curves, colour and detail (or hold B)"));
             compare = c.is_pointer_button_down_on() || (!ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_down(egui::Key::B)));
             ui.separator();
-            ui.label("Display");
-            egui::ComboBox::from_id_salt("fin_disp").selected_text(self.display.name()).show_ui(ui, |ui| {
+            ui.label(tr("Display"));
+            egui::ComboBox::from_id_salt("fin_disp").selected_text(tr(self.display.name())).show_ui(ui, |ui| {
                 for m in Display::ALL {
-                    ui.selectable_value(&mut self.display, m, m.name());
+                    ui.selectable_value(&mut self.display, m, tr(m.name()));
                 }
-            }).response.on_hover_text("How the preview is shown. Only the view changes, never the saved image (as Siril's display modes)");
+            }).response.on_hover_text(tr("How the preview is shown. Only the view changes, never the saved image (as Siril's display modes)"));
             if self.display != Display::Linear {
-                ui.colored_label(Color32::from_rgb(230, 150, 30), "view only");
+                ui.colored_label(Color32::from_rgb(230, 150, 30), tr("view only"));
             }
             if self.mask.painting {
                 self.cropping = false;
-                ui.colored_label(Color32::from_rgb(120, 170, 255), "Painting the mask: left = sky, right = foreground, wheel = brush size");
+                ui.colored_label(Color32::from_rgb(120, 170, 255), tr("Painting the mask: left = sky, right = foreground, wheel = brush size"));
             }
             if self.cropping {
-                ui.colored_label(Color32::from_rgb(255, 210, 0), "Cropping: the whole image is shown");
+                ui.colored_label(Color32::from_rgb(255, 210, 0), tr("Cropping: the whole image is shown"));
             }
             if self.busy() {
                 ui.spinner();
@@ -1033,13 +1047,13 @@ impl FinishTab {
         });
         ui.label(egui::RichText::new(&self.status).size(12.5));
         if self.scale < 1.0 && self.shown.is_some() {
-            ui.label(egui::RichText::new(format!("Preview at {:.0} % of full size; the full image is processed when saving.", self.scale * 100.0)).weak().size(12.0));
+            ui.label(egui::RichText::new(crate::trf!("Preview at {} % of full size; the full image is processed when saving.", format!("{:.0}", self.scale * 100.0))).weak().size(12.0));
         }
         let Some(s) = &self.shown else {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {
-                ui.label(egui::RichText::new(if self.loading { "Loading…" } else { "No image yet" }).size(20.0).weak());
-                ui.label(egui::RichText::new("Open an image (Ctrl+O), or use “Use in Post-processing” in the Star stacking tab or “Post-process” after saving a panorama.").weak());
+                ui.label(egui::RichText::new(if self.loading { tr("Loading…") } else { tr("No image yet") }).size(20.0).weak());
+                ui.label(egui::RichText::new(tr("Open an image (Ctrl+O), or use “Use in Post-processing” in the Star stacking tab or “Post-process” after saving a panorama.")).weak());
             });
             return;
         };
@@ -1084,9 +1098,9 @@ impl FinishTab {
                         Some(wb) => {
                             self.p.wb = wb;
                             (self.p.temperature, self.p.tint) = (0.0, 0.0);
-                            self.status = "White balance set from the sampled area.".into();
+                            self.status = tr("White balance set from the sampled area.").into();
                         }
-                        None => self.status = "The sampled area is black or outside the image: try another one.".into(),
+                        None => self.status = tr("The sampled area is black or outside the image: try another one.").into(),
                     }
                 }
             }
@@ -1209,7 +1223,7 @@ fn change_label(a: &Snap, b: &Snap) -> String {
         v.push("stretch");
     }
     if (p.wb, p.neutral_bg, p.temperature, p.tint) != (q.wb, q.neutral_bg, q.temperature, q.tint) {
-        v.push("white balance");
+        v.push(tr("white balance"));
     }
     if (p.exposure, p.contrast, p.highlights, p.midtones, p.shadows, p.whites, p.blacks) != (q.exposure, q.contrast, q.highlights, q.midtones, q.shadows, q.whites, q.blacks) {
         v.push("light");
@@ -1230,10 +1244,10 @@ fn change_label(a: &Snap, b: &Snap) -> String {
         v.push("mask");
     }
     if a.1.sky != b.1.sky {
-        v.push("sky look");
+        v.push(tr("sky look"));
     }
     if a.1.ground != b.1.ground {
-        v.push("foreground look");
+        v.push(tr("foreground look"));
     }
     if v.is_empty() { "a change".into() } else { v.join(", ") }
 }
@@ -1260,17 +1274,17 @@ fn file_name(name: &str) -> String {
 /// blacks) and their reset; shared by the Post-processing and Timelapse tabs.
 pub(crate) fn light_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str) {
     egui::Grid::new(id).num_columns(2).show(ui, |ui| {
-        ui.label("Exposure (EV)");
+        ui.label(tr("Exposure (EV)"));
         ui.add(egui::Slider::new(&mut p.exposure, -3.0..=3.0).step_by(0.05));
         ui.end_row();
-        slider(ui, "Contrast", &mut p.contrast, -1.0..=1.0, "S-curve around the middle grey");
-        slider(ui, "Highlights", &mut p.highlights, -1.0..=1.0, "Bright areas (around 75 %): lower to bring back detail in bright sky or lights");
-        slider(ui, "Midtones", &mut p.midtones, -1.0..=1.0, "Middle brightness (around 50 %)");
-        slider(ui, "Shadows", &mut p.shadows, -1.0..=1.0, "Dark areas (around 25 %): raise to see into the foreground");
-        slider(ui, "Whites", &mut p.whites, -1.0..=1.0, "White point: raise to make the brightest parts white, lower to keep them from clipping");
-        slider(ui, "Blacks", &mut p.blacks, -1.0..=1.0, "Black point: lower for deeper blacks, raise to lift them");
+        slider(ui, tr("Contrast"), &mut p.contrast, -1.0..=1.0, tr("S-curve around the middle grey"));
+        slider(ui, tr("Highlights"), &mut p.highlights, -1.0..=1.0, tr("Bright areas (around 75 %): lower to bring back detail in bright sky or lights"));
+        slider(ui, tr("Midtones"), &mut p.midtones, -1.0..=1.0, tr("Middle brightness (around 50 %)"));
+        slider(ui, tr("Shadows"), &mut p.shadows, -1.0..=1.0, tr("Dark areas (around 25 %): raise to see into the foreground"));
+        slider(ui, tr("Whites"), &mut p.whites, -1.0..=1.0, tr("White point: raise to make the brightest parts white, lower to keep them from clipping"));
+        slider(ui, tr("Blacks"), &mut p.blacks, -1.0..=1.0, tr("Black point: lower for deeper blacks, raise to lift them"));
     });
-    if ui.small_button("Reset light").clicked() {
+    if ui.small_button(tr("Reset light")).clicked() {
         (p.exposure, p.contrast, p.highlights, p.midtones, p.shadows, p.whites, p.blacks) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     }
 }
@@ -1278,12 +1292,12 @@ pub(crate) fn light_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str) 
 /// The detail sliders (noise, colour noise, stars, sharpening).
 pub(crate) fn detail_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str, simple: bool) {
     egui::Grid::new(id).num_columns(2).show(ui, |ui| {
-        slider(ui, "Noise reduction", &mut p.noise, 0.0..=1.0, "Smooths grain in flat areas (sky), keeps edges and stars");
-        slider(ui, "Colour noise", &mut p.color_noise, 0.0..=1.0, "Removes coloured speckles from high-ISO images, keeps the brightness detail");
-        slider(ui, "Star reduction", &mut p.star_reduce, 0.0..=1.0, "Makes stars smaller so the Milky Way or nebula stands out");
-        slider(ui, "Sharpen", &mut p.sharpen, 0.0..=2.0, "Unsharp mask; check at 1:1 zoom");
+        slider(ui, tr("Noise reduction"), &mut p.noise, 0.0..=1.0, tr("Smooths grain in flat areas (sky), keeps edges and stars"));
+        slider(ui, tr("Colour noise"), &mut p.color_noise, 0.0..=1.0, tr("Removes coloured speckles from high-ISO images, keeps the brightness detail"));
+        slider(ui, tr("Star reduction"), &mut p.star_reduce, 0.0..=1.0, tr("Makes stars smaller so the Milky Way or nebula stands out"));
+        slider(ui, tr("Sharpen"), &mut p.sharpen, 0.0..=2.0, tr("Unsharp mask; check at 1:1 zoom"));
         if !simple {
-            ui.label("Sharpen radius (px)");
+            ui.label(tr("Sharpen radius (px)"));
             ui.add(egui::Slider::new(&mut p.sharpen_radius, 0.5..=5.0).step_by(0.1));
             ui.end_row();
         }
@@ -1293,16 +1307,16 @@ pub(crate) fn detail_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str,
 /// Temperature and tint sliders.
 pub(crate) fn temperature_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str) {
     egui::Grid::new(id).num_columns(2).show(ui, |ui| {
-        slider(ui, "Temperature", &mut p.temperature, -1.0..=1.0, "Cooler (blue) ← → warmer (yellow)");
-        slider(ui, "Tint", &mut p.tint, -1.0..=1.0, "Greener ← → more magenta");
+        slider(ui, tr("Temperature"), &mut p.temperature, -1.0..=1.0, tr("Cooler (blue) ← → warmer (yellow)"));
+        slider(ui, tr("Tint"), &mut p.tint, -1.0..=1.0, tr("Greener ← → more magenta"));
     });
 }
 
 /// Saturation and vibrance sliders.
 pub(crate) fn colour_controls(ui: &mut egui::Ui, p: &mut FinishParams, id: &str) {
     egui::Grid::new(id).num_columns(2).show(ui, |ui| {
-        slider(ui, "Saturation", &mut p.saturation, 0.0..=2.0, "All colours: 0 = black and white, 1 = unchanged");
-        slider(ui, "Vibrance", &mut p.vibrance, -1.0..=1.0, "Dull colours more than strong ones (skin, already strong colours stay natural)");
+        slider(ui, tr("Saturation"), &mut p.saturation, 0.0..=2.0, tr("All colours: 0 = black and white, 1 = unchanged"));
+        slider(ui, tr("Vibrance"), &mut p.vibrance, -1.0..=1.0, tr("Dull colours more than strong ones (skin, already strong colours stay natural)"));
     });
 }
 

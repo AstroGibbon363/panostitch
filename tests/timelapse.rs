@@ -3,7 +3,7 @@
 
 use panostitch::image::{Image, Img};
 use panostitch::io;
-use panostitch::timelapse::{self as tl, Deflicker, Format, Pan, Resolution, Settings};
+use panostitch::timelapse::{self as tl, Aspect, Deflicker, Format, Pan, Resolution, Settings};
 
 /// `n` frames of 160 × 120: a grey scene whose brightness flickers, a "star"
 /// that moves four pixels to the right per frame, and a still vertical line at x = 80.
@@ -32,6 +32,12 @@ fn frame_shape_and_size() {
     assert_eq!(tl::video_size(3016, 2008, &Settings { resolution: Resolution::FullHd, ..s.clone() }), (1920, 1080));
     // Never scaled up; always even.
     assert_eq!(tl::video_size(801, 451, &Settings { resolution: Resolution::FullHd, ..s.clone() }), (800, 450));
+    // Every shape at 1080p, from a 6000 × 4000 frame.
+    for (a, want) in [(Aspect::Frame, (1620, 1080)), (Aspect::Wide, (1920, 1080)), (Aspect::Photo, (1620, 1080)), (Aspect::Classic, (1440, 1080)), (Aspect::Square, (1080, 1080)), (Aspect::Vertical, (1080, 1920))] {
+        assert_eq!(tl::video_size(6000, 4000, &Settings { aspect: a, resolution: Resolution::FullHd, ..s.clone() }), want, "{a:?}");
+    }
+    // A portrait 4:3 from portrait frames.
+    assert_eq!(tl::video_size(4000, 6000, &Settings { aspect: Aspect::Classic, resolution: Resolution::FullHd, ..s.clone() }), (1080, 1440));
     // Portrait frames make a portrait video.
     let (w, h) = tl::video_size(4000, 6000, &s);
     assert!(h > w && h == 1280, "{w}×{h}");
@@ -40,7 +46,7 @@ fn frame_shape_and_size() {
     let (a, b) = (tl::frame_crop(6000, 4000, &s, 0.0), tl::frame_crop(6000, 4000, &s, 1.0));
     assert!(b.crop[0] > a.crop[0] && b.crop[1] > a.crop[1]);
     // Slider move: a view 10 % smaller travels from the left edge to the right edge.
-    let s = Settings { zoom: 0.0, crop_16_9: false, pan: 10.0, pan_dir: Pan::LeftToRight, ..s };
+    let s = Settings { zoom: 0.0, aspect: Aspect::Frame, pan: 10.0, pan_dir: Pan::LeftToRight, ..s };
     let (a, b) = (tl::frame_crop(6000, 4000, &s, 0.0).crop, tl::frame_crop(6000, 4000, &s, 1.0).crop);
     assert!(a[0].abs() < 1e-9 && b[2].abs() < 1e-9, "{a:?} {b:?}");
     assert!((1.0 - a[0] - a[2] - 1.0 / 1.1).abs() < 1e-9, "view width {a:?}");
@@ -73,7 +79,7 @@ fn gif_and_numbered_images() {
     let fr = frames(dir.path(), 6);
     // Numbered PNGs with a slider move, the last frame held and the way back.
     let out = dir.path().join("move.png").to_string_lossy().to_string();
-    let s = Settings { frames: fr.clone(), deflicker: Deflicker::Off, format: Format::Sequence, resolution: Resolution::Frames, crop_16_9: false, fps: 2, hold_last: 1.0, bounce: true, pan: 20.0, ease: false, out, ..Settings::default() };
+    let s = Settings { frames: fr.clone(), deflicker: Deflicker::Off, format: Format::Sequence, resolution: Resolution::Frames, aspect: Aspect::Frame, fps: 2, hold_last: 1.0, bounce: true, pan: 20.0, ease: false, out, ..Settings::default() };
     let d = tl::make(&s, &no_progress).unwrap();
     assert_eq!((d.w, d.h, d.frames), (132, 100, 6));
     assert_eq!(d.video_frames, 6 + 2 + 4);
@@ -146,4 +152,49 @@ fn deflicker_by_colour_and_region() {
     let g = tl::deflicker(&lv, 1, 1, 5, Deflicker::Light);
     let (a, b) = (tl::apply_gains(frame(5), &g[5], [0.0; 4], true).at(30, 10), tl::apply_gains(frame(6), &g[6], [0.0; 4], true).at(30, 10));
     assert!((a[2] - b[2]).abs() > 0.1, "{a:?} vs {b:?}");
+}
+
+#[test]
+fn project_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let night = dir.path().join("night");
+    std::fs::create_dir(&night).unwrap();
+    let fr = frames(&night, 3);
+    let mut mask = panostitch::image::Bits::new(40, 60);
+    for c in 0..60 {
+        for r in 0..(5 + c / 6) {
+            mask.set(r, c, true);
+        }
+    }
+    let mut s = Settings { frames: fr.clone(), pan: 6.0, pan_dir: Pan::Up, zoom: 3.0, format: Format::Gif, fps: 30, deflicker: Deflicker::Strong, out: night.join("v.gif").to_string_lossy().to_string(), ..Settings::default() };
+    s.look.exposure = 0.3;
+    s.local.mask = mask.clone();
+    s.local.sky.saturation = 1.4;
+    s.local.feather = 0.12;
+    let x = tl::ProjectExtras { use_finish: true, fisheye: Some((0.5, 0.33, 0.3)), sky_radius: 90.0 };
+    let p = tl::save_project(&night.join("a").to_string_lossy(), &s, &x).unwrap();
+    assert!(p.ends_with("a.tlproj"));
+    let o = tl::open_project(&p).unwrap();
+    assert!(o.missing.is_empty());
+    assert_eq!(o.extras, x);
+    let r = &o.settings;
+    assert_eq!((r.frames.clone(), r.pan, r.pan_dir, r.zoom, r.format, r.fps, r.deflicker), (fr.clone(), 6.0, Pan::Up, 3.0, Format::Gif, 30, Deflicker::Strong));
+    assert_eq!((r.look.exposure, r.local.sky.saturation, r.local.feather), (0.3, 1.4, 0.12));
+    assert_eq!(r.local.mask, mask);
+    assert_eq!(r.out, s.out);
+
+    // The folder moved: frames are found next to the project; a deleted one is reported.
+    let moved = dir.path().join("moved");
+    std::fs::rename(&night, &moved).unwrap();
+    std::fs::remove_file(moved.join("f001.png")).unwrap();
+    let o = tl::open_project(&moved.join("a.tlproj").to_string_lossy()).unwrap();
+    assert_eq!(o.settings.frames.len(), 2);
+    assert!(o.settings.frames[0].starts_with(&*moved.to_string_lossy()), "{:?}", o.settings.frames);
+    assert_eq!(o.missing, vec!["f001.png".to_string()]);
+    assert!(o.settings.out.starts_with(&*moved.to_string_lossy()), "{}", o.settings.out);
+
+    // Not a timelapse project.
+    let bad = dir.path().join("x.tlproj");
+    std::fs::write(&bad, "format = \"PanoStitch stacking project\"\n").unwrap();
+    assert!(tl::open_project(&bad.to_string_lossy()).unwrap_err().contains("not a timelapse project"));
 }

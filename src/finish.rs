@@ -565,12 +565,24 @@ pub fn stretch(img: &Img, p: &FinishParams, m: &mut Measured) -> Img {
         StretchMode::Off => img.clone(),
         StretchMode::Srgb => img.map(|c| c.map(|v| linear_to_srgb(v.clamp(0.0, 1.0)))),
         StretchMode::MtfAuto => {
-            let bm = *m.stretch.get_or_insert_with(|| measure_stretch(img, p.target, p.unlinked));
+            // Measuring each colour on its own evens out the colours, so it would
+            // undo the white balance (temperature, tint, a sampled grey) applied
+            // just before. It is measured without those multipliers instead, and
+            // they are applied afterwards as gains on the normalised values.
+            let mul = if p.unlinked && p.wb_used() { wb_multipliers(p) } else { [1.0; 3] };
+            let bm = *m.stretch.get_or_insert_with(|| {
+                if mul == [1.0; 3] {
+                    measure_stretch(img, p.target, p.unlinked)
+                } else {
+                    measure_stretch(&img.map(move |c| [c[0] / mul[0], c[1] / mul[1], c[2] / mul[2]]), p.target, p.unlinked)
+                }
+            });
             img.map(move |c| {
                 let mut o = [0.0; 3];
                 for k in 0..3 {
                     let (b, mid) = (bm[k].0 as f32, bm[k].1 as f32);
-                    o[k] = mtf(mid, ((c[k] - b) / (1.0 - b).max(1e-6)).clamp(0.0, 1.0));
+                    let v = c[k] / mul[k];
+                    o[k] = mtf(mid, ((v - b) / (1.0 - b).max(1e-6) * mul[k]).clamp(0.0, 1.0));
                 }
                 o
             })

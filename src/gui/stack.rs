@@ -8,6 +8,7 @@
 //! with the right one ("Detect sky" paints a first mask). Frame report: click
 //! a frame (in the table or the chart) to exclude it (or include it again).
 
+use crate::gui::i18n::tr;
 use super::dialogs::{self, Picked};
 use super::{combo, image_view, slider, texture, View};
 use crate::image::{resize, Bits, Gray, Img};
@@ -23,16 +24,16 @@ use std::sync::{Arc, Mutex};
 pub const PROJECT_EXT: &str = ".stackproj";
 const GROUP_KEYS: [&str; 7] = ["stars", "base", "darks", "bias", "flats", "flatdarks", "foreground"];
 const DEM: [(u32, &str); 7] = [(3, "AHD"), (11, "DHT"), (12, "AAHD"), (4, "DCB"), (2, "PPG"), (1, "VNG"), (0, "Bilinear")];
-const WB: [(io::WhiteBalance, &str); 3] = [(io::WhiteBalance::Camera, "Camera"), (io::WhiteBalance::Auto, "Average of image"), (io::WhiteBalance::Daylight, "Daylight")];
-const STACK_PRESETS: [&str; 3] = ["Milky Way landscape", "Star trails", "Deep sky (telescope)"];
+const WB: [(io::WhiteBalance, &str); 3] = [(io::WhiteBalance::Camera, "Camera"), (io::WhiteBalance::Auto, "Average of image"), (io::WhiteBalance::Daylight, "Daylight")]; // tr
+const STACK_PRESETS: [&str; 3] = ["Milky Way landscape", "Star trails", "Deep sky (telescope)"]; // tr
 
 /// Sequator's names for the input groups (simple mode; also the keys of the explanations).
-const GROUPS: [&str; 8] = ["Star images", "Base image", "Noise images", "Bias images", "Vignetting images", "Flat-dark images", "Foreground image", "Output"];
+const GROUPS: [&str; 8] = ["Star images", "Base image", "Noise images", "Bias images", "Vignetting images", "Flat-dark images", "Foreground image", "Output"]; // tr
 /// The usual names (normal mode).
-const GROUPS_STD: [&str; 8] = ["Light frames", "Base frame", "Dark frames", "Bias frames", "Flat field frames", "Flat-dark frames", "Foreground image", "Output"];
+const GROUPS_STD: [&str; 8] = ["Light frames", "Base frame", "Dark frames", "Bias frames", "Flat field frames", "Flat-dark frames", "Foreground image", "Output"]; // tr
 
 fn group_name(g: usize, simple: bool) -> &'static str {
-    if simple { GROUPS[g] } else { GROUPS_STD[g] }
+    tr(if simple { GROUPS[g] } else { GROUPS_STD[g] })
 }
 const MASK_COLS: usize = 400;
 const PREVIEW_MAX: usize = 1600;
@@ -115,39 +116,6 @@ pub struct StackTab {
     post_note: &'static str,
 }
 
-/// The painted mask as run lengths (alternately not sky / sky), column by column
-/// (the order the Julia version used, so its project files open here too).
-fn runs(m: &Bits) -> Vec<i64> {
-    let (mut out, mut cur, mut n) = (Vec::new(), false, 0i64);
-    for c in 0..m.w {
-        for r in 0..m.h {
-            let b = m.at(r, c);
-            if b == cur {
-                n += 1;
-            } else {
-                out.push(n);
-                cur = b;
-                n = 1;
-            }
-        }
-    }
-    out.push(n);
-    out
-}
-fn unruns(r: &[i64], rows: usize, cols: usize) -> Bits {
-    let mut m = Bits::new(rows, cols);
-    let mut p = 0usize;
-    for (k, &n) in r.iter().enumerate() {
-        for q in p..(p + n.max(0) as usize).min(rows * cols) {
-            if k % 2 == 1 {
-                m.set(q % rows, q / rows, true);
-            }
-        }
-        p += n.max(0) as usize;
-    }
-    m
-}
-
 impl Default for StackTab {
     fn default() -> Self {
         let (tx, rx) = channel();
@@ -158,7 +126,7 @@ impl Default for StackTab {
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
             post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
-            status: "Add light frames to begin. Choose a group, then Add… (or type a path).".into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
+            status: tr("Add light frames to begin. Choose a group, then Add… (or type a path).").into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
             simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: super::notes::note("Tone"),
         }
     }
@@ -197,6 +165,18 @@ impl StackTab {
         c
     }
 
+    /// Files dropped on the window: to the chosen group (light frames when the output is chosen).
+    pub fn add_dropped(&mut self, ps: Vec<String>) {
+        if self.running {
+            self.status = tr("Wait until the stacking has finished, then drop the files again.").into();
+            return;
+        }
+        if self.group == 7 {
+            self.group = 0;
+        }
+        self.add(ps);
+    }
+
     fn add(&mut self, ps: Vec<String>) {
         if ps.is_empty() {
             return;
@@ -226,7 +206,7 @@ impl StackTab {
                 self.cfg.output = std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join("stacked.tif").to_string_lossy().to_string();
             }
         }
-        self.status = format!("Added {n} file(s) to {}.", group_name(g, self.simple));
+        self.status = crate::trf!("Added {} file(s) to {}.", n, group_name(g, self.simple));
         self.cfg.excluded.retain(|p| self.files[0].contains(p));
         self.show_preview(self.base());
     }
@@ -246,7 +226,7 @@ impl StackTab {
         }
         self.loading = true;
         let tx = self.tx.clone();
-        self.status = format!("Loading preview of {}…", basename(&p));
+        self.status = crate::trf!("Loading preview of {}…", basename(&p));
         crate::sys::background(move || {
             let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| {
                 let f = PREVIEW_MAX as f64 / a.w.max(a.h) as f64;
@@ -254,7 +234,7 @@ impl StackTab {
             });
             let _ = tx.send(match r {
                 Ok((hw, img)) => Msg::Preview(p, Arc::new(img), hw),
-                Err(e) => Msg::Error(format!("Cannot preview {}: {e}", basename(&p))),
+                Err(e) => Msg::Error(crate::trf!("Cannot preview {}: {}", basename(&p), e)),
             });
         });
     }
@@ -267,15 +247,15 @@ impl StackTab {
     fn run(&mut self, preview: bool) {
         if self.running {
             self.cancel.store(true, Ordering::Relaxed);
-            self.status = "Cancelling…".into();
+            self.status = tr("Cancelling…").into();
             return;
         }
         if self.files[0].is_empty() {
-            self.status = "Add light frames first.".into();
+            self.status = tr("Add light frames first.").into();
             return;
         }
         if !preview && self.cfg.output.is_empty() {
-            self.status = "Set the output file first (Output).".into();
+            self.status = tr("Set the output file first (Output).").into();
             return;
         }
         if !preview {
@@ -287,12 +267,12 @@ impl StackTab {
         let cfg = self.settings();
         self.running = true;
         self.running_preview = preview;
-        let calib: Vec<String> = [(cfg.darks.len(), "darks"), (cfg.flats.len(), "flats"), (cfg.bias.len(), "biases"), (cfg.flatdarks.len(), "flat darks")]
+        let calib: Vec<String> = [(cfg.darks.len(), tr("darks")), (cfg.flats.len(), tr("flats")), (cfg.bias.len(), tr("biases")), (cfg.flatdarks.len(), tr("flat darks"))]
             .iter()
             .filter(|(n, _)| *n > 0)
             .map(|(n, k)| format!("{n} {k}"))
             .collect();
-        self.run_info = Some((std::time::Instant::now(), if calib.is_empty() { "none".into() } else { calib.join(", ") }));
+        self.run_info = Some((std::time::Instant::now(), if calib.is_empty() { tr("none").into() } else { calib.join(", ") }));
         self.cancel.store(false, Ordering::Relaxed);
         let (tx, cancel, prog) = (self.tx.clone(), self.cancel.clone(), self.progress.clone());
         // Work units for the progress bar: one per frame loaded (calibration
@@ -303,7 +283,7 @@ impl StackTab {
         let ncal: usize = kinds.iter().map(|k| k.1).sum();
         let combine_units = 0.35 * lights as f64;
         let total = ncal as f64 + lights as f64 + combine_units;
-        *prog.lock().unwrap_or_else(|e| e.into_inner()) = Progress { msg: "Starting…".into(), done: 0.0, total, start: Some(std::time::Instant::now()) };
+        *prog.lock().unwrap_or_else(|e| e.into_inner()) = Progress { msg: tr("Starting…").into(), done: 0.0, total, start: Some(std::time::Instant::now()) };
         crate::sys::background(move || {
             let t0 = std::time::Instant::now();
             let progress = |m: &str| -> Result<(), String> {
@@ -339,7 +319,7 @@ impl StackTab {
                 p.msg = m.to_string();
                 Ok(())
             };
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stack(&cfg, preview, &progress, None))).unwrap_or_else(|_| Err("internal error (panic)".into()));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stack(&cfg, preview, &progress, None))).unwrap_or_else(|_| Err(tr("internal error (panic)").into()));
             let msg = match r {
                 Ok(r) => {
                     let f = (RESULT_MAX as f64 / r.image.w.max(r.image.h) as f64).min(1.0);
@@ -347,15 +327,7 @@ impl StackTab {
                     let nused = r.report.iter().filter(|fi| fi.used()).count();
                     let rej: Vec<&FrameInfo> = r.report.iter().filter(|fi| matches!(fi.status, Status::Rejected | Status::Failed)).collect();
                     let nexcl = r.report.iter().filter(|fi| fi.status == Status::Excluded).count();
-                    let s = format!(
-                        "{}{nused} frame(s) stacked{}{}. Brightness ×{:.2}.{} ({} s)",
-                        if preview { "Quick preview: " } else { "Done: " },
-                        if rej.is_empty() { String::new() } else { format!(", {} left out ({}{}) – see Frame report", rej.len(), rej.iter().take(2).map(|fi| format!("{}: {}", basename(&fi.path), fi.reason)).collect::<Vec<_>>().join("; "), if rej.len() > 2 { "; …" } else { "" }) },
-                        if nexcl > 0 { format!(", {nexcl} excluded by you") } else { String::new() },
-                        r.gain,
-                        if r.saved.is_empty() { String::new() } else if r.saved.len() == 1 { format!(" Saved {}.", r.saved[0]) } else { format!(" Saved {} files.", r.saved.len()) },
-                        t0.elapsed().as_secs()
-                    );
+                    let s = crate::trf!("{}{} frame(s) stacked{}{}. Brightness ×{}.{} ({} s)", if preview { tr("Quick preview: ") } else { tr("Done: ") }, nused, if rej.is_empty() { String::new() } else { crate::trf!(", {} left out ({}{}) – see Frame report", rej.len(), rej.iter().take(2).map(|fi| format!("{}: {}", basename(&fi.path), fi.reason)).collect::<Vec<_>>().join("; "), if rej.len() > 2 { "; …" } else { "" }) }, if nexcl > 0 { crate::trf!(", {} excluded by you", nexcl) } else { String::new() }, format!("{:.2}", r.gain), if r.saved.is_empty() { String::new() } else if r.saved.len() == 1 { crate::trf!(" Saved {}.", r.saved[0]) } else { crate::trf!(" Saved {} files.", r.saved.len()) }, t0.elapsed().as_secs());
                     let fw = r.fwhm * f;
                     let mut r = r;
                     r.fwhm = fw.max(r.fwhm * 0.0 + fw);
@@ -374,27 +346,30 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
     let excl = r.report.iter().filter(|fi| fi.status == Status::Excluded).count();
     // A quick preview measures only a few frames: count against those.
     let total = if r.preview { r.report.iter().filter(|fi| fi.status != Status::Skipped).count() } else { nlights };
-    let mut frames = format!("{used} of {total} stacked");
+    let mut frames = crate::trf!("{} of {} stacked", used, total);
     if left > 0 {
-        frames += &format!(", {left} left out (see Frame report)");
+        frames += &crate::trf!(", {} left out (see Frame report)", left);
     }
     if excl > 0 {
-        frames += &format!(", {excl} excluded by you");
+        frames += &crate::trf!(", {} excluded by you", excl);
     }
     if r.preview {
-        frames += &format!(" (quick preview of {nlights} light frames)");
+        frames += &crate::trf!(" (quick preview of {} light frames)", nlights);
     }
     let (w, h) = (r.image.w, r.image.h);
-    let mut rep = super::JobReport::new(if r.preview { "Quick preview done" } else { "Stack finished" }, used > 0)
-        .row("Frames", frames)
-        .row("Calibration", calib.to_string())
-        .row("Time", super::duration(secs))
-        .row("Result", format!("{w} × {h} px ({:.1} MP)", (w * h) as f64 / 1e6));
+    let mut rep = super::JobReport::new(if r.preview { tr("Quick preview done") } else { tr("Stack finished") }, used > 0)
+        .row(tr("Frames"), frames)
+        .row(tr("Calibration"), calib.to_string())
+        .row(tr("Time"), super::duration(secs))
+        .row(tr("Result"), format!("{w} × {h} px ({:.1} MP)", (w * h) as f64 / 1e6));
     rep = match r.saved.len() {
-        0 => rep.row("Saved", if r.preview { "not saved (quick preview)" } else { "not saved" }),
-        1 => rep.row("Saved", format!("{} ({})", basename(&r.saved[0]), super::file_size(&r.saved[0]))),
-        n => rep.row("Saved", format!("{n} files, e.g. {}", basename(&r.saved[0]))),
+        0 => rep.row(tr("Saved"), if r.preview { tr("not saved (quick preview)") } else { tr("not saved") }),
+        1 => rep.row(tr("Saved"), format!("{} ({})", basename(&r.saved[0]), super::file_size(&r.saved[0]))),
+        n => rep.row(tr("Saved"), crate::trf!("{} files, e.g. {}", n, basename(&r.saved[0]))),
     };
+    if let Some(f) = r.saved.first() {
+        rep = rep.file(f);
+    }
     rep
 }
 
@@ -427,7 +402,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 c.distortion = Distortion::Auto;
                 c.light_pollution.filter = Pollution::Uneven;
                 c.light_pollution.strength = 50.0;
-                "the sky is aligned, the foreground stays sharp; sky region detected automatically (or draw it), wide-angle distortion corrected, uneven light pollution reduced."
+                tr("the sky is aligned, the foreground stays sharp; sky region detected automatically (or draw it), wide-angle distortion corrected, uneven light pollution reduced.")
             }
             "Star trails" => {
                 c.composition = Composition::StarTrails;
@@ -436,7 +411,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 if matches!(c.sky.mode, SkyMode::None | SkyMode::All) {
                     c.sky.mode = SkyMode::Automatic;
                 }
-                "no alignment, the brightest value per pixel, the gaps between frames filled; sky region detected automatically (or draw it). Try Trail fade for a comet look."
+                tr("no alignment, the brightest value per pixel, the gaps between frames filled; sky region detected automatically (or draw it). Try Trail fade for a comet look.")
             }
             _ => {
                 // Deep sky (telescope)
@@ -445,7 +420,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 c.bg_extraction = (true, 2);
                 c.color_calibration = true;
                 c.tone = Tone::Stretch;
-                "the whole frame is sky; frames only shift and turn; gradients removed, colours calibrated, automatic stretch. Save as .fits for further processing."
+                tr("the whole frame is sky; frames only shift and turn; gradients removed, colours calibrated, automatic stretch. Save as .fits for further processing.")
             }
         }
     }
@@ -467,7 +442,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     self.overlay_tex = None;
                     self.vstate.fit = true;
                     if !self.running {
-                        self.status = "Ready.".into();
+                        self.status = tr("Ready.").into();
                     }
                 }
                 Msg::Sky(mask, s) => {
@@ -511,16 +486,16 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 Msg::Error(e) => {
                     if let Some((t0, _)) = self.run_info.take() {
                         let cancelled = e == "Cancelled.";
-                        let mut rep = super::JobReport::new(if cancelled { "Stacking cancelled" } else { "Stacking failed" }, false);
+                        let mut rep = super::JobReport::new(if cancelled { tr("Stacking cancelled") } else { tr("Stacking failed") }, false);
                         if !cancelled {
-                            rep = rep.row("Error", e.clone());
+                            rep = rep.row(tr("Error"), e.clone());
                         }
-                        self.report = Some(rep.row("Light frames", self.files[0].len().to_string()).row("Time", super::duration(t0.elapsed().as_secs_f64())));
+                        self.report = Some(rep.row(tr("Light frames"), self.files[0].len().to_string()).row(tr("Time"), super::duration(t0.elapsed().as_secs_f64())));
                     }
                     self.running = false;
                     self.loading = false;
                     self.post_busy = false;
-                    self.status = format!("Error: {e}");
+                    self.status = crate::trf!("Error: {}", e);
                 }
             }
         }
@@ -537,7 +512,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     let p = std::panic::catch_unwind(|| postprocess(&raw, &w, &cfg, fw, None));
                     let _ = tx.send(match p {
                         Ok(p) => Msg::Post(key, p),
-                        Err(_) => Msg::Error("post-processing failed".into()),
+                        Err(_) => Msg::Error(tr("post-processing failed").into()),
                     });
                 });
             }
@@ -551,8 +526,8 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     Picked::Save(Some(p)) if what == "output" => self.cfg.output = p,
                     Picked::Save(Some(p)) if what == "result" => self.save_result(p),
                     Picked::Save(Some(p)) if what == "saveproj" => match self.save_project(&p) {
-                        Ok(p) => self.status = format!("Saved project {p}."),
-                        Err(e) => self.status = format!("Error: {e}"),
+                        Ok(p) => self.status = crate::trf!("Saved project {}.", p),
+                        Err(e) => self.status = crate::trf!("Error: {}", e),
                     },
                     Picked::Files(ps) if what == "openproj" => {
                         if let Some(p) = ps.first() {
@@ -649,103 +624,22 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         }
     }
 
-    /// Projects (.stackproj, TOML text) keep the file lists, the sky region and every setting.
-    pub fn save_project(&mut self, path: &str) -> Result<String, String> {
+    /// The menus, toggles and sliders (projects; remembered between sessions).
+    pub fn settings_table(&mut self) -> toml::Table {
         use toml::{Table, Value};
-        let mut path = path.to_string();
-        if !path.to_lowercase().ends_with(PROJECT_EXT) {
-            path += PROJECT_EXT;
-        }
-        let dir = std::path::absolute(&path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let fref = |p: &str| {
-            let ap = std::path::absolute(p).unwrap_or_else(|_| p.into());
-            let mut t = Table::new();
-            t.insert("path".into(), ap.to_string_lossy().to_string().into());
-            t.insert("relative".into(), super::relpath(&ap, &dir).into());
-            Value::Table(t)
-        };
         let mut d = Table::new();
-        d.insert("format".into(), "PanoStitch stacking project".into());
-        d.insert("version".into(), 2.into());
-        d.insert("files".into(), Value::Table((0..7).map(|g| (GROUP_KEYS[g].to_string(), Value::Array(self.files[g].iter().map(|p| fref(p)).collect()))).collect()));
-        let excl: Vec<Value> = self.files[0].iter().enumerate().filter(|(_, p)| self.cfg.excluded.contains(p)).map(|(k, _)| Value::from((k + 1) as i64)).collect();
-        d.insert("excluded".into(), Value::Array(excl));
         d.insert("menus".into(), Value::Table(self.menus().into_iter().map(|(k, v)| (k.to_string(), Value::from(v))).collect()));
-        let out = self.cfg.output.clone();
-        let line = self.cfg.sky.line;
-        let mask = self.cfg.sky.mask.clone();
         let brush = self.brush;
         let (tg, sl) = self.named();
         d.insert("toggles".into(), Value::Table(tg.into_iter().map(|(k, v)| (k.to_string(), Value::from(*v))).collect()));
         let mut slt: Table = sl.into_iter().map(|(k, v, _)| (k.to_string(), Value::from(v))).collect();
         slt.insert("brush".into(), brush.into());
         d.insert("sliders".into(), Value::Table(slt));
-        if !out.is_empty() {
-            d.insert("output".into(), fref(&out));
-        }
-        if let Some(l) = line {
-            d.insert("sky_line".into(), Value::Array(vec![l.0.into(), l.1.into(), l.2.into(), l.3.into()]));
-        }
-        if mask.any() {
-            let mut t = Table::new();
-            t.insert("size".into(), Value::Array(vec![(mask.h as i64).into(), (mask.w as i64).into()]));
-            t.insert("runs".into(), Value::Array(runs(&mask).into_iter().map(Value::from).collect()));
-            d.insert("sky_mask".into(), Value::Table(t));
-        }
-        std::fs::write(&path, toml::to_string(&d).map_err(|e| e.to_string())?).map_err(|e| format!("Cannot save {path}: {e}"))?;
-        self.project = Some(path.clone());
-        self.saved_fp = Some(self.fingerprint());
-        Ok(path)
+        d
     }
 
-    pub fn open_project(&mut self, path: &str) {
-        if self.running {
-            self.status = "Wait until the stacking has finished.".into();
-            return;
-        }
-        match self.read_project(path) {
-            Ok(s) => {
-                self.status = s;
-                self.saved_fp = Some(self.fingerprint());
-            }
-            Err(e) => self.status = e,
-        }
-    }
-
-    fn read_project(&mut self, path: &str) -> Result<String, String> {
-        use toml::Value;
-        let text = std::fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {e}", basename(path)))?;
-        let d: toml::Table = text.parse().map_err(|e| format!("Cannot read {}: {e}", basename(path)))?;
-        if d.get("format").and_then(|v| v.as_str()) != Some("PanoStitch stacking project") {
-            return Err(format!("{} is not a stacking project.", basename(path)));
-        }
-        let dir = std::path::absolute(path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let resolve = |r: &Value| -> (Option<String>, String) {
-            let ap = r.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let rel = dir.join(r.get("relative").and_then(|v| v.as_str()).unwrap_or(""));
-            let found = if std::path::Path::new(&ap).is_file() { Some(ap.clone()) } else if rel.is_file() { Some(rel.to_string_lossy().to_string()) } else { None };
-            (found, ap)
-        };
-        let mut missing = Vec::new();
-        let files = d.get("files").and_then(|v| v.as_table()).cloned().unwrap_or_default();
-        let mut found_stars: Vec<Option<String>> = Vec::new();
-        for g in 0..7 {
-            let recs = files.get(GROUP_KEYS[g]).and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            let fs: Vec<Option<String>> = recs.iter().map(|r| { let (f, ap) = resolve(r); if f.is_none() { missing.push(basename(&ap)); } f }).collect();
-            if g == 0 {
-                found_stars = fs.clone();
-            }
-            self.files[g] = fs.into_iter().flatten().collect();
-        }
-        self.cfg.excluded = d.get("excluded").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|k| k.as_integer()).filter_map(|k| found_stars.get(k as usize - 1).cloned().flatten()).collect()).unwrap_or_default();
-        // The output need not exist yet: keep its absolute path if that folder exists.
-        self.cfg.output = match d.get("output") {
-            Some(o) => {
-                let ap = o.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if std::path::Path::new(&ap).parent().is_some_and(|p| p.is_dir()) { ap } else { dir.join(o.get("relative").and_then(|v| v.as_str()).unwrap_or("stacked.tif")).to_string_lossy().to_string() }
-            }
-            None => String::new(),
-        };
+    /// Set the menus, toggles and sliders from [`StackTab::settings_table`]; what is missing stays.
+    pub fn apply_settings(&mut self, d: &toml::Table) {
         let tbl = |k: &str| d.get(k).and_then(|v| v.as_table()).cloned().unwrap_or_default();
         for (k, v) in tbl("menus") {
             if let Some(v) = v.as_str() {
@@ -776,13 +670,109 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         for (v, mut f) in setters {
             f(&mut self.cfg, v);
         }
+    }
+
+    /// Projects (.stackproj, TOML text) keep the file lists, the sky region and every setting.
+    pub fn save_project(&mut self, path: &str) -> Result<String, String> {
+        use toml::{Table, Value};
+        let mut path = path.to_string();
+        if !path.to_lowercase().ends_with(PROJECT_EXT) {
+            path += PROJECT_EXT;
+        }
+        let dir = std::path::absolute(&path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let fref = |p: &str| {
+            let ap = std::path::absolute(p).unwrap_or_else(|_| p.into());
+            let mut t = Table::new();
+            t.insert("path".into(), ap.to_string_lossy().to_string().into());
+            t.insert("relative".into(), super::relpath(&ap, &dir).into());
+            Value::Table(t)
+        };
+        let mut d = Table::new();
+        d.insert("format".into(), "PanoStitch stacking project".into());
+        d.insert("version".into(), 2.into());
+        d.insert("files".into(), Value::Table((0..7).map(|g| (GROUP_KEYS[g].to_string(), Value::Array(self.files[g].iter().map(|p| fref(p)).collect()))).collect()));
+        let excl: Vec<Value> = self.files[0].iter().enumerate().filter(|(_, p)| self.cfg.excluded.contains(p)).map(|(k, _)| Value::from((k + 1) as i64)).collect();
+        d.insert("excluded".into(), Value::Array(excl));
+        d.extend(self.settings_table());
+        let out = self.cfg.output.clone();
+        let line = self.cfg.sky.line;
+        let mask = self.cfg.sky.mask.clone();
+        if !out.is_empty() {
+            d.insert("output".into(), fref(&out));
+        }
+        if let Some(l) = line {
+            d.insert("sky_line".into(), Value::Array(vec![l.0.into(), l.1.into(), l.2.into(), l.3.into()]));
+        }
+        if mask.any() {
+            let mut t = Table::new();
+            t.insert("size".into(), Value::Array(vec![(mask.h as i64).into(), (mask.w as i64).into()]));
+            t.insert("runs".into(), Value::Array(mask.to_runs().into_iter().map(Value::from).collect()));
+            d.insert("sky_mask".into(), Value::Table(t));
+        }
+        std::fs::write(&path, toml::to_string(&d).map_err(|e| e.to_string())?).map_err(|e| crate::trf!("Cannot save {}: {}", path, e))?;
+        self.project = Some(path.clone());
+        self.saved_fp = Some(self.fingerprint());
+        super::remember_project(&path);
+        Ok(path)
+    }
+
+    pub fn open_project(&mut self, path: &str) {
+        if self.running {
+            self.status = tr("Wait until the stacking has finished.").into();
+            return;
+        }
+        match self.read_project(path) {
+            Ok(s) => {
+                super::remember_project(path);
+                self.status = s;
+                self.saved_fp = Some(self.fingerprint());
+            }
+            Err(e) => self.status = e,
+        }
+    }
+
+    fn read_project(&mut self, path: &str) -> Result<String, String> {
+        use toml::Value;
+        let text = std::fs::read_to_string(path).map_err(|e| crate::trf!("Cannot read {}: {}", basename(path), e))?;
+        let d: toml::Table = text.parse().map_err(|e| crate::trf!("Cannot read {}: {}", basename(path), e))?;
+        if d.get("format").and_then(|v| v.as_str()) != Some("PanoStitch stacking project") {
+            return Err(crate::trf!("{} is not a stacking project.", basename(path)));
+        }
+        let dir = std::path::absolute(path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let resolve = |r: &Value| -> (Option<String>, String) {
+            let ap = r.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let rel = dir.join(r.get("relative").and_then(|v| v.as_str()).unwrap_or(""));
+            let found = if std::path::Path::new(&ap).is_file() { Some(ap.clone()) } else if rel.is_file() { Some(rel.to_string_lossy().to_string()) } else { None };
+            (found, ap)
+        };
+        let mut missing = Vec::new();
+        let files = d.get("files").and_then(|v| v.as_table()).cloned().unwrap_or_default();
+        let mut found_stars: Vec<Option<String>> = Vec::new();
+        for g in 0..7 {
+            let recs = files.get(GROUP_KEYS[g]).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let fs: Vec<Option<String>> = recs.iter().map(|r| { let (f, ap) = resolve(r); if f.is_none() { missing.push(basename(&ap)); } f }).collect();
+            if g == 0 {
+                found_stars = fs.clone();
+            }
+            self.files[g] = fs.into_iter().flatten().collect();
+        }
+        self.cfg.excluded = d.get("excluded").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|k| k.as_integer()).filter_map(|k| found_stars.get(k as usize - 1).cloned().flatten()).collect()).unwrap_or_default();
+        // The output need not exist yet: keep its absolute path if that folder exists.
+        self.cfg.output = match d.get("output") {
+            Some(o) => {
+                let ap = o.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if std::path::Path::new(&ap).parent().is_some_and(|p| p.is_dir()) { ap } else { dir.join(o.get("relative").and_then(|v| v.as_str()).unwrap_or("stacked.tif")).to_string_lossy().to_string() }
+            }
+            None => String::new(),
+        };
+        self.apply_settings(&d);
         let num = |v: &Value| v.as_float().or(v.as_integer().map(|i| i as f64));
         self.cfg.sky.line = d.get("sky_line").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(num).collect::<Vec<f64>>()).filter(|a| a.len() == 4).map(|a| (a[0], a[1], a[2], a[3]));
         self.cfg.sky.mask = match d.get("sky_mask") {
             Some(m) => {
                 let size: Vec<i64> = m.get("size").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_integer()).collect()).unwrap_or_default();
                 let r: Vec<i64> = m.get("runs").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_integer()).collect()).unwrap_or_default();
-                if size.len() == 2 { unruns(&r, size[0] as usize, size[1] as usize) } else { Bits::new(0, 0) }
+                if size.len() == 2 { Bits::from_runs(&r, size[0] as usize, size[1] as usize) } else { Bits::new(0, 0) }
             }
             None => Bits::new(0, 0),
         };
@@ -796,12 +786,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         self.view = ViewKind::Base;
         self.show_preview(self.base());
         let counts: String = (2..7).filter(|&g| !self.files[g].is_empty()).map(|g| format!(", {} {}", self.files[g].len(), group_name(g, self.simple).to_lowercase())).collect();
-        Ok(format!(
-            "Opened {}: {} light frames{counts}.{}",
-            basename(path),
-            self.files[0].len(),
-            if missing.is_empty() { String::new() } else { format!(" Missing files: {}.", missing.join(", ")) }
-        ))
+        Ok(crate::trf!("Opened {}: {} light frames{}.{}", basename(path), self.files[0].len(), counts, if missing.is_empty() { String::new() } else { format!(" Missing files: {}.", missing.join(", ")) }))
     }
 
     fn save_result(&mut self, p: String) {
@@ -809,10 +794,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         let mut cfg = self.settings();
         cfg.output = p.clone();
         let tx = self.tx.clone();
-        self.status = format!("Saving {}…", basename(&p));
+        self.status = crate::trf!("Saving {}…", basename(&p));
         crate::sys::background(move || {
             let _ = tx.send(match save_result(&r, &cfg) {
-                Ok(_) => Msg::Status(format!("Saved {p}{}", if io::is_astro(&p) { " (linear 32-bit)." } else { "." })),
+                Ok(_) => Msg::Status(crate::trf!("Saved {}{}", p, if io::is_astro(&p) { tr(" (linear 32-bit).") } else { "." })),
                 Err(e) => Msg::Error(e),
             });
         });
@@ -820,15 +805,15 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn toggle_exclude(&mut self, path: &str) {
         if Some(path.to_string()) == self.base() || self.result.as_ref().is_some_and(|r| r.base == path) {
-            self.status = "The base frame cannot be excluded (choose another base first).".into();
+            self.status = tr("The base frame cannot be excluded (choose another base first).").into();
             return;
         }
         if let Some(k) = self.cfg.excluded.iter().position(|p| p == path) {
             self.cfg.excluded.remove(k);
-            self.status = format!("{} will be used in the next run.", basename(path));
+            self.status = crate::trf!("{} will be used in the next run.", basename(path));
         } else {
             self.cfg.excluded.push(path.to_string());
-            self.status = format!("{} will be left out of the next run.", basename(path));
+            self.status = crate::trf!("{} will be left out of the next run.", basename(path));
         }
     }
 
@@ -860,7 +845,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn ask_open_project(&mut self) {
         if self.dialog.is_none() {
-            self.dialog = Some((dialogs::pick_open("Open project", "Stacking projects", PROJECT_EXT), "openproj"));
+            self.dialog = Some((dialogs::pick_open(tr("Open project"), tr("Stacking projects"), PROJECT_EXT), "openproj"));
         }
     }
 
@@ -869,8 +854,8 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         if quick {
             if let Some(p) = self.project.clone() {
                 self.status = match self.save_project(&p) {
-                    Ok(p) => format!("Saved project {p}."),
-                    Err(e) => format!("Error: {e}"),
+                    Ok(p) => crate::trf!("Saved project {}.", p),
+                    Err(e) => crate::trf!("Error: {}", e),
                 };
                 return;
             }
@@ -880,7 +865,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join(format!("stacking{PROJECT_EXT}")).to_string_lossy().to_string(),
                 None => format!("stacking{PROJECT_EXT}"),
             });
-            self.dialog = Some((dialogs::pick_save("Save stacking project", &default), "saveproj"));
+            self.dialog = Some((dialogs::pick_save(tr("Save stacking project"), &default), "saveproj"));
         }
     }
 
@@ -891,7 +876,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         let (tg, sl) = self.named();
         let t: Vec<(&str, bool)> = tg.iter().map(|(k, v)| (*k, **v)).collect();
         let v: Vec<(&str, f64)> = sl.iter().map(|(k, v, _)| (*k, *v)).collect();
-        let text = format!("{:?}{:?}{t:?}{v:?}{:?}{:?}{:?}{:?}{}", self.files, self.cfg.excluded, menus, self.cfg.output, self.cfg.sky.line, runs(&self.cfg.sky.mask), self.brush);
+        let text = format!("{:?}{:?}{t:?}{v:?}{:?}{:?}{:?}{:?}{}", self.files, self.cfg.excluded, menus, self.cfg.output, self.cfg.sky.line, self.cfg.sky.mask.to_runs(), self.brush);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         text.hash(&mut h);
         h.finish()
@@ -1037,8 +1022,8 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         let (dir, stem0, ext) = self.out_parts();
         let mut stem = self.name_edit.clone().unwrap_or(stem0);
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Save as").strong());
-            let r = ui.add(egui::TextEdit::singleline(&mut stem).desired_width(150.0).hint_text("file name"));
+            ui.label(egui::RichText::new(tr("Save as")).strong());
+            let r = ui.add(egui::TextEdit::singleline(&mut stem).desired_width(150.0).hint_text(tr("file name")));
             if r.has_focus() {
                 self.name_edit = Some(stem.clone());
                 if !stem.trim().is_empty() {
@@ -1049,13 +1034,13 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
             let mut pick: Option<String> = None;
             egui::ComboBox::from_id_salt("outname").selected_text("").width(18.0).height(400.0).show_ui(ui, |ui| {
-                ui.weak("Suggested names");
+                ui.weak(tr("Suggested names"));
                 for n in self.name_suggestions() {
                     if ui.selectable_label(n == stem, &n).clicked() {
                         pick = Some(n);
                     }
                 }
-            }).response.on_hover_text("Suggested file names");
+            }).response.on_hover_text(tr("Suggested file names"));
             if let Some(n) = pick {
                 self.set_out(&dir, &n, &ext);
             }
@@ -1067,13 +1052,13 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                         new_ext = Some(e);
                     }
                 }
-            }).response.on_hover_text(io::OUTPUT_FORMATS.iter().find(|f| f.0 == ext).map(|f| f.1).unwrap_or("file type"));
+            }).response.on_hover_text(io::OUTPUT_FORMATS.iter().find(|f| f.0 == ext).map(|f| f.1).unwrap_or(tr("file type")));
             if let Some(e) = new_ext {
                 self.set_out(&dir, &stem, e);
             }
-            if ui.button("Folder…").on_hover_text(format!("Saved in {dir}")).clicked() && self.dialog.is_none() {
+            if ui.button(tr("Folder…")).on_hover_text(crate::trf!("Saved in {}", dir)).clicked() && self.dialog.is_none() {
                 let d = if self.cfg.output.is_empty() { std::path::Path::new(&dir).join(format!("{stem}.{ext}")).to_string_lossy().to_string() } else { self.cfg.output.clone() };
-                self.dialog = Some((dialogs::pick_save("Output", &d), "output"));
+                self.dialog = Some((dialogs::pick_save(tr("Output"), &d), "output"));
             }
         });
         if let Some((store, aligned)) = self.work_needs() {
@@ -1081,27 +1066,23 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             let in_ram = store < 0.5 * mem;
             let disk_need = aligned + if in_ram { 0.0 } else { store + 2e9_f64.max(0.02 * store) };
             let disk_ok = disk.is_none_or(|d| disk_need <= d as f64);
-            let disk_free = disk.map(|d| format!("{} free here", gb(d as f64))).unwrap_or_else(|| "free space unknown".into());
-            let mut text = format!(
-                "Frames need ≈ {}: {}",
-                gb(store),
-                if in_ram { format!("kept in memory ({} free)", gb(mem)) } else { format!("too big for memory ({} free), kept on disk here ({disk_free})", gb(mem)) }
-            );
+            let disk_free = disk.map(|d| crate::trf!("{} free here", gb(d as f64))).unwrap_or_else(|| tr("free space unknown").into());
+            let mut text = crate::trf!("Frames need ≈ {}: {}", gb(store), if in_ram { crate::trf!("kept in memory ({} free)", gb(mem)) } else { crate::trf!("too big for memory ({} free), kept on disk here ({})", gb(mem), disk_free) });
             if aligned > 0.0 {
-                text += &format!("; aligned frames ≈ {} on disk ({disk_free})", gb(aligned));
+                text += &crate::trf!("; aligned frames ≈ {} on disk ({})", gb(aligned), disk_free);
             }
             if disk_ok {
                 ui.weak(text);
             } else {
-                ui.colored_label(Color32::from_rgb(220, 120, 0), format!("⚠ {text}. Not enough space: switch on Half size (RAW conversion) or Merge 4 pixels, use fewer frames, or choose a folder on a bigger disk."));
+                ui.colored_label(Color32::from_rgb(220, 120, 0), crate::trf!("⚠ {}. Not enough space: switch on Half size (RAW conversion) or Merge 4 pixels, use fewer frames, or choose a folder on a bigger disk.", text));
             }
         }
         let exists = !self.cfg.output.is_empty() && std::path::Path::new(&self.cfg.output).exists();
         ui.horizontal_wrapped(|ui| {
-            ui.weak(format!("in {dir}"));
+            ui.weak(crate::trf!("in {}", dir));
             if exists {
-                ui.colored_label(Color32::from_rgb(200, 120, 0), "– exists, will be replaced");
-                if ui.small_button("next free name").clicked() {
+                ui.colored_label(Color32::from_rgb(200, 120, 0), tr("– exists, will be replaced"));
+                if ui.small_button(tr("next free name")).clicked() {
                     let base = stem.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end_matches('_').to_string();
                     if let Some(n) = (2..10_000).map(|k| format!("{base}_{k}")).find(|n| !std::path::Path::new(&dir).join(format!("{n}.{ext}")).exists()) {
                         self.set_out(&dir, &n, &ext);
@@ -1112,7 +1093,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
     }
 
     fn left(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Input");
+        ui.heading(tr("Input"));
         // One row per group: status dot, name, and a dropdown with its files
         // (hundreds of light frames do not fit in a list).
         let base = self.base();
@@ -1135,10 +1116,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                         // The base frame: automatic (the middle one) or any light frame.
                         let cur = match self.files[1].first() {
                             Some(b) => basename(b),
-                            None => base.as_ref().map(|b| format!("(auto) {}", basename(b))).unwrap_or_else(|| "–".into()),
+                            None => base.as_ref().map(|b| crate::trf!("(auto) {}", basename(b))).unwrap_or_else(|| "–".into()),
                         };
                         egui::ComboBox::from_id_salt("pick1").selected_text(cur).width(w).height(400.0).show_ui(ui, |ui| {
-                            if ui.selectable_label(self.files[1].is_empty(), "(auto: the middle one)").clicked() {
+                            if ui.selectable_label(self.files[1].is_empty(), tr("(auto: the middle one)")).clicked() {
                                 new_base = Some(None);
                             }
                             for f in &self.files[0] {
@@ -1155,15 +1136,15 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                         ui.weak("–");
                     }
                     _ => {
-                        let cur = self.shown.as_ref().filter(|s| self.files[g].contains(s)).map(|s| basename(s)).unwrap_or_else(|| if n == 1 { basename(&self.files[g][0]) } else { format!("{n} files") });
+                        let cur = self.shown.as_ref().filter(|s| self.files[g].contains(s)).map(|s| basename(s)).unwrap_or_else(|| if n == 1 { basename(&self.files[g][0]) } else { crate::trf!("{} files", n) });
                         egui::ComboBox::from_id_salt(("pick", g)).selected_text(cur).width(w).height(400.0).show_ui(ui, |ui| {
                             for f in &self.files[g] {
                                 let mut t = basename(f);
                                 if g == 0 && self.files[1].contains(f) {
-                                    t += "  ← base";
+                                    t += tr("  ← base");
                                 }
                                 if g == 0 && self.cfg.excluded.contains(f) {
-                                    t += "  ✗ excluded";
+                                    t += tr("  ✗ excluded");
                                 }
                                 if ui.selectable_label(self.shown.as_deref() == Some(f.as_str()), t).clicked() {
                                     show = Some(f.clone());
@@ -1182,9 +1163,9 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             self.files[1] = b.iter().cloned().collect();
             if let Some(b) = &b {
                 self.cfg.excluded.retain(|p| p != b);
-                self.status = format!("Base frame: {}.", basename(b));
+                self.status = crate::trf!("Base frame: {}.", basename(b));
             } else {
-                self.status = "Base frame: automatic (the middle light frame).".into();
+                self.status = tr("Base frame: automatic (the middle light frame).").into();
             }
             self.group = 1;
             self.setting = None;
@@ -1195,15 +1176,15 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             self.show_preview(Some(f));
         }
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Add…").clicked() && self.dialog.is_none() {
+            if ui.button(tr("Add…")).clicked() && self.dialog.is_none() {
                 if self.group == 7 {
                     let d = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
-                    self.dialog = Some((dialogs::pick_save("Output", &d), "output"));
+                    self.dialog = Some((dialogs::pick_save(tr("Output"), &d), "output"));
                 } else {
                     self.dialog = Some((dialogs::pick_images(), "add"));
                 }
             }
-            if ui.button("Remove").clicked() {
+            if ui.button(tr("Remove")).clicked() {
                 let g = self.group;
                 if g == 7 {
                     self.cfg.output.clear();
@@ -1214,10 +1195,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     }
                     self.show_preview(self.base());
                 } else {
-                    self.status = "Choose a file in the group's dropdown first (Clear removes the whole group).".into();
+                    self.status = tr("Choose a file in the group's dropdown first (Clear removes the whole group).").into();
                 }
             }
-            if ui.button("Clear").clicked() {
+            if ui.button(tr("Clear")).clicked() {
                 let g = self.group;
                 if g == 7 {
                     self.cfg.output.clear();
@@ -1229,18 +1210,18 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 }
                 self.show_preview(self.base());
             }
-            if ui.button("Use as base").clicked() {
+            if ui.button(tr("Use as base")).clicked() {
                 match self.shown.clone().filter(|s| self.files[0].contains(s)) {
                     Some(s) => {
                         self.files[1] = vec![s.clone()];
                         self.cfg.excluded.retain(|p| *p != s);
                         self.status = format!("{}: {}.", group_name(1, self.simple), basename(&s));
                     }
-                    None => self.status = format!("Choose one of the {} in its dropdown first.", group_name(0, self.simple).to_lowercase()),
+                    None => self.status = crate::trf!("Choose one of the {} in its dropdown first.", group_name(0, self.simple).to_lowercase()),
                 }
             }
         });
-        let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text("…or type a file/folder path + Enter").desired_width(ui.available_width().min(420.0)));
+        let r = ui.add(egui::TextEdit::singleline(&mut self.pathbox).hint_text(tr("…or type a file/folder path + Enter")).desired_width(ui.available_width().min(420.0)));
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.pathbox.trim().is_empty() {
             let t = self.pathbox.trim().to_string();
             self.pathbox.clear();
@@ -1254,49 +1235,44 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         // The settings list: click an entry to see its options below.
         ui.separator();
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Preset").strong());
-            egui::ComboBox::from_id_salt("stackpreset").selected_text("choose…").width(220.0).show_ui(ui, |ui| {
+            ui.label(egui::RichText::new(tr("Preset")).strong());
+            egui::ComboBox::from_id_salt("stackpreset").selected_text(tr("choose…")).width(220.0).show_ui(ui, |ui| {
                 for name in STACK_PRESETS {
-                    if ui.selectable_label(false, name).clicked() {
+                    if ui.selectable_label(false, tr(name)).clicked() {
                         let note = self.apply_preset(name);
-                        self.status = format!("Preset “{name}”: {note}");
+                        self.status = crate::trf!("Preset “{}”: {}", tr(name), note);
                     }
                 }
             });
         });
         let c = &self.cfg;
-        let onoff = |b: bool| if b { "On" } else { "Off" };
+        let onoff = |b: bool| if b { tr("On") } else { tr("Off") };
         let mut rows: Vec<(usize, String, bool)> = vec![
-            (1, format!("Composition: {}", c.composition.name()), true),
+            (1, crate::trf!("Composition: {}", tr(c.composition.name())), true),
             (
                 1,
                 format!(
                     "     {}",
                     if c.composition == Composition::StarTrails {
-                        format!("{}{}", if c.trails.0 == Fade::Off { "Lighten" } else { c.trails.0.name() }, if c.trails.1 { ", gaps filled" } else { "" })
+                        format!("{}{}", if c.trails.0 == Fade::Off { tr("Lighten") } else { tr(c.trails.0.name()) }, if c.trails.1 { tr(", gaps filled") } else { "" })
                     } else {
-                        format!("{}{}", c.align_mode.name(), if c.selective { ", selective" } else { "" })
+                        format!("{}{}", tr(c.align_mode.name()), if c.selective { tr(", selective") } else { "" })
                     }
                 ),
                 true,
             ),
-            (2, format!("Sky region: {}", c.sky.mode.name()), c.sky.mode != SkyMode::None),
-            (3, format!("Sigma clipping: {} / {} σ, {}×", c.sigma.low, c.sigma.high, c.sigma.iters), true),
-            (4, format!("Frame rejection: {}", if c.reject.auto { "Auto" } else { "Off" }), c.reject.auto),
+            (2, crate::trf!("Sky region: {}", tr(c.sky.mode.name())), c.sky.mode != SkyMode::None),
+            (3, crate::trf!("Sigma clipping: {} / {} σ, {}×", c.sigma.low, c.sigma.high, c.sigma.iters), true),
+            (4, crate::trf!("Frame rejection: {}", if c.reject.auto { tr("Auto") } else { tr("Off") }), c.reject.auto),
             (
                 5,
-                format!(
-                    "RAW conversion: {} WB, {}{}",
-                    WB.iter().find(|w| w.0 == c.raw.wb).map(|w| w.1).unwrap_or("Camera"),
-                    DEM.iter().find(|d| d.0 == c.raw.quality).map(|d| d.1).unwrap_or("AHD"),
-                    if c.raw.half { ", half size" } else { "" }
-                ),
+                crate::trf!("RAW conversion: {} WB, {}{}", tr(WB.iter().find(|w| w.0 == c.raw.wb).map(|w| w.1).unwrap_or("Camera")), DEM.iter().find(|d| d.0 == c.raw.quality).map(|d| d.1).unwrap_or("AHD"), if c.raw.half { tr(", half size") } else { "" }),
                 true,
             ),
-            (6, format!("Reduce dynamic noises: {}", onoff(c.dynamic_noise)), c.dynamic_noise),
-            (7, format!("Reduce distor. effects: {}", c.distortion.name()), c.distortion != Distortion::Off),
-            (8, format!("Merge 4 pixels: {}", onoff(c.merge4)), c.merge4),
-            (9, format!("Time-lapse: {}", if c.timelapse.0 { format!("every {} frames", c.timelapse.1) } else { "Off".into() }), c.timelapse.0),
+            (6, crate::trf!("Reduce dynamic noises: {}", onoff(c.dynamic_noise)), c.dynamic_noise),
+            (7, crate::trf!("Reduce distor. effects: {}", tr(c.distortion.name())), c.distortion != Distortion::Off),
+            (8, crate::trf!("Merge 4 pixels: {}", onoff(c.merge4)), c.merge4),
+            (9, crate::trf!("Time-lapse: {}", if c.timelapse.0 { crate::trf!("every {} frames", c.timelapse.1) } else { tr("Off").into() }), c.timelapse.0),
         ];
         if self.simple {
             rows.retain(|r| r.0 <= 2); // simple mode: the essentials
@@ -1317,9 +1293,9 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             first = *k;
         }
         ui.separator();
-        const TITLES: [&str; 10] = ["", "Composition", "Sky region", "Sigma clipping", "Frame rejection", "RAW conversion", "Reduce dynamic noises", "Reduce distor. effects", "Merge 4 pixels", "Time-lapse"];
+        const TITLES: [&str; 10] = ["", "Composition", "Sky region", "Sigma clipping", "Frame rejection", "RAW conversion", "Reduce dynamic noises", "Reduce distor. effects", "Merge 4 pixels", "Time-lapse"]; // tr
         let title = match self.setting {
-            Some(k) => TITLES[k],
+            Some(k) => tr(TITLES[k]),
             None => group_name(self.group, self.simple),
         };
         ui.label(egui::RichText::new(title).strong().size(16.0));
@@ -1331,20 +1307,20 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             None => {
                 match self.group {
                     0 => {
-                        ui.checkbox(&mut self.cfg.unify_exposure, "Unify exposure");
+                        ui.checkbox(&mut self.cfg.unify_exposure, tr("Unify exposure"));
                     }
                     4 => {
-                        ui.checkbox(&mut self.cfg.homogenize_vignetting, "Homogenize vignetting");
+                        ui.checkbox(&mut self.cfg.homogenize_vignetting, tr("Homogenize vignetting"));
                     }
                     6 => {
-                        ui.checkbox(&mut self.cfg.foreground.match_brightness, "Match brightness to the stacked ground");
-                        ui.add(egui::Slider::new(&mut self.cfg.foreground.ev, -3.0..=3.0).step_by(0.1).text("Exposure (EV)"));
+                        ui.checkbox(&mut self.cfg.foreground.match_brightness, tr("Match brightness to the stacked ground"));
+                        ui.add(egui::Slider::new(&mut self.cfg.foreground.ev, -3.0..=3.0).step_by(0.1).text(tr("Exposure (EV)")));
                     }
                     7 => {
-                        ui.label("Saved as (edit the full path here, or use the Save as row on the left):");
-                        ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text("output file (.tif / .png / .jpg / .fits / .xisf)").desired_width(ui.available_width().min(420.0)));
+                        ui.label(tr("Saved as (edit the full path here, or use the Save as row on the left):"));
+                        ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text(tr("output file (.tif / .png / .jpg / .fits / .xisf)")).desired_width(ui.available_width().min(420.0)));
                         if !self.cfg.output.is_empty() && std::path::Path::new(&self.cfg.output).exists() {
-                            ui.colored_label(Color32::from_rgb(200, 120, 0), "This file exists and will be replaced.");
+                            ui.colored_label(Color32::from_rgb(200, 120, 0), tr("This file exists and will be replaced."));
                         }
                     }
                     _ => {}
@@ -1354,43 +1330,43 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             Some(1) => {
                 let c = &mut self.cfg;
                 egui::Grid::new("compo").num_columns(2).show(ui, |ui| {
-                    combo(ui, "Composition", &mut c.composition, Composition::ALL, |v| v.name());
-                    combo(ui, "Stacking", &mut c.align_mode, AlignMode::ALL, |v| v.name());
+                    combo(ui, tr("Composition"), &mut c.composition, Composition::ALL, |v| v.name());
+                    combo(ui, tr("Stacking"), &mut c.align_mode, AlignMode::ALL, |v| v.name());
                     if !self.simple {
-                        combo(ui, "Model", &mut c.model, &[Model::Homography, Model::Similarity], |v| v.name());
-                        combo(ui, "Interpolation", &mut c.interpolation, Interpolation::ALL, |v| v.name());
+                        combo(ui, tr("Model"), &mut c.model, &[Model::Homography, Model::Similarity], |v| v.name());
+                        combo(ui, tr("Interpolation"), &mut c.interpolation, Interpolation::ALL, |v| v.name());
                         ui.label("");
-                        ui.checkbox(&mut c.selective, "Selective (sigma clipping in the sky)");
+                        ui.checkbox(&mut c.selective, tr("Selective (sigma clipping in the sky)"));
                         ui.end_row();
                     }
-                    combo(ui, "Trail fade", &mut c.trails.0, Fade::ALL, |v| v.name());
+                    combo(ui, tr("Trail fade"), &mut c.trails.0, Fade::ALL, |v| v.name());
                     ui.label("");
-                    ui.checkbox(&mut c.trails.1, "Fill gaps between frames (star trails)");
+                    ui.checkbox(&mut c.trails.1, tr("Fill gaps between frames (star trails)"));
                     ui.end_row();
                 });
                 note(ui, "Composition");
             }
             Some(2) => {
                 egui::Grid::new("sky").num_columns(2).show(ui, |ui| {
-                    combo(ui, "Sky region", &mut self.cfg.sky.mode, SkyMode::ALL, |v| v.name());
+                    combo(ui, tr("Sky region"), &mut self.cfg.sky.mode, SkyMode::ALL, |v| v.name());
                     let mut g = self.cfg.sky.gradient * 100.0;
-                    if slider(ui, "Gradient (% height)", &mut g, 1.0..=50.0, 1.0) {
+                    if slider(ui, tr("Gradient (% height)"), &mut g, 1.0..=50.0, 1.0) {
                         self.cfg.sky.gradient = g / 100.0;
                     }
-                    slider(ui, "Brush size (% width)", &mut self.brush, 0.5..=30.0, 0.5);
+                    slider(ui, tr("Brush size (% width)"), &mut self.brush, 0.5..=30.0, 0.5);
                     let mut f = self.cfg.sky.feather * 100.0;
-                    if slider(ui, "Mask feather (% width)", &mut f, 0.0..=10.0, 0.5) {
+                    if slider(ui, tr("Mask feather (% width)"), &mut f, 0.0..=10.0, 0.5) {
                         self.cfg.sky.feather = f / 100.0;
                     }
                 });
-                if ui.checkbox(&mut self.aux, "Auxiliary highlight").changed() {
+                if ui.checkbox(&mut self.aux, tr("Auxiliary highlight")).changed() {
                     self.disp_tex = None;
                 }
-                if ui.checkbox(&mut self.show_stars, "Show detected stars").changed() && self.show_stars && self.result.is_none() {
-                    self.status = "Stars are shown after a run (Quick preview or Start).".into();
+                if ui.checkbox(&mut self.show_stars, tr("Show detected stars")).changed() && self.show_stars && self.result.is_none() {
+                    self.status = tr("Stars are shown after a run (Quick preview or Start).").into();
                 }
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("◎ Detect sky").clicked() {
+                    if ui.button(tr("◎ Detect sky")).clicked() {
                         match (&self.disp, &self.shown) {
                             (Some(img), Some(sh)) if !self.loading => {
                                 self.loading = true;
@@ -1398,13 +1374,13 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                                 crate::sys::background(move || {
                                     let (mask, _) = detect_sky(&img, MASK_COLS, Some(rows), 0.01);
                                     let pct = 100 * mask.count() / mask.len().max(1);
-                                    let _ = tx.send(Msg::Sky(mask, format!("Sky detected in {}: {pct} % of the frame (hatched = foreground). Approximate: correct it with the brush – left button paints sky, right erases, wheel = brush size.", basename(&sh))));
+                                    let _ = tx.send(Msg::Sky(mask, crate::trf!("Sky detected in {}: {} % of the frame (hatched = foreground). Approximate: correct it with the brush – left button paints sky, right erases, wheel = brush size.", basename(&sh), pct)));
                                 });
                             }
-                            _ => self.status = "Add light frames first: the sky is detected in the shown frame.".into(),
+                            _ => self.status = tr("Add light frames first: the sky is detected in the shown frame.").into(),
                         }
                     }
-                    if ui.button("Reset sky region").clicked() {
+                    if ui.button(tr("Reset sky region")).clicked() {
                         self.cfg.sky.line = None;
                         self.cfg.sky.mask = Bits::new(0, 0);
                     }
@@ -1414,61 +1390,61 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             Some(3) => {
                 let c = &mut self.cfg;
                 egui::Grid::new("sig").num_columns(2).show(ui, |ui| {
-                    slider(ui, "Sigma low", &mut c.sigma.low, 1.0..=5.0, 0.1);
-                    slider(ui, "Sigma high", &mut c.sigma.high, 1.0..=5.0, 0.1);
-                    slider(ui, "Iterations", &mut c.sigma.iters, 1..=10, 1.0);
+                    slider(ui, tr("Sigma low"), &mut c.sigma.low, 1.0..=5.0, 0.1);
+                    slider(ui, tr("Sigma high"), &mut c.sigma.high, 1.0..=5.0, 0.1);
+                    slider(ui, tr("Iterations"), &mut c.sigma.iters, 1..=10, 1.0);
                 });
                 note(ui, "Sigma clipping");
             }
             Some(4) => {
                 let c = &mut self.cfg;
-                ui.checkbox(&mut c.reject.auto, "Reject bad frames automatically");
+                ui.checkbox(&mut c.reject.auto, tr("Reject bad frames automatically"));
                 egui::Grid::new("rej").num_columns(2).show(ui, |ui| {
                     let (mut l, mut st) = (c.reject.min_light * 100.0, c.reject.min_stars * 100.0);
-                    if slider(ui, "Min. light (%)", &mut l, 10.0..=95.0, 5.0) {
+                    if slider(ui, tr("Min. light (%)"), &mut l, 10.0..=95.0, 5.0) {
                         c.reject.min_light = l / 100.0;
                     }
-                    if slider(ui, "Min. stars (%)", &mut st, 10.0..=95.0, 5.0) {
+                    if slider(ui, tr("Min. stars (%)"), &mut st, 10.0..=95.0, 5.0) {
                         c.reject.min_stars = st / 100.0;
                     }
-                    slider(ui, "Max. FWHM (×)", &mut c.reject.max_fwhm, 1.1..=3.0, 0.05);
-                    slider(ui, "Max. elongation (×)", &mut c.reject.max_elong, 1.05..=2.0, 0.05);
+                    slider(ui, tr("Max. FWHM (×)"), &mut c.reject.max_fwhm, 1.1..=3.0, 0.05);
+                    slider(ui, tr("Max. elongation (×)"), &mut c.reject.max_elong, 1.05..=2.0, 0.05);
                 });
                 note(ui, "Frame rejection");
             }
             Some(5) => {
                 let c = &mut self.cfg;
                 egui::Grid::new("raw").num_columns(2).show(ui, |ui| {
-                    combo(ui, "White balance", &mut c.raw.wb, &WB.map(|w| w.0), |w| WB.iter().find(|x| x.0 == w).map(|x| x.1).unwrap_or("?"));
+                    combo(ui, tr("White balance"), &mut c.raw.wb, &WB.map(|w| w.0), |w| WB.iter().find(|x| x.0 == w).map(|x| x.1).unwrap_or("?"));
                     let mut decs = vec![io::RawDecoder::Auto];
                     decs.extend(io::available_raw_decoders());
-                    combo(ui, "Decoder", &mut c.raw.decoder, &decs, |d| d.name());
-                    combo(ui, "Demosaicing", &mut c.raw.quality, &DEM.map(|d| d.0), |q| DEM.iter().find(|d| d.0 == q).map(|d| d.1).unwrap_or("?"));
+                    combo(ui, tr("Decoder"), &mut c.raw.decoder, &decs, |d| d.name());
+                    combo(ui, tr("Demosaicing"), &mut c.raw.quality, &DEM.map(|d| d.0), |q| DEM.iter().find(|d| d.0 == q).map(|d| d.1).unwrap_or("?"));
                     ui.label("");
-                    ui.checkbox(&mut c.raw.half, "Half size");
+                    ui.checkbox(&mut c.raw.half, tr("Half size"));
                     ui.end_row();
                 });
                 note(ui, "RAW conversion");
             }
             Some(6) => {
-                ui.checkbox(&mut self.cfg.dynamic_noise, "Reduce dynamic noises");
+                ui.checkbox(&mut self.cfg.dynamic_noise, tr("Reduce dynamic noises"));
                 note(ui, "Reduce dynamic noises");
             }
             Some(7) => {
                 egui::Grid::new("dist").num_columns(2).show(ui, |ui| {
-                    combo(ui, "Correction", &mut self.cfg.distortion, Distortion::ALL, |v| v.name());
+                    combo(ui, tr("Correction"), &mut self.cfg.distortion, Distortion::ALL, |v| v.name());
                 });
                 note(ui, "Reduce distor. effects");
             }
             Some(8) => {
-                ui.checkbox(&mut self.cfg.merge4, "Merge 4 pixels");
+                ui.checkbox(&mut self.cfg.merge4, tr("Merge 4 pixels"));
                 note(ui, "Merge 4 pixels");
             }
             Some(_) => {
                 let c = &mut self.cfg;
-                ui.checkbox(&mut c.timelapse.0, "Time-lapse");
-                ui.add(egui::Slider::new(&mut c.timelapse.1, 2..=200).text("Frames per stack"));
-                ui.label(format!("{nstars} light frames → {} frames", (nstars + 1).saturating_sub(c.timelapse.1)));
+                ui.checkbox(&mut c.timelapse.0, tr("Time-lapse"));
+                ui.add(egui::Slider::new(&mut c.timelapse.1, 2..=200).text(tr("Frames per stack")));
+                ui.label(crate::trf!("{} light frames → {} frames", nstars, (nstars + 1).saturating_sub(c.timelapse.1)));
                 note(ui, "Time-lapse");
             }
         }
@@ -1477,10 +1453,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(15.0)).min_size(egui::vec2(180.0, 36.0));
             // While a run is going, its own button cancels it; the other one waits.
             let (rp, rs) = (self.running && self.running_preview, self.running && !self.running_preview);
-            if ui.add_enabled(!rs, big(if rp { "Cancel" } else { "◐ Quick preview" })).on_hover_text(if rp { "Esc" } else { "Ctrl+P" }).clicked() {
+            if ui.add_enabled(!rs, big(if rp { tr("Cancel") } else { tr("◐ Quick preview") })).on_hover_text(if rp { tr("Esc") } else { tr("Ctrl+P") }).clicked() {
                 self.run(true);
             }
-            if ui.add_enabled(!rp, big(if rs { "Cancel" } else { "▶ Start" })).on_hover_text(if rs { "Esc" } else { "Ctrl+Enter" }).clicked() {
+            if ui.add_enabled(!rp, big(if rs { tr("Cancel") } else { tr("▶ Start") })).on_hover_text(if rs { tr("Esc") } else { tr("Ctrl+Enter") }).clicked() {
                 self.run(false);
             }
         });
@@ -1493,8 +1469,8 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
             ui.add_space(6.0);
         }
-        ui.heading("Post-processing");
-        ui.weak("Applied to the result at once. Start saves with these settings; Save result… saves again.");
+        ui.heading(tr("Post-processing"));
+        ui.weak(tr("Applied to the result at once. Start saves with these settings; Save result… saves again."));
         let simple = self.simple;
         let mut changed: Option<&'static str> = None;
         let c = &mut self.cfg;
@@ -1504,19 +1480,19 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
         };
         if !simple {
-            ch(ui.checkbox(&mut c.bg_extraction.0, "Background extraction"), "Background extraction");
+            ch(ui.checkbox(&mut c.bg_extraction.0, tr("Background extraction")), "Background extraction");
             if c.bg_extraction.0 {
-                ch(ui.add(egui::Slider::new(&mut c.bg_extraction.1, 1..=4).text("Degree")), "Background extraction");
+                ch(ui.add(egui::Slider::new(&mut c.bg_extraction.1, 1..=4).text(tr("Degree"))), "Background extraction");
             }
-            ch(ui.checkbox(&mut c.color_calibration, "Color calibration"), "Color calibration");
-            ch(ui.checkbox(&mut c.color_noise.0, "Reduce colour noise"), "Reduce colour noise");
+            ch(ui.checkbox(&mut c.color_calibration, tr("Color calibration")), "Color calibration");
+            ch(ui.checkbox(&mut c.color_noise.0, tr("Reduce colour noise")), "Reduce colour noise");
             if c.color_noise.0 {
-                ch(ui.add(egui::Slider::new(&mut c.color_noise.1, 5.0..=100.0).step_by(5.0).text("Strength")), "Reduce colour noise");
+                ch(ui.add(egui::Slider::new(&mut c.color_noise.1, 5.0..=100.0).step_by(5.0).text(tr("Strength"))), "Reduce colour noise");
             }
         }
         let before = c.light_pollution.filter;
         egui::Grid::new("lp").num_columns(2).show(ui, |ui| {
-            combo(ui, "Light pollution", &mut c.light_pollution.filter, Pollution::ALL, |v| v.name());
+            combo(ui, tr("Light pollution"), &mut c.light_pollution.filter, Pollution::ALL, |v| v.name());
         });
         if before != c.light_pollution.filter {
             changed = Some("Reduce light pollution");
@@ -1527,31 +1503,31 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
         };
         if c.light_pollution.filter != Pollution::Off {
-            ch(ui.add(egui::Slider::new(&mut c.light_pollution.strength, 0.0..=100.0).step_by(1.0).text("Strength")), "Reduce light pollution");
+            ch(ui.add(egui::Slider::new(&mut c.light_pollution.strength, 0.0..=100.0).step_by(1.0).text(tr("Strength"))), "Reduce light pollution");
             if !simple {
                 if c.light_pollution.filter == Pollution::DeepSky {
-                    ch(ui.add(egui::Slider::new(&mut c.light_pollution.degree, 1..=4).text("Degree (deep sky)")), "Reduce light pollution");
+                    ch(ui.add(egui::Slider::new(&mut c.light_pollution.degree, 1..=4).text(tr("Degree (deep sky)"))), "Reduce light pollution");
                 } else {
-                    ch(ui.add(egui::Slider::new(&mut c.light_pollution.tiles, 6..=48).text("Tiles (uneven)")), "Reduce light pollution");
-                    ch(ui.checkbox(&mut c.light_pollution.iaa, "I.A.A. (also the foreground)"), "Reduce light pollution");
+                    ch(ui.add(egui::Slider::new(&mut c.light_pollution.tiles, 6..=48).text(tr("Tiles (uneven)"))), "Reduce light pollution");
+                    ch(ui.checkbox(&mut c.light_pollution.iaa, tr("I.A.A. (also the foreground)")), "Reduce light pollution");
                 }
-                ch(ui.checkbox(&mut self.show_bg, "Show removed background"), "Reduce light pollution");
+                ch(ui.checkbox(&mut self.show_bg, tr("Show removed background")), "Reduce light pollution");
             }
         }
         if !simple {
-            ch(ui.checkbox(&mut c.enhance_stars.0, "Enhance star light"), "Enhance star light");
+            ch(ui.checkbox(&mut c.enhance_stars.0, tr("Enhance star light")), "Enhance star light");
             if c.enhance_stars.0 {
-                ch(ui.add(egui::Slider::new(&mut c.enhance_stars.1, 0.0..=100.0).step_by(1.0).text("Strength")), "Enhance star light");
+                ch(ui.add(egui::Slider::new(&mut c.enhance_stars.1, 0.0..=100.0).step_by(1.0).text(tr("Strength"))), "Enhance star light");
             }
         }
-        ch(ui.checkbox(&mut c.auto_brightness, "Auto brightness"), "Auto brightness");
+        ch(ui.checkbox(&mut c.auto_brightness, tr("Auto brightness")), "Auto brightness");
         if !simple {
-            ch(ui.checkbox(&mut c.hdr, "High dynamic range"), "High dynamic range");
+            ch(ui.checkbox(&mut c.hdr, tr("High dynamic range")), "High dynamic range");
         }
         let (t0, c0) = (c.tone, c.color_space);
         egui::Grid::new("tone").num_columns(2).show(ui, |ui| {
-            combo(ui, "Tone", &mut c.tone, Tone::ALL, |v| v.name());
-            combo(ui, "Color space", &mut c.color_space, ColorSpace::ALL, |v| v.name());
+            combo(ui, tr("Tone"), &mut c.tone, Tone::ALL, |v| v.name());
+            combo(ui, tr("Color space"), &mut c.color_space, ColorSpace::ALL, |v| v.name());
         });
         if t0 != c.tone {
             changed = Some("Tone");
@@ -1563,11 +1539,11 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             if let Some(p) = &self.post {
                 super::stitch::histogram(ui, &p.linear, Some((c.stretch.black, c.stretch.mid, c.stretch.white)));
             }
-            ui.checkbox(&mut c.stretch.auto, "Automatic stretch");
+            ui.checkbox(&mut c.stretch.auto, tr("Automatic stretch"));
             let mut moved = false;
-            moved |= ui.add(egui::Slider::new(&mut c.stretch.black, 0.0..=0.5).step_by(0.0005).text("Black point")).changed();
-            moved |= ui.add(egui::Slider::new(&mut c.stretch.mid, 0.0005..=0.9995).step_by(0.0005).text("Midtones")).changed();
-            moved |= ui.add(egui::Slider::new(&mut c.stretch.white, 0.5..=1.0).step_by(0.0005).text("White point")).changed();
+            moved |= ui.add(egui::Slider::new(&mut c.stretch.black, 0.0..=0.5).step_by(0.0005).text(tr("Black point"))).changed();
+            moved |= ui.add(egui::Slider::new(&mut c.stretch.mid, 0.0005..=0.9995).step_by(0.0005).text(tr("Midtones"))).changed();
+            moved |= ui.add(egui::Slider::new(&mut c.stretch.white, 0.5..=1.0).step_by(0.0005).text(tr("White point"))).changed();
             if moved {
                 c.stretch.auto = false; // moving a stretch slider: by hand from now on
                 changed = Some("Tone");
@@ -1577,7 +1553,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             self.post_note = super::notes::note(n);
         }
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Linear (for processing)").clicked() {
+            if ui.button(tr("Linear (for processing)")).clicked() {
                 (self.cfg.bg_extraction.0, self.cfg.color_calibration, self.cfg.color_noise.0, self.cfg.enhance_stars.0, self.cfg.auto_brightness, self.cfg.hdr) = (false, false, false, false, false, false);
                 self.cfg.light_pollution.filter = Pollution::Off;
                 self.cfg.color_space = ColorSpace::Srgb;
@@ -1586,33 +1562,33 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     self.cfg.output = std::path::Path::new(&self.cfg.output).with_extension("fits").to_string_lossy().to_string();
                 }
                 self.post_note = super::notes::note("Linear");
-                self.status = format!("Linear output: no post-processing, no brightness change, no tone curve{}", if self.cfg.output.is_empty() { ".".to_string() } else { format!("; output {} (32-bit).", basename(&self.cfg.output)) });
+                self.status = crate::trf!("Linear output: no post-processing, no brightness change, no tone curve{}", if self.cfg.output.is_empty() { ".".to_string() } else { crate::trf!("; output {} (32-bit).", basename(&self.cfg.output)) });
             }
-            if ui.button("⬇ Save result…").clicked() && self.dialog.is_none() {
+            if ui.button(tr("⬇ Save result…")).clicked() && self.dialog.is_none() {
                 match &self.result {
-                    None => self.status = "Nothing to save yet: press Start.".into(),
-                    Some(r) if r.preview => self.status = "This is a quick preview (small); press Start for the full-size result.".into(),
+                    None => self.status = tr("Nothing to save yet: press Start.").into(),
+                    Some(r) if r.preview => self.status = tr("This is a quick preview (small); press Start for the full-size result.").into(),
                     _ => {
                         let d = if self.cfg.output.is_empty() { "stacked.tif".into() } else { self.cfg.output.clone() };
-                        self.dialog = Some((dialogs::pick_save("Save result", &d), "result"));
+                        self.dialog = Some((dialogs::pick_save(tr("Save result"), &d), "result"));
                     }
                 }
             }
         });
-        if ui.button("⇄ Use in the Stitcher (panorama panel)").clicked() {
+        if ui.button(tr("⇄ Use in the Stitcher (panorama panel)")).clicked() {
             match &self.result {
                 Some(r) if !r.preview && r.saved.len() == 1 => {
                     self.to_stitcher.push(r.saved[0].clone());
-                    self.status = format!("{} added to the Stitcher. Stack the next panel here (same settings, a new output name), add it too, then stitch them there.", basename(&r.saved[0]));
+                    self.status = crate::trf!("{} added to the Stitcher. Stack the next panel here (same settings, a new output name), add it too, then stitch them there.", basename(&r.saved[0]));
                 }
-                Some(r) if r.saved.len() > 1 => self.status = "This run saved several files (time-lapse / align only); the Stitcher takes one stacked panel.".into(),
-                _ => self.status = "Press Start first: the saved result goes to the Stitcher.".into(),
+                Some(r) if r.saved.len() > 1 => self.status = tr("This run saved several files (time-lapse / align only); the Stitcher takes one stacked panel.").into(),
+                _ => self.status = tr("Press Start first: the saved result goes to the Stitcher.").into(),
             }
         }
-        if ui.button("✎ Use in Post-processing").on_hover_text("Open the saved result in the Post-processing tab: crop, stretch, curves, colour, noise").clicked() {
+        if ui.button(tr("✎ Use in Post-processing")).on_hover_text(tr("Open the saved result in the Post-processing tab: crop, stretch, curves, colour, noise")).clicked() {
             match &self.result {
                 Some(r) if !r.preview && !r.saved.is_empty() => self.to_finish.push(r.saved[0].clone()),
-                _ => self.status = "Press Start first: the saved result goes to Post-processing.".into(),
+                _ => self.status = tr("Press Start first: the saved result goes to Post-processing.").into(),
             }
         }
         ui.label(egui::RichText::new(self.post_note).weak().size(12.5));
@@ -1620,20 +1596,20 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal_wrapped(|ui| {
-            for (k, l) in [(ViewKind::Base, group_name(1, self.simple)), (ViewKind::Result, "Result"), (ViewKind::Report, "Frame report")] {
+            for (k, l) in [(ViewKind::Base, group_name(1, self.simple)), (ViewKind::Result, tr("Result")), (ViewKind::Report, tr("Frame report"))] {
                 if ui.selectable_label(self.view == k, l).clicked() {
                     self.view = k;
                     self.vstate.fit = true;
                 }
             }
-            if ui.button("Fit").on_hover_text("F").clicked() {
+            if ui.button(tr("Fit")).on_hover_text("F").clicked() {
                 self.vstate.fit = true;
             }
             ui.add_space(30.0);
-            if ui.button("⇪ Open project…").on_hover_text("Ctrl+O").clicked() {
+            if ui.button(tr("⇪ Open project…")).on_hover_text(tr("Ctrl+O")).clicked() {
                 self.ask_open_project();
             }
-            if ui.button("⬇ Save project…").on_hover_text("Ctrl+S saves to the open project at once").clicked() {
+            if ui.button(tr("⬇ Save project…")).on_hover_text(tr("Ctrl+S saves to the open project at once")).clicked() {
                 self.ask_save_project(false);
             }
         });
@@ -1655,7 +1631,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn show_base(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(disp) = self.disp.clone() else {
-            ui.centered_and_justified(|ui| ui.weak("Base frame preview: add light frames."));
+            ui.centered_and_justified(|ui| ui.weak(tr("Base frame preview: add light frames.")));
             return;
         };
         ui.label(format!("{}{}", if self.shown == self.base() { "Base frame: " } else { "Preview: " }, self.shown.as_deref().map(basename).unwrap_or_default()));
@@ -1744,7 +1720,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                         }
                     }
                 }
-                SkyMode::None if s.resp.clicked() => self.status = "Choose a sky region mode (Sky region) to draw on the preview.".into(),
+                SkyMode::None if s.resp.clicked() => self.status = tr("Choose a sky region mode (Sky region) to draw on the preview.").into(),
                 _ => {}
             }
         }
@@ -1766,7 +1742,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn show_result(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(r) = &self.result else {
-            ui.centered_and_justified(|ui| ui.weak("Result: press Quick preview or Start."));
+            ui.centered_and_justified(|ui| ui.weak(tr("Result: press Quick preview or Start.")));
             return;
         };
         let showing_bg = self.show_bg && self.post.as_ref().is_some_and(|p| p.background.is_some());
@@ -1787,10 +1763,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn show_report(&mut self, ui: &mut egui::Ui) {
         let Some(r) = self.result.clone() else {
-            ui.weak("No report yet: press Quick preview or Start.");
+            ui.weak(tr("No report yet: press Quick preview or Start."));
             return;
         };
-        ui.label("Frame report – click a frame (chart or table) to exclude / include it in the next run");
+        ui.label(tr("Frame report – click a frame (chart or table) to exclude / include it in the next run"));
         // Chart: every measure ÷ its median over the frames used; left-out frames shaded.
         // Frames left out of a quick preview were not measured: they are only counted.
         let shown: Vec<FrameInfo> = r.report.iter().filter(|f| f.status != Status::Skipped).cloned().collect();
@@ -1819,12 +1795,12 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         }
         p.line_segment([Pos2::new(rect.left(), yat(1.0)), Pos2::new(rect.right(), yat(1.0))], Stroke::new(1.0, Color32::GRAY));
         let series: [(&str, fn(&FrameInfo) -> f64, Color32); 6] = [
-            ("stars", |f| f.stars as f64, Color32::from_rgb(30, 144, 255)),
+            (tr("stars"), |f| f.stars as f64, Color32::from_rgb(30, 144, 255)),
             ("FWHM", |f| f.fwhm, Color32::from_rgb(255, 165, 0)),
-            ("elongation", |f| f.elong, Color32::from_rgb(147, 112, 219)),
-            ("light", |f| f.light, Color32::GOLD),
-            ("sky level", |f| f.background, Color32::GRAY),
-            ("align error", |f| if f.status == Status::Base { f64::NAN } else { f.err }, Color32::from_rgb(255, 99, 71)),
+            (tr("elongation"), |f| f.elong, Color32::from_rgb(147, 112, 219)),
+            (tr("light"), |f| f.light, Color32::GOLD),
+            (tr("sky level"), |f| f.background, Color32::GRAY),
+            (tr("align error"), |f| if f.status == Status::Base { f64::NAN } else { f.err }, Color32::from_rgb(255, 99, 71)),
         ];
         let mut lx = rect.left() + 6.0;
         for (label, get, col) in series {
@@ -1867,9 +1843,9 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 let mut t = lines[k + 1].to_string();
                 let excl = self.cfg.excluded.contains(&fi.path);
                 if excl && fi.status != Status::Excluded {
-                    t += "  → excluded next run";
+                    t += tr("  → excluded next run");
                 } else if !excl && fi.status == Status::Excluded {
-                    t += "  → included next run";
+                    t += tr("  → included next run");
                 }
                 if ui.add(egui::Label::new(egui::RichText::new(t).monospace().color(col)).sense(egui::Sense::click())).clicked() {
                     let path = fi.path.clone();
@@ -1877,10 +1853,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 }
             }
             if skipped > 0 {
-                ui.weak(format!("{skipped} more light frames were not in the quick preview (it uses up to {PREVIEW_FRAMES})."));
+                ui.weak(crate::trf!("{} more light frames were not in the quick preview (it uses up to {}).", skipped, PREVIEW_FRAMES));
             }
             ui.add_space(8.0);
-            ui.label("Process log (time per step):");
+            ui.label(tr("Process log (time per step):"));
             for l in &r.log {
                 ui.monospace(l);
             }

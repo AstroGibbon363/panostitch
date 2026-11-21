@@ -19,14 +19,34 @@
 - **Camera move:** a slider-like move across the frame (the view a few percent smaller, gliding left, right, up or down, with a gentle start and stop) and a slow zoom; the preview outlines where the video starts and ends.
 - **Deflicker** (light or strong) of brightness and of each colour, region by region on a coarse grid, so large-scale changes in one part of the frame are evened out too; slow changes such as dusk stay.
 - RAW frames are read with the fast built-in decoder by default; **RAW via** can choose RawTherapee (applies its `.pp3` edits, about ten times slower) or another installed decoder. The tab says how many frames have `.pp3` files.
-- 16:9 crop, resolution up to 4K (never scaled up), frame rate, play forward then back, hold the last frame.
+- Video shapes: as the frames, 16:9, 3:2, 4:3, 1:1 square (all-sky fisheye) and 9:16 vertical (phones); resolution up to 4K (never scaled up), frame rate, play forward then back, hold the last frame.
 - **Output:** MP4 (H.264) and WebM (VP9) through ffmpeg when it is installed (or next to the program); animated GIF and numbered TIFF / PNG / JPEG images built in.
 - Runs in the background with a progress bar (time elapsed and left) and Cancel, then a report: frames, video size, frame rate and length, time taken, file and its size.
+- **Projects** (`.tlproj`): the frames, looks, mask and every video setting; frames are found again after the folder moved.
+- Up to eight frames at a time, fewer when memory is short (120 fisheye RAW frames: 56 s → 46 s).
 
 ### Speed and memory
 - **Big panoramas in less memory:** the full-size panorama is rendered in bands of rows when it does not fit in one piece and kept in the file's own format (6 bytes per pixel for 16-bit TIFF instead of about 50); photos read again at full size are kept in half precision. Smart blending renders each band with overlap, so the bands join seamlessly.
 - Star stacking loads the calibration frames in parallel (they were read one by one) and loads and measures as many light frames at once as the free memory allows (it was at most 4). 60 frames of 24 MP with darks, flats and bias: 118 s → 81 s on a 28-thread PC, the same result bit for bit.
 - Long jobs use at most 85 % of the CPU cores, and memory checks leave 15 % of the memory free, so the PC stays responsive.
+
+### Languages and help
+- The window in **English, Czech, German, Spanish, French or Polish**, switched in the top bar (the first start follows the system's language). Messages from the engine (progress steps, the process log) are still in English.
+- The manual in all six languages (Spanish, French and Polish are new).
+- **Help** (F1 or **? Help**): the manual inside the program, in the window's language, with contents, search, links between chapters and Back; F1 opens the chapter of the tab on show.
+
+### Comfort
+- **Drag and drop** images or folders onto the window (to the tab on show); dropped project files open in their tab.
+- **Recent projects** in the top bar, for all three kinds of project.
+- The tab, the stacking settings, the timelapse's video settings and the stitcher's RAW settings are remembered for the next session (not files, masks or looks). File dialogs start in the folder used last.
+- **Show in folder** after saving a panorama, a stack, a video or a post-processed image.
+- Progress bars no longer run off narrow panels: the message and times are written under the bar.
+
+### Stability
+- **RAW white balance in stacking:** *Average of image* and *Daylight* gave wrong colours with the built-in decoder: the grey-world average could miss the blue pixels entirely, and Daylight applied no white balance at all (the camera colour matrix was read from a field the RAW library no longer fills). Both now match LibRaw.
+- **Alignment:** a frame whose star match was degenerate (the same few stars matched over and over) could be accepted with a folded, mirrored transform and smeared across the whole stack, tinting it (e.g. red from car lights). Alignments that flip the frame or scale it beyond 0.6–1.6× are now refused, and the frame is reported as failed.
+- **Post-processing white balance on stacks:** with the automatic stretch measuring each colour on its own (the default for linear data), temperature, tint and a sampled grey were measured away and had almost no effect. They now act on top of the stretch.
+- Sorting star distances and fit errors cannot crash on an invalid number (NaN) any more.
 
 ### Reports and times
 - After stacking and after saving a panorama, a short report: photos / frames used, time taken, result size, file and its size, or what went wrong.

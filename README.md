@@ -16,7 +16,7 @@ panostitch [images or project files …]   # the window
 panostack [options] LIGHT_FRAMES_OR_FOLDER # star stacking, no window (see --help)
 ```
 
-The user manual is in `docs/` (English, Czech, German). The Timelapse tab
+The user manual is in `docs/` (English, Czech, German, Spanish, French, Polish) and inside the program (F1). The Timelapse tab
 makes MP4 and WebM videos with ffmpeg if it is installed (optional; animated
 GIF and numbered images work without it).
 
@@ -42,12 +42,12 @@ executable of about 15 MB that needs nothing else.
 | `src/stitcher/` | Features, matching, RANSAC, placement, bundle adjustment, projections, blending |
 | `src/stacker/` | Calibration, star detection and alignment, combining, post-processing, the run |
 | `src/finish.rs` | The Post-processing tab's engine: geometry, stretches (MTF, arcsinh, GHS), white balance, light, curves, colour, detail, sky and foreground looks |
-| `src/timelapse.rs` | Time-lapse videos: frame shape and size, deflicker, star trails, GIF and numbered images, MP4 / WebM through ffmpeg |
-| `src/gui/` | The window (egui): stitcher, stacking, post-processing and timelapse tabs, file dialogs |
+| `src/timelapse.rs` | Time-lapse videos: shapes and sizes, camera move, deflicker, projects, GIF and numbered images, MP4 / WebM through ffmpeg |
+| `src/gui/` | The window (egui): stitcher, stacking, post-processing and timelapse tabs, file dialogs, the built-in manual (`help.rs`), texts in six languages (`i18n.rs`, `i18n_*.rs`) |
 | `src/bin/` | `panostitch` (window) and `panostack` (command line) |
-| `tests/` | Tests: stacking on synthetic night scenes, stitching, post-processing, time-lapse videos, file formats, the window's tabs |
+| `tests/` | Tests: stacking on synthetic night scenes, stitching, post-processing, time-lapse videos, file formats, the window's tabs, translations and the manuals' links |
 | `examples/` | Using the library from your own Rust code |
-| `docs/` | User manual in English, Czech and German (Markdown) |
+| `docs/` | User manual in English, Czech, German, Spanish, French and Polish (Markdown) |
 
 Camera RAW files are decoded by a built-in pure-Rust decoder (`rawler`).
 LibRaw's `dcraw_emu`, RawTherapee, darktable or dcraw are used too if installed

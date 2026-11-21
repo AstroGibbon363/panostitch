@@ -223,3 +223,25 @@ fn fisheye_circle_found() {
     // An ordinary frame (no dark corners): no circle.
     assert!(fin::fisheye_circle(&Image::filled(120, 160, [0.1f32; 3])).is_none());
 }
+
+/// White balance must survive the automatic stretch that measures each colour
+/// on its own (the default for stacks): temperature, tint and a sampled grey
+/// change the colour of the result instead of being measured away.
+#[test]
+fn white_balance_survives_per_colour_auto_stretch() {
+    // A dark, linear "stack" with a colour cast.
+    let img = scene(80, 120).map(|c| c.map(|v| v * 0.08));
+    let mean = |x: &Img| -> [f64; 3] { [0, 1, 2].map(|k| x.px.iter().map(|p| p[k] as f64).sum::<f64>() / x.px.len() as f64) };
+    for unlinked in [true, false] {
+        let base = FinishParams { stretch: StretchMode::MtfAuto, unlinked, ..FinishParams::default() };
+        let r0 = mean(&fin::process(&img, &base, 1.0, &mut Measured::default()));
+        let warm = mean(&fin::process(&img, &FinishParams { temperature: 0.8, ..base.clone() }, 1.0, &mut Measured::default()));
+        let magenta = mean(&fin::process(&img, &FinishParams { tint: 0.8, ..base.clone() }, 1.0, &mut Measured::default()));
+        let sampled = mean(&fin::process(&img, &FinishParams { wb: [1.4, 1.0, 0.7], ..base.clone() }, 1.0, &mut Measured::default()));
+        let rb = |m: [f64; 3]| m[0] / m[2];
+        let g = |m: [f64; 3]| m[1] / (m[0] + m[2]) * 2.0;
+        assert!(rb(warm) > rb(r0) * 1.15, "unlinked={unlinked}: warmer temperature had no effect: R/B {:.3} → {:.3}", rb(r0), rb(warm));
+        assert!(g(magenta) < g(r0) * 0.9, "unlinked={unlinked}: magenta tint had no effect: G {:.3} → {:.3}", g(r0), g(magenta));
+        assert!(rb(sampled) > rb(r0) * 1.15, "unlinked={unlinked}: sampled white balance had no effect: R/B {:.3} → {:.3}", rb(r0), rb(sampled));
+    }
+}

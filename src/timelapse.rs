@@ -12,11 +12,12 @@ use crate::image::{crop_resize, luminance, resize, Gray, Img};
 use crate::io::{self, basename};
 use crate::stacker::{linear_to_srgb, srgb_to_linear};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Which way a slider move goes: the direction the view travels across the frame.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Pan {
     LeftToRight,
     RightToLeft,
@@ -36,7 +37,7 @@ impl Pan {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Format {
     Mp4,
     WebM,
@@ -68,7 +69,7 @@ impl Format {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Resolution {
     Frames,
     Uhd,
@@ -100,11 +101,52 @@ impl Resolution {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Deflicker {
     Off,
     Light,
     Strong,
+}
+
+/// The shape of the video: the frame cut to this aspect ratio.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Aspect {
+    /// The frames' own shape, uncut.
+    Frame,
+    /// 16:9, 3:2 and 4:3 follow the frames' orientation (portrait frames make a portrait video).
+    Wide,
+    Photo,
+    Classic,
+    /// 1:1, e.g. the whole circle of an all-sky fisheye.
+    Square,
+    /// 9:16 upright (phones), whatever the frames' orientation.
+    Vertical,
+}
+
+impl Aspect {
+    pub const ALL: [Aspect; 6] = [Aspect::Frame, Aspect::Wide, Aspect::Photo, Aspect::Classic, Aspect::Square, Aspect::Vertical];
+    pub fn name(self) -> &'static str {
+        match self {
+            Aspect::Frame => "As the frames",
+            Aspect::Wide => "16:9 widescreen",
+            Aspect::Photo => "3:2 (camera)",
+            Aspect::Classic => "4:3",
+            Aspect::Square => "1:1 square (all-sky)",
+            Aspect::Vertical => "9:16 vertical (phones)",
+        }
+    }
+    /// Width / height of the video for frames of `w × h`, or None to keep the frames' shape.
+    pub fn ratio(self, w: f64, h: f64) -> Option<f64> {
+        let turn = |r: f64| if w >= h { r } else { 1.0 / r };
+        match self {
+            Aspect::Frame => None,
+            Aspect::Wide => Some(turn(16.0 / 9.0)),
+            Aspect::Photo => Some(turn(1.5)),
+            Aspect::Classic => Some(turn(4.0 / 3.0)),
+            Aspect::Square => Some(1.0),
+            Aspect::Vertical => Some(9.0 / 16.0),
+        }
+    }
 }
 
 /// Everything a video is made from.
@@ -140,7 +182,7 @@ pub struct Settings {
     pub format: Format,
     pub fps: u32,
     pub resolution: Resolution,
-    pub crop_16_9: bool,
+    pub aspect: Aspect,
     /// 30…100: video quality, JPEG quality of numbered images.
     pub quality: u32,
     /// Play forward, then back.
@@ -169,7 +211,7 @@ impl Default for Settings {
             format: Format::Mp4,
             fps: 25,
             resolution: Resolution::FullHd,
-            crop_16_9: true,
+            aspect: Aspect::Wide,
             quality: 80,
             bounce: false,
             hold_last: 0.0,
@@ -194,8 +236,9 @@ pub struct Done {
 
 pub const NO_FFMPEG: &str = "MP4 and WebM are made with ffmpeg, which was not found. Install it (ffmpeg.org; on Windows e.g. “winget install ffmpeg”, on Linux from the package manager), put ffmpeg next to this program, or choose Animated GIF or Numbered images.";
 
-/// Frames loaded at the same time (each needs memory for a full frame).
-const PAR: usize = 4;
+/// Frames loaded at the same time, at most (fewer when memory is short). On a
+/// 28-thread PC, 120 fisheye RAW frames to 720p took 56 s with 4, 46 s with 8, 43 s with 12.
+const PAR: usize = 8;
 
 // --------------------------------------------------------------------------
 // Frame shape
@@ -207,8 +250,7 @@ const PAR: usize = 4;
 pub fn frame_crop(w: usize, h: usize, s: &Settings, t: f64) -> FinishParams {
     let (w, h) = (w as f64, h as f64);
     let (mut kx, mut ky) = (1.0, 1.0);
-    if s.crop_16_9 {
-        let r = if w >= h { 16.0 / 9.0 } else { 9.0 / 16.0 };
+    if let Some(r) = s.aspect.ratio(w, h) {
         if w / h > r {
             kx = h * r / w;
         } else {
@@ -659,13 +701,18 @@ pub fn make(s: &Settings, progress: &(dyn Fn(&str, f64, f64) -> Result<(), Strin
     let measuring = s.deflicker != Deflicker::Off && n > 2;
     let total = if measuring { 2 * n } else { n } as f64;
     let mut done = 0.0;
+    progress(&format!("Reading frame 1 of {n}"), done, total)?;
+    let first = load(0)?;
+    // Frames at a time: as many as the free memory allows (a frame as loaded,
+    // decoding and look working copies: about 36 bytes per pixel), at most PAR.
+    let par = crate::sys::jobs_for_memory(36.0 * (first.w * first.h) as f64, 0.0).min(PAR);
 
     // Pass 1: the brightness and colour of every frame, region by region (deflicker).
     let gains: Option<Vec<Img>> = if measuring {
         let mut lv: Vec<Vec<[f64; 3]>> = vec![Vec::new(); n];
         let mut g = (1, 1);
         let idx: Vec<usize> = (0..n).collect();
-        for chunk in idx.chunks(PAR) {
+        for chunk in idx.chunks(par) {
             progress(&format!("Measuring brightness and colour: frame {} of {n}", chunk[0] + 1), done, total)?;
             let r: Vec<Result<FrameLevels, String>> = chunk.par_iter().map(|&i| {
                 load(i).map(|f| {
@@ -694,7 +741,6 @@ pub fn make(s: &Settings, progress: &(dyn Fn(&str, f64, f64) -> Result<(), Strin
     // Pass 2: every frame, in order.
     progress(&format!("Frame 1 of {n}"), done, total)?;
     let t_of = |i: usize| if n > 1 { i as f64 / (n - 1) as f64 } else { 0.0 };
-    let first = load(0)?;
     let size = video_size(first.w, first.h, s);
     // Values measured on the first frame (automatic stretch) serve all, so the video does not flicker.
     let mut m = Measured::default();
@@ -718,7 +764,7 @@ pub fn make(s: &Settings, progress: &(dyn Fn(&str, f64, f64) -> Result<(), Strin
         emit(f0, &mut sink, &mut written)?;
         done += 1.0;
         let idx: Vec<usize> = (1..n).collect();
-        for chunk in idx.chunks(PAR) {
+        for chunk in idx.chunks(par) {
             progress(&format!("Frame {} of {n}", chunk[0] + 1), done, total)?;
             let r: Vec<Result<Img, String>> = chunk.par_iter().map(|&i| {
                 let mut mm = m;
@@ -770,4 +816,245 @@ pub fn preview(frame: &Img, s: &Settings, scale: f64) -> Img {
     let lk = Look::new(s);
     let geo = FinishParams::default();
     apply_look(frame.clone(), &lk, (frame.w, frame.h), &geo, scale, &mut Measured::default())
+}
+
+// --------------------------------------------------------------------------
+// Project files
+// --------------------------------------------------------------------------
+
+/// Timelapse projects: the frames, the look, the mask and every video setting.
+pub const PROJECT_EXT: &str = ".tlproj";
+const PROJECT_FORMAT: &str = "PanoStitch timelapse project";
+
+/// What the tab keeps besides [`Settings`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectExtras {
+    /// Start from the Post-processing tab's look (whatever image is open there).
+    pub use_finish: bool,
+    /// The fisheye circle the sky disc was made from (centre x, y, radius; fractions of the width).
+    pub fisheye: Option<(f64, f64, f64)>,
+    /// The sky's share of the circle's radius, in percent.
+    pub sky_radius: f64,
+}
+
+impl Default for ProjectExtras {
+    fn default() -> Self {
+        Self { use_finish: false, fisheye: None, sky_radius: 85.0 }
+    }
+}
+
+/// A file in a project: absolute, and relative to the project's folder (for a moved folder).
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
+struct FileRef {
+    path: String,
+    relative: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct MaskRuns {
+    /// Rows, columns.
+    size: [usize; 2],
+    runs: Vec<i64>,
+}
+
+/// The file as written (TOML). Plain values come first, tables last.
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct ProjectFile {
+    format: String,
+    version: u32,
+    raw_via: String,
+    deflicker: Deflicker,
+    deflicker_window: u32,
+    deflicker_colour: bool,
+    deflicker_regions: bool,
+    use_post_processing_look: bool,
+    zoom: f64,
+    slider_move: f64,
+    direction: Pan,
+    gentle: bool,
+    video_format: Format,
+    fps: u32,
+    resolution: Resolution,
+    /// Older projects: true = 16:9, false = the frames' shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crop_16_9: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shape: Option<Aspect>,
+    quality: u32,
+    bounce: bool,
+    hold_last: f64,
+    soft_edge: f64,
+    sky_circle: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fisheye: Option<[f64; 3]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<FileRef>,
+    frames: Vec<FileRef>,
+    look: FinishParams,
+    sky: FinishParams,
+    ground: FinishParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mask: Option<MaskRuns>,
+}
+
+impl Default for ProjectFile {
+    fn default() -> Self {
+        let (s, x, l) = (Settings::default(), ProjectExtras::default(), Local::default());
+        Self {
+            format: PROJECT_FORMAT.into(),
+            version: 1,
+            raw_via: s.decoder.name().into(),
+            deflicker: s.deflicker,
+            deflicker_window: s.deflicker_window,
+            deflicker_colour: s.deflicker_colour,
+            deflicker_regions: s.deflicker_regions,
+            use_post_processing_look: x.use_finish,
+            zoom: s.zoom,
+            slider_move: s.pan,
+            direction: s.pan_dir,
+            gentle: s.ease,
+            video_format: s.format,
+            fps: s.fps,
+            resolution: s.resolution,
+            crop_16_9: None,
+            shape: Some(s.aspect),
+            quality: s.quality,
+            bounce: s.bounce,
+            hold_last: s.hold_last,
+            soft_edge: l.feather,
+            sky_circle: x.sky_radius,
+            fisheye: None,
+            output: None,
+            frames: Vec::new(),
+            look: FinishParams::default(),
+            sky: FinishParams::default(),
+            ground: FinishParams::default(),
+            mask: None,
+        }
+    }
+}
+
+/// The project as text, with paths also relative to the folder `dir`.
+pub fn project_text(s: &Settings, x: &ProjectExtras, dir: &Path) -> Result<String, String> {
+    let fref = |p: &str| {
+        let ap = std::path::absolute(p).unwrap_or_else(|_| p.into());
+        FileRef { path: ap.to_string_lossy().to_string(), relative: crate::sys::relpath(&ap, dir) }
+    };
+    let m = &s.local.mask;
+    let f = ProjectFile {
+        raw_via: s.decoder.name().into(),
+        deflicker: s.deflicker,
+        deflicker_window: s.deflicker_window,
+        deflicker_colour: s.deflicker_colour,
+        deflicker_regions: s.deflicker_regions,
+        use_post_processing_look: x.use_finish,
+        zoom: s.zoom,
+        slider_move: s.pan,
+        direction: s.pan_dir,
+        gentle: s.ease,
+        video_format: s.format,
+        fps: s.fps,
+        resolution: s.resolution,
+        crop_16_9: None,
+        shape: Some(s.aspect),
+        quality: s.quality,
+        bounce: s.bounce,
+        hold_last: s.hold_last,
+        soft_edge: s.local.feather,
+        sky_circle: x.sky_radius,
+        fisheye: x.fisheye.map(|(a, b, c)| [a, b, c]),
+        output: (!s.out.trim().is_empty()).then(|| fref(s.out.trim())),
+        frames: s.frames.iter().map(|p| fref(p)).collect(),
+        look: s.look.clone(),
+        sky: s.local.sky.clone(),
+        ground: s.local.ground.clone(),
+        mask: m.any().then(|| MaskRuns { size: [m.h, m.w], runs: m.to_runs() }),
+        ..Default::default()
+    };
+    toml::to_string(&f).map_err(|e| e.to_string())
+}
+
+/// Save a project (the extension is added if missing); returns the path written.
+pub fn save_project(path: &str, s: &Settings, x: &ProjectExtras) -> Result<String, String> {
+    let mut path = path.trim().to_string();
+    if !path.to_lowercase().ends_with(PROJECT_EXT) {
+        path += PROJECT_EXT;
+    }
+    let dir = std::path::absolute(&path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let text = project_text(s, x, &dir)?;
+    std::fs::write(&path, text).map_err(|e| format!("Cannot save {path}: {e}"))?;
+    Ok(path)
+}
+
+/// An opened project: the settings, the tab's extras, and the frames that were not found.
+#[derive(Debug)]
+pub struct Opened {
+    pub settings: Settings,
+    pub extras: ProjectExtras,
+    pub missing: Vec<String>,
+}
+
+/// Read a project. Frames are looked for at their saved place, then relative
+/// to the project (a moved or copied folder); RAW decoders not installed here
+/// fall back to the built-in one.
+pub fn open_project(path: &str) -> Result<Opened, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {e}", basename(path)))?;
+    let f: ProjectFile = toml::from_str(&text).map_err(|e| format!("Cannot read {}: {e}", basename(path)))?;
+    if f.format != PROJECT_FORMAT {
+        return Err(format!("{} is not a timelapse project.", basename(path)));
+    }
+    let dir = std::path::absolute(path).map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let mut missing = Vec::new();
+    let mut frames = Vec::new();
+    for r in &f.frames {
+        let rel = dir.join(&r.relative);
+        if Path::new(&r.path).is_file() {
+            frames.push(r.path.clone());
+        } else if !r.relative.is_empty() && rel.is_file() {
+            frames.push(rel.to_string_lossy().to_string());
+        } else {
+            missing.push(basename(&r.path));
+        }
+    }
+    // The video need not exist yet: keep its place if that folder exists, else next to the project.
+    let out = match &f.output {
+        Some(o) if Path::new(&o.path).parent().is_some_and(|p| p.is_dir()) => o.path.clone(),
+        Some(o) => dir.join(if o.relative.is_empty() { basename(&o.path) } else { o.relative.clone() }).to_string_lossy().to_string(),
+        None => String::new(),
+    };
+    let decoder = io::RawDecoder::from_name(&f.raw_via)
+        .filter(|d| *d == io::RawDecoder::Auto || io::available_raw_decoders().contains(d))
+        .unwrap_or(io::RawDecoder::Builtin);
+    let mask = match &f.mask {
+        Some(m) if m.size[0] > 0 && m.size[1] > 0 => crate::image::Bits::from_runs(&m.runs, m.size[0], m.size[1]),
+        _ => crate::image::Bits::new(0, 0),
+    };
+    let settings = Settings {
+        frames,
+        decoder,
+        deflicker: f.deflicker,
+        deflicker_window: f.deflicker_window.clamp(3, 31),
+        deflicker_colour: f.deflicker_colour,
+        deflicker_regions: f.deflicker_regions,
+        base: None,
+        look: f.look,
+        local: Local { mask, feather: f.soft_edge.clamp(0.0, 0.25), sky: f.sky, ground: f.ground },
+        zoom: f.zoom.clamp(0.0, 30.0),
+        pan: f.slider_move.clamp(0.0, 20.0),
+        pan_dir: f.direction,
+        ease: f.gentle,
+        format: f.video_format,
+        fps: f.fps.clamp(1, 120),
+        resolution: f.resolution,
+        aspect: f.shape.unwrap_or(if f.crop_16_9 == Some(false) { Aspect::Frame } else { Aspect::Wide }),
+        quality: f.quality.clamp(30, 100),
+        bounce: f.bounce,
+        hold_last: f.hold_last.clamp(0.0, 5.0),
+        out,
+    };
+    let extras = ProjectExtras { use_finish: f.use_post_processing_look, fisheye: f.fisheye.map(|a| (a[0], a[1], a[2])), sky_radius: f.sky_circle.clamp(30.0, 100.0) };
+    Ok(Opened { settings, extras, missing })
 }

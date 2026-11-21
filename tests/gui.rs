@@ -14,8 +14,22 @@ struct Win {
     t0: Instant,
 }
 
+/// One temporary settings folder for all tests, so they never read or change the user's.
+fn test_config() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let d = tempfile::tempdir().unwrap();
+        std::env::set_var("PANOSTITCH_CONFIG", d.path());
+        // The window in English, whatever the system's language.
+        std::env::set_var("PANOSTITCH_LANG", "en");
+        d
+    })
+    .path()
+}
+
 impl Win {
     fn new(paths: Vec<String>) -> Self {
+        test_config();
         let ctx = egui::Context::default();
         let app = App::with_context(&ctx, paths);
         Self { ctx, app, t0: Instant::now() }
@@ -332,6 +346,11 @@ fn button_symbols_have_glyphs() {
         let s = std::fs::read_to_string(f).unwrap();
         used.extend(s.chars().filter(|c| ('\u{2190}'..='\u{2BFF}').contains(c)));
     }
+    // Every letter of the translations and of the manuals shown in the help window.
+    for f in ["src/gui/i18n_table.rs", "src/gui/i18n_es.rs", "src/gui/i18n_fr.rs", "src/gui/i18n_pl.rs", "docs/manual_en.md", "docs/manual_cs.md", "docs/manual_de.md", "docs/manual_es.md", "docs/manual_fr.md", "docs/manual_pl.md"] {
+        let s = std::fs::read_to_string(f).unwrap();
+        used.extend(s.chars().filter(|c| !c.is_ascii() && !c.is_whitespace()));
+    }
     used.sort();
     used.dedup();
     assert!(used.len() > 10);
@@ -344,8 +363,8 @@ fn button_symbols_have_glyphs() {
 #[test]
 fn post_processing_tab() {
     let dir = tempfile::tempdir().unwrap();
-    // Presets go to a temporary settings folder, not the user's.
-    std::env::set_var("PANOSTITCH_CONFIG", dir.path().join("config"));
+    // Presets go to the tests' temporary settings folder, not the user's.
+    test_config();
     let d = dir.path().to_string_lossy().to_string();
     let src = pj(&d, "stack.fits");
     // A dark, linear "stack": FITS opens with the automatic stretch.
@@ -490,4 +509,68 @@ fn timelapse_tab_mask() {
     for _ in 0..3 {
         w.frame();
     }
+
+    // Save the project; a fresh window opened with it has the same frames, mask and look.
+    assert!(w.app.close_reasons().iter().any(|r| r.contains("Timelapse")), "{:?}", w.app.close_reasons());
+    let proj = pj(&d, "night.tlproj");
+    w.app.timelapse.save_project(&pj(&d, "night"));
+    assert!(std::path::Path::new(&proj).exists(), "{}", w.app.timelapse.t_status());
+    assert!(!w.app.close_reasons().iter().any(|r| r.contains("Timelapse")));
+    let sky = w.app.timelapse.t_mask().2;
+    let mut w2 = Win::new(vec![proj.clone()]);
+    w2.until("frame preview", 30, |a| a.timelapse.t_shown().is_some());
+    assert_eq!(w2.app.timelapse.t_mask().2, sky);
+    assert_eq!(w2.app.timelapse.t_look(1).exposure, -0.5);
+    assert_eq!(w2.app.timelapse.t_settings().frames.len(), 3);
+    assert_eq!(w2.app.timelapse.t_settings().format, panostitch::timelapse::Format::Gif);
+    assert!(w2.app.close_reasons().is_empty(), "{:?}", w2.app.close_reasons());
+    w2.app.timelapse.t_look(0).contrast = 0.2;
+    assert!(w2.app.close_reasons().iter().any(|r| r.contains("Timelapse")));
+    w2.frame();
+}
+
+#[test]
+fn drop_remember_and_recent() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_string_lossy().to_string();
+    let night = pj(&d, "night");
+    std::fs::create_dir(&night).unwrap();
+    for k in 0..3 {
+        panostitch::io::save_panorama(&pj(&night, &format!("f{k}.jpg")), &scene(120, 180, 40 + k)).unwrap();
+    }
+    std::fs::write(pj(&night, "notes.txt"), "not an image").unwrap();
+
+    // A folder dropped on the Timelapse tab adds its images (only the images).
+    let mut w = Win::new(vec![]);
+    w.app.show_timelapse();
+    w.app.drop_files(vec![night.clone()]);
+    assert_eq!(w.app.timelapse.t_settings().frames.len(), 3);
+    w.until("frame preview", 30, |a| a.timelapse.t_shown().is_some());
+    w.app.timelapse.t_settings().fps = 30;
+    w.app.timelapse.t_settings().deflicker = panostitch::timelapse::Deflicker::Strong;
+    w.app.timelapse.save_project(&pj(&d, "night"));
+    let proj = pj(&d, "night.tlproj");
+    assert!(panostitch::gui::recent_projects().contains(&proj), "{:?}", panostitch::gui::recent_projects());
+
+    // A project dropped on another tab opens in its own tab.
+    let mut w2 = Win::new(vec![]);
+    w2.app.show_finish();
+    w2.app.drop_files(vec![proj.clone()]);
+    assert_eq!(w2.app.timelapse.t_settings().frames.len(), 3);
+    assert_eq!(w2.app.timelapse.t_settings().fps, 30);
+    w2.frame();
+
+    // Settings are remembered for the next session, the frames are not.
+    let mut t = w.app.stack.settings_table();
+    t["sliders"].as_table_mut().unwrap().insert("gradient".into(), 25.0.into());
+    w.app.stack.apply_settings(&t);
+    let keep = dir.path().join("remembered");
+    w.app.remember_in(&keep);
+    let mut w3 = Win::new(vec![]);
+    w3.app.restore_from(&keep);
+    let s = w3.app.timelapse.t_settings();
+    assert_eq!((s.fps, s.deflicker, s.frames.len()), (30, panostitch::timelapse::Deflicker::Strong, 0));
+    assert_eq!(w3.app.stack.settings_table()["sliders"]["gradient"].as_float(), Some(25.0));
+    assert_eq!(w3.app.stack.settings_table(), w.app.stack.settings_table());
+    w3.frame();
 }

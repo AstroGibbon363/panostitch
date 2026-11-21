@@ -132,3 +132,18 @@ pub fn check_writable(file: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Path of `p` relative to the folder `dir` (for project files).
+pub fn relpath(p: &std::path::Path, dir: &std::path::Path) -> String {
+    let a: Vec<_> = p.components().collect();
+    let b: Vec<_> = dir.components().collect();
+    let k = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut out = std::path::PathBuf::new();
+    for _ in k..b.len() {
+        out.push("..");
+    }
+    for c in &a[k..] {
+        out.push(c);
+    }
+    out.to_string_lossy().to_string()
+}

@@ -3,12 +3,19 @@
 
 pub mod dialogs;
 pub mod finish;
+pub mod help;
+pub mod i18n;
+mod i18n_es;
+mod i18n_fr;
+mod i18n_pl;
+mod i18n_table;
 pub mod mask;
 pub mod notes;
 pub mod stack;
 pub mod stitch;
 pub mod timelapse;
 
+use i18n::tr;
 use crate::image::Img;
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
 
@@ -124,9 +131,10 @@ pub fn slider<N: egui::emath::Numeric>(ui: &mut egui::Ui, label: &str, v: &mut N
 pub fn combo<T: Copy + PartialEq>(ui: &mut egui::Ui, label: &str, v: &mut T, all: &[T], name: impl Fn(T) -> &'static str) -> bool {
     ui.label(label);
     let before = *v;
-    egui::ComboBox::from_id_salt(label).selected_text(name(*v)).show_ui(ui, |ui| {
+    // The choices' names are translated here (they come from the engine in English).
+    egui::ComboBox::from_id_salt(label).selected_text(tr(name(*v))).show_ui(ui, |ui| {
         for &o in all {
-            ui.selectable_value(v, o, name(o));
+            ui.selectable_value(v, o, tr(name(o)));
         }
     });
     ui.end_row();
@@ -140,11 +148,18 @@ pub struct JobReport {
     pub title: String,
     pub ok: bool,
     pub rows: Vec<(String, String)>,
+    /// The file (or folder) made, for "Show in folder".
+    pub file: Option<String>,
 }
 
 impl JobReport {
     pub fn new(title: impl Into<String>, ok: bool) -> Self {
-        Self { title: title.into(), ok, rows: Vec::new() }
+        Self { title: title.into(), ok, rows: Vec::new(), file: None }
+    }
+    /// The file the job wrote (adds a "Show in folder" button when it exists).
+    pub fn file(mut self, path: &str) -> Self {
+        self.file = Some(path.to_string());
+        self
     }
     pub fn row(mut self, k: &str, v: impl Into<String>) -> Self {
         self.rows.push((k.to_string(), v.into()));
@@ -158,7 +173,7 @@ impl JobReport {
             ui.horizontal(|ui| {
                 ui.colored_label(col, egui::RichText::new(format!("{} {}", if self.ok { "✔" } else { "✖" }, self.title)).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close = ui.small_button("×").on_hover_text("Close the report").clicked();
+                    close = ui.small_button("×").on_hover_text(tr("Close the report")).clicked();
                 });
             });
             egui::Grid::new(("report", &self.title)).num_columns(2).spacing([10.0, 2.0]).show(ui, |ui| {
@@ -168,6 +183,11 @@ impl JobReport {
                     ui.end_row();
                 }
             });
+            if let Some(f) = self.file.as_ref().filter(|f| std::path::Path::new(f).exists()) {
+                if ui.small_button(tr("Show in folder")).on_hover_text(f.as_str()).clicked() {
+                    dialogs::show_in_folder(f);
+                }
+            }
         });
         close
     }
@@ -181,23 +201,25 @@ pub fn duration(secs: f64) -> String {
     } else if s < 60.0 {
         format!("{s:.0} s")
     } else if s < 3600.0 {
-        format!("{} min {:02} s", (s / 60.0) as u64, (s % 60.0) as u64)
+        crate::trf!("{} min {} s", (s / 60.0) as u64, format!("{:02}", (s % 60.0) as u64))
     } else {
-        format!("{} h {:02} min", (s / 3600.0) as u64, ((s % 3600.0) / 60.0) as u64)
+        crate::trf!("{} h {} min", (s / 3600.0) as u64, format!("{:02}", ((s % 3600.0) / 60.0) as u64))
     }
 }
 
 /// A progress bar with the time elapsed and an estimate of the time left.
 pub fn progress_bar(ui: &mut egui::Ui, msg: &str, f: f32, start: Option<std::time::Instant>) {
-    let left = match start {
-        Some(t) => {
-            let el = t.elapsed().as_secs_f64();
-            let left = if f > 0.03 && f < 1.0 { format!(", about {} left", duration((el * (1.0 - f as f64) / f as f64).max(1.0))) } else { String::new() };
-            format!(" – {} elapsed{left}", duration(el))
-        }
-        None => String::new(),
-    };
-    ui.add(egui::ProgressBar::new(f).show_percentage().text(format!("{msg}{left}")));
+    // Only the percentage in the bar; the message and the times below it, wrapped,
+    // so nothing runs off a narrow panel.
+    ui.add(egui::ProgressBar::new(f).desired_width(ui.available_width()).text(format!("{:.0} %", 100.0 * f.clamp(0.0, 1.0))));
+    if !msg.is_empty() {
+        ui.add(egui::Label::new(msg).wrap());
+    }
+    if let Some(t) = start {
+        let el = t.elapsed().as_secs_f64();
+        let left = if f > 0.03 && f < 1.0 { crate::trf!(", about {} left", duration((el * (1.0 - f as f64) / f as f64).max(1.0))) } else { String::new() };
+        ui.add(egui::Label::new(egui::RichText::new(format!("{} elapsed{left}", duration(el))).weak()).wrap());
+    }
 }
 
 /// Size of a file on disk, for reports ("38 MB"), or "?" if it cannot be read.
@@ -220,6 +242,7 @@ pub struct Prefs {
     pub dark: bool,
     pub modern: bool,
     pub simple: bool,
+    pub lang: i18n::Lang,
 }
 
 pub fn apply_style(ctx: &egui::Context, p: Prefs) {
@@ -259,20 +282,7 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(f);
 }
 
-/// Path of `p` relative to the folder `dir` (for project files).
-pub fn relpath(p: &std::path::Path, dir: &std::path::Path) -> String {
-    let a: Vec<_> = p.components().collect();
-    let b: Vec<_> = dir.components().collect();
-    let k = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
-    let mut out = std::path::PathBuf::new();
-    for _ in k..b.len() {
-        out.push("..");
-    }
-    for c in &a[k..] {
-        out.push(c);
-    }
-    out.to_string_lossy().to_string()
-}
+pub use crate::sys::relpath;
 
 pub struct App {
     tab: Tab,
@@ -284,6 +294,8 @@ pub struct App {
     /// Why closing the window was held back (shown in a dialog), if it was.
     confirm_close: Option<Vec<String>>,
     allow_close: bool,
+    /// The manual, in a window of its own.
+    pub help: help::Help,
 }
 
 impl App {
@@ -296,18 +308,27 @@ impl App {
         install_fonts(ctx);
         let prefs = load_prefs();
         apply_style(ctx, prefs);
-        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default(), finish: finish::FinishTab::default(), timelapse: timelapse::TimelapseTab::default(), confirm_close: None, allow_close: false };
+        let mut app = Self { tab: Tab::Stitch, prefs, stitch: stitch::StitchTab::default(), stack: stack::StackTab::default(), finish: finish::FinishTab::default(), timelapse: timelapse::TimelapseTab::default(), confirm_close: None, allow_close: false, help: help::Help::default() };
+        i18n::set_lang(app.prefs.lang);
+        app.restore_from(&config_dir().join(REMEMBERED));
         // Project files open in their tab; images go to the stitcher.
         let (stackp, rest): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| p.to_lowercase().ends_with(stack::PROJECT_EXT));
+        let (tlp, rest): (Vec<String>, Vec<String>) = rest.into_iter().partition(|p| p.to_lowercase().ends_with(crate::timelapse::PROJECT_EXT));
         let (panop, imgs): (Vec<String>, Vec<String>) = rest.into_iter().partition(|p| p.to_lowercase().ends_with(stitch::PROJECT_EXT));
         if let Some(p) = panop.first() {
             app.stitch.open_project(p);
+            app.tab = Tab::Stitch;
         } else if !imgs.is_empty() {
             app.stitch.add_paths(imgs);
+            app.tab = Tab::Stitch;
         }
         if let Some(p) = stackp.first() {
             app.stack.open_project(p);
             app.tab = Tab::Stack;
+        }
+        if let Some(p) = tlp.first() {
+            app.timelapse.open_project(p);
+            app.tab = Tab::Timelapse;
         }
         // Development aid (screenshots): PANOSTITCH_FINISH=<file> opens it in Post-processing,
         // PANOSTITCH_TAB=timelapse shows that tab.
@@ -321,7 +342,7 @@ impl App {
         let marker = config_dir().join("crashed");
         if marker.exists() {
             let _ = std::fs::remove_file(&marker);
-            app.stitch.notice(format!("PanoStitch closed unexpectedly last time. The details are in {} – please attach that file when you report it.", crash_log().display()));
+            app.stitch.notice(crate::trf!("PanoStitch closed unexpectedly last time. The details are in {} – please attach that file when you report it.", crash_log().display()));
         }
         app
     }
@@ -331,9 +352,141 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.frame(ui);
     }
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.remember_in(&config_dir().join(REMEMBERED));
+    }
+}
+
+/// Folder (in the settings folder) with what is remembered between sessions.
+const REMEMBERED: &str = "remembered";
+/// How many recent projects are listed.
+const RECENT_MAX: usize = 10;
+
+fn recent_file() -> std::path::PathBuf {
+    config_dir().join("recent_projects.txt")
+}
+
+/// Project files opened or saved lately, newest first (only those that still exist).
+pub fn recent_projects() -> Vec<String> {
+    std::fs::read_to_string(recent_file()).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && std::path::Path::new(l).is_file()).collect()
+}
+
+/// Put a project at the top of the recent list.
+pub fn remember_project(path: &str) {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let p = std::path::absolute(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string());
+    let mut v = recent_projects();
+    v.retain(|q| *q != p);
+    v.insert(0, p);
+    v.truncate(RECENT_MAX);
+    let _ = std::fs::create_dir_all(config_dir());
+    let _ = std::fs::write(recent_file(), v.join("\n") + "\n");
+}
+
+/// Which tab a project file belongs to (by its extension).
+fn project_tab(path: &str) -> Option<Tab> {
+    let l = path.to_lowercase();
+    if l.ends_with(stack::PROJECT_EXT) {
+        Some(Tab::Stack)
+    } else if l.ends_with(stitch::PROJECT_EXT) {
+        Some(Tab::Stitch)
+    } else if l.ends_with(crate::timelapse::PROJECT_EXT) {
+        Some(Tab::Timelapse)
+    } else {
+        None
+    }
+}
+
+impl Tab {
+    fn name(self) -> &'static str {
+        match self {
+            Tab::Stitch => "stitch",
+            Tab::Stack => "stack",
+            Tab::Finish => "finish",
+            Tab::Timelapse => "timelapse",
+        }
+    }
+    fn from_name(s: &str) -> Option<Tab> {
+        [Tab::Stitch, Tab::Stack, Tab::Finish, Tab::Timelapse].into_iter().find(|t| t.name() == s)
+    }
+    fn title(self) -> &'static str {
+        match self {
+            Tab::Stitch => tr("Panorama stitcher"),
+            Tab::Stack => tr("Star stacking"),
+            Tab::Finish => tr("Post-processing"),
+            Tab::Timelapse => tr("Timelapse"),
+        }
+    }
 }
 
 impl App {
+    /// Open a project file in its tab.
+    pub fn open_project(&mut self, path: &str) {
+        match project_tab(path) {
+            Some(Tab::Stack) => self.stack.open_project(path),
+            Some(Tab::Stitch) => self.stitch.open_project(path),
+            Some(Tab::Timelapse) => self.timelapse.open_project(path),
+            _ => return,
+        }
+        self.tab = project_tab(path).unwrap_or(self.tab);
+    }
+
+    /// Files dropped on the window: projects open in their tab, images (and
+    /// folders of images) go to the tab on show.
+    pub fn drop_files(&mut self, paths: Vec<String>) {
+        let (projects, rest): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| project_tab(p).is_some());
+        if let Some(p) = projects.first() {
+            self.open_project(p);
+            return;
+        }
+        let mut imgs: Vec<String> = rest.iter().flat_map(|p| dialogs::expand_paths(p)).filter(|p| crate::io::is_image(p)).collect();
+        imgs.dedup();
+        if imgs.is_empty() {
+            return;
+        }
+        match self.tab {
+            Tab::Stitch => self.stitch.add_dropped(imgs),
+            Tab::Stack => self.stack.add_dropped(imgs),
+            Tab::Finish => self.finish.add_dropped(imgs),
+            Tab::Timelapse => self.timelapse.add_dropped(imgs),
+        }
+    }
+
+    /// Keep the settings for the next session (in `dir`): the tab on show, each
+    /// tab's settings (not its files), RAW reading in the stitcher.
+    pub fn remember_in(&mut self, dir: &std::path::Path) {
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        let mut t = toml::Table::new();
+        t.insert("tab".into(), self.tab.name().into());
+        t.insert("stitcher".into(), toml::Value::Table(self.stitch.remembered()));
+        let _ = std::fs::write(dir.join("window.toml"), toml::to_string(&t).unwrap_or_default());
+        let _ = std::fs::write(dir.join("stacking.toml"), toml::to_string(&self.stack.settings_table()).unwrap_or_default());
+        let _ = std::fs::write(dir.join("timelapse.tlproj"), self.timelapse.remembered());
+    }
+
+    /// The settings kept by [`App::remember_in`]; what is missing or unreadable stays as it is.
+    pub fn restore_from(&mut self, dir: &std::path::Path) {
+        let read = |f: &str| -> toml::Table { std::fs::read_to_string(dir.join(f)).ok().and_then(|s| s.parse().ok()).unwrap_or_default() };
+        let w = read("window.toml");
+        if let Some(t) = w.get("tab").and_then(|v| v.as_str()).and_then(Tab::from_name) {
+            self.tab = t;
+        }
+        if let Some(t) = w.get("stitcher").and_then(|v| v.as_table()) {
+            self.stitch.restore_remembered(t);
+        }
+        let st = read("stacking.toml");
+        if !st.is_empty() {
+            self.stack.apply_settings(&st);
+        }
+        let tl = dir.join("timelapse.tlproj");
+        if tl.is_file() {
+            self.timelapse.restore_remembered(&tl);
+        }
+    }
+
     pub fn busy(&self) -> bool {
         self.stitch.busy() || self.stack.busy() || self.finish.busy() || self.timelapse.busy()
     }
@@ -359,22 +512,66 @@ impl App {
         let ctx = ui.ctx().clone();
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Stitch, egui::RichText::new("Panorama stitcher").strong());
-                ui.selectable_value(&mut self.tab, Tab::Stack, egui::RichText::new("Star stacking (landscape / trails)").strong());
-                ui.selectable_value(&mut self.tab, Tab::Finish, egui::RichText::new("Post-processing").strong());
-                ui.selectable_value(&mut self.tab, Tab::Timelapse, egui::RichText::new("Timelapse").strong());
+                ui.selectable_value(&mut self.tab, Tab::Stitch, egui::RichText::new(tr("Panorama stitcher")).strong());
+                ui.selectable_value(&mut self.tab, Tab::Stack, egui::RichText::new(tr("Star stacking (landscape / trails)")).strong());
+                ui.selectable_value(&mut self.tab, Tab::Finish, egui::RichText::new(tr("Post-processing")).strong());
+                ui.selectable_value(&mut self.tab, Tab::Timelapse, egui::RichText::new(tr("Timelapse")).strong());
+                ui.add_space(12.0);
+                let mut open = None;
+                ui.menu_button(tr("Recent projects"), |ui| {
+                    let v = recent_projects();
+                    if v.is_empty() {
+                        ui.weak(tr("None yet: projects you open or save appear here."));
+                    }
+                    for p in v {
+                        let tab = project_tab(&p).map(|t| t.title()).unwrap_or("");
+                        if ui.button(format!("{}  ({tab})", crate::io::basename(&p))).on_hover_text(&p).clicked() {
+                            open = Some(p);
+                            ui.close();
+                        }
+                    }
+                });
+                if let Some(p) = open {
+                    self.open_project(&p);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let before = self.prefs;
-                    ui.checkbox(&mut self.prefs.simple, "✓ Simple").on_hover_text("Leave out the advanced controls");
-                    ui.checkbox(&mut self.prefs.modern, "◆ Modern");
-                    ui.checkbox(&mut self.prefs.dark, "☾ Dark");
+                    if ui.button(format!("? {}", tr("Help"))).on_hover_text(tr("The manual (F1: the chapter of this tab)")).clicked() {
+                        self.help.show_chapter(self.prefs.lang, None);
+                    }
+                    egui::ComboBox::from_id_salt("ui_lang").selected_text(tr(self.prefs.lang.name())).width(90.0).show_ui(ui, |ui| {
+                        for l in i18n::Lang::ALL {
+                            ui.selectable_value(&mut self.prefs.lang, l, tr(l.name()));
+                        }
+                    });
+                    ui.checkbox(&mut self.prefs.simple, tr("✓ Simple")).on_hover_text(tr("Leave out the advanced controls"));
+                    ui.checkbox(&mut self.prefs.modern, tr("◆ Modern"));
+                    ui.checkbox(&mut self.prefs.dark, tr("☾ Dark"));
                     if self.prefs != before {
                         apply_style(&ctx, self.prefs);
                         save_prefs(self.prefs);
+                        i18n::set_lang(self.prefs.lang);
                     }
                 });
             });
         });
+        // Files dragged onto the window.
+        let dropped: Vec<String> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_string_lossy().to_string()).filter(|p| !p.is_empty()).collect());
+        if !dropped.is_empty() {
+            self.drop_files(dropped);
+        }
+        if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+            let r = ctx.content_rect();
+            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop_overlay")));
+            p.rect_filled(r, 0.0, Color32::from_black_alpha(150));
+            let txt = match self.tab {
+                Tab::Stitch => tr("Drop to add the images to the panorama"),
+                Tab::Stack => tr("Drop to add the files to the stacking"),
+                Tab::Finish => tr("Drop to open the image"),
+                Tab::Timelapse => tr("Drop to add the frames"),
+            };
+            p.text(r.center(), egui::Align2::CENTER_CENTER, format!("{txt}\n{}", tr("(project files open in their tab)")), egui::FontId::proportional(24.0), Color32::WHITE);
+        }
         // Stacked panels handed to the stitcher.
         let handed = std::mem::take(&mut self.stack.to_stitcher);
         if !handed.is_empty() {
@@ -398,6 +595,17 @@ impl App {
             Tab::Finish => self.finish.ui(ui, &ctx),
             Tab::Timelapse => self.timelapse.ui(ui, &ctx),
         }
+        // F1: the manual at the chapter of the tab on show.
+        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            let ch = match self.tab {
+                Tab::Stitch => "5",
+                Tab::Stack => "13",
+                Tab::Finish => "16",
+                Tab::Timelapse => "17",
+            };
+            self.help.show_chapter(self.prefs.lang, Some(ch));
+        }
+        self.help.ui(&ctx);
         if self.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -408,22 +616,25 @@ impl App {
     pub fn close_reasons(&mut self) -> Vec<String> {
         let mut r = Vec::new();
         if self.stack.running() {
-            r.push("Stacking is running; it will be stopped.".to_string());
+            r.push(tr("Stacking is running; it will be stopped.").to_string());
         } else if self.stitch.busy() {
-            r.push("The stitcher is still working (rendering or saving).".to_string());
+            r.push(tr("The stitcher is still working (rendering or saving).").to_string());
         } else if self.finish.saving() {
-            r.push("Post-processing is still saving the image.".to_string());
+            r.push(tr("Post-processing is still saving the image.").to_string());
         } else if self.timelapse.busy() {
-            r.push("A video is being made; it will be stopped and not kept.".to_string());
+            r.push(tr("A video is being made; it will be stopped and not kept.").to_string());
         }
         if self.stitch.unsaved() {
-            r.push("Panorama stitcher: changes not saved in a project.".to_string());
+            r.push(tr("Panorama stitcher: changes not saved in a project.").to_string());
         }
         if self.stack.unsaved() {
-            r.push("Star stacking: setup not saved in a project.".to_string());
+            r.push(tr("Star stacking: setup not saved in a project.").to_string());
         }
         if self.finish.unsaved() {
-            r.push("Post-processing: adjusted image not saved.".to_string());
+            r.push(tr("Post-processing: adjusted image not saved.").to_string());
+        }
+        if self.timelapse.unsaved() {
+            r.push(tr("Timelapse: frames and settings not saved in a project.").to_string());
         }
         r
     }
@@ -441,22 +652,25 @@ impl App {
         let mut choice = None;
         egui::Modal::new(egui::Id::unique("confirm_close")).show(ctx, |ui| {
             ui.set_max_width(420.0);
-            ui.heading("Quit PanoStitch?");
+            ui.heading(tr("Quit PanoStitch?"));
             for r in &reasons {
                 ui.label(format!("• {r}"));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button(egui::RichText::new("Quit anyway").strong()).clicked() {
+                if ui.button(egui::RichText::new(tr("Quit anyway")).strong()).clicked() {
                     choice = Some(0);
                 }
-                if self.stitch.unsaved() && ui.button("Save panorama project…").clicked() {
+                if self.stitch.unsaved() && ui.button(tr("Save panorama project…")).clicked() {
                     choice = Some(1);
                 }
-                if self.stack.unsaved() && ui.button("Save stacking project…").clicked() {
+                if self.stack.unsaved() && ui.button(tr("Save stacking project…")).clicked() {
                     choice = Some(2);
                 }
-                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if self.timelapse.unsaved() && ui.button(tr("Save timelapse project…")).clicked() {
+                    choice = Some(4);
+                }
+                if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     choice = Some(3);
                 }
             });
@@ -478,6 +692,11 @@ impl App {
                 self.tab = Tab::Stack;
                 self.stack.ask_save_project(true);
             }
+            Some(4) => {
+                self.confirm_close = None;
+                self.tab = Tab::Timelapse;
+                self.timelapse.ask_save_project(true);
+            }
             Some(_) => self.confirm_close = None,
             None => {}
         }
@@ -495,12 +714,16 @@ pub fn config_dir() -> std::path::PathBuf {
 fn load_prefs() -> Prefs {
     let t: toml::Table = std::fs::read_to_string(config_dir().join("ui.toml")).ok().and_then(|s| s.parse().ok()).unwrap_or_default();
     let b = |k: &str| t.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-    Prefs { dark: b("dark"), modern: b("modern"), simple: b("simple") }
+    // PANOSTITCH_LANG=en|cs|de overrides (tests); else the saved choice, else the system's language.
+    let lang = std::env::var("PANOSTITCH_LANG").ok().and_then(|v| i18n::Lang::from_code(&v))
+        .or_else(|| t.get("lang").and_then(|v| v.as_str()).and_then(i18n::Lang::from_code))
+        .unwrap_or_else(i18n::Lang::from_system);
+    Prefs { dark: b("dark"), modern: b("modern"), simple: b("simple"), lang }
 }
 fn save_prefs(p: Prefs) {
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("ui.toml"), format!("dark = {}\nmodern = {}\nsimple = {}\n", p.dark, p.modern, p.simple));
+    let _ = std::fs::write(dir.join("ui.toml"), format!("dark = {}\nmodern = {}\nsimple = {}\nlang = \"{}\"\n", p.dark, p.modern, p.simple, p.lang.code()));
 }
 
 /// Where a crash is recorded.

@@ -6,6 +6,7 @@
 //! and the overlay go through `finish::source_point`, so the mask stays on the
 //! same part of the picture when the image is turned or cropped.
 
+use crate::gui::i18n::tr;
 use super::Shown;
 use crate::finish::{self, FinishParams, Local};
 use crate::image::{Bits, Img};
@@ -60,6 +61,17 @@ impl MaskEditor {
         self.rev += 1;
     }
 
+    /// The fisheye circle the sky disc came from, and the sky's share of its radius (%).
+    pub fn circle_state(&self) -> (Option<(f64, f64, f64)>, f64) {
+        (self.circle, self.sky_radius)
+    }
+
+    /// Restore [`MaskEditor::circle_state`] (projects), after [`MaskEditor::set_local`].
+    pub fn set_circle(&mut self, circle: Option<(f64, f64, f64)>, sky_radius: f64) {
+        self.circle = circle;
+        self.sky_radius = sky_radius;
+    }
+
     pub fn has_sky(&self) -> bool {
         self.local.mask.any()
     }
@@ -101,9 +113,9 @@ impl MaskEditor {
             Some(c) => {
                 self.circle = Some(c);
                 self.apply_circle(img.w, img.h);
-                self.message = Some(format!("Image circle found. Sky = the inner {:.0} % of its radius; the ring outside (horizon, trees) is foreground. Adjust “Sky circle”, raise “Soft edge” for a gradual change, and correct the rest with the brush.", self.sky_radius));
+                self.message = Some(crate::trf!("Image circle found. Sky = the inner {} % of its radius; the ring outside (horizon, trees) is foreground. Adjust “Sky circle”, raise “Soft edge” for a gradual change, and correct the rest with the brush.", format!("{:.0}", self.sky_radius)));
             }
-            None => self.message = Some("No dark corners around a lit circle: this is not a circular fisheye image. Paint the sky with the brush instead.".into()),
+            None => self.message = Some(tr("No dark corners around a lit circle: this is not a circular fisheye image. Paint the sky with the brush instead.").into()),
         }
     }
 
@@ -123,7 +135,7 @@ impl MaskEditor {
                     let pct = 100 * m.count() / m.len().max(1);
                     self.circle = None;
                     self.set_mask(m);
-                    self.message = Some(format!("Sky detected: {pct} % of the image. It is approximate: correct it with the brush (✎ Paint: left button = sky, right button = foreground)."));
+                    self.message = Some(crate::trf!("Sky detected: {} % of the image. It is approximate: correct it with the brush (✎ Paint: left button = sky, right button = foreground).", pct));
                 }
             }
         }
@@ -132,22 +144,22 @@ impl MaskEditor {
     /// The mask controls. `source` is the image the sky is detected in (None: not open yet).
     pub fn controls(&mut self, ui: &mut egui::Ui, source: Option<Arc<Img>>) {
         ui.horizontal_wrapped(|ui| {
-            ui.toggle_value(&mut self.painting, "✎ Paint").on_hover_text("Paint on the image: left button = sky, right button = foreground, mouse wheel = brush size");
-            ui.checkbox(&mut self.show, "Show mask").on_hover_text("Sky tinted blue, foreground orange (always shown while painting)");
+            ui.toggle_value(&mut self.painting, tr("✎ Paint")).on_hover_text(tr("Paint on the image: left button = sky, right button = foreground, mouse wheel = brush size"));
+            ui.checkbox(&mut self.show, tr("Show mask")).on_hover_text(tr("Sky tinted blue, foreground orange (always shown while painting)"));
         });
         egui::Grid::new(ui.scope_id().with("mask_grid")).num_columns(2).show(ui, |ui| {
-            ui.label("Brush size (% width)");
+            ui.label(tr("Brush size (% width)"));
             ui.add(egui::Slider::new(&mut self.brush, 0.5..=30.0).logarithmic(true));
             ui.end_row();
-            ui.label("Soft edge (% width)");
+            ui.label(tr("Soft edge (% width)"));
             let mut f = self.local.feather * 100.0;
-            if ui.add(egui::Slider::new(&mut f, 0.0..=25.0).step_by(0.5)).on_hover_text("How softly the sky and foreground looks blend at the mask's edge. Large values give a gradual change (with the fisheye circle: a radial gradient)").changed() {
+            if ui.add(egui::Slider::new(&mut f, 0.0..=25.0).step_by(0.5)).on_hover_text(tr("How softly the sky and foreground looks blend at the mask's edge. Large values give a gradual change (with the fisheye circle: a radial gradient)")).changed() {
                 self.local.feather = f / 100.0;
             }
             ui.end_row();
             if self.circle.is_some() {
-                ui.label("Sky circle (% radius)");
-                if ui.add(egui::Slider::new(&mut self.sky_radius, 30.0..=100.0).step_by(1.0)).on_hover_text("How much of the fisheye's image circle is sky; the ring outside it is foreground. Changing it redraws the mask (brush corrections are lost)").changed() {
+                ui.label(tr("Sky circle (% radius)"));
+                if ui.add(egui::Slider::new(&mut self.sky_radius, 30.0..=100.0).step_by(1.0)).on_hover_text(tr("How much of the fisheye's image circle is sky; the ring outside it is foreground. Changing it redraws the mask (brush corrections are lost)")).changed() {
                     if let Some(img) = &source {
                         self.apply_circle(img.w, img.h);
                     }
@@ -157,24 +169,24 @@ impl MaskEditor {
         });
         let have = self.local.mask.w > 0;
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(have, egui::Button::new("All sky")).clicked() {
+            if ui.add_enabled(have, egui::Button::new(tr("All sky"))).clicked() {
                 self.fill(true);
             }
-            if ui.add_enabled(have, egui::Button::new("Invert")).clicked() {
+            if ui.add_enabled(have, egui::Button::new(tr("Invert"))).clicked() {
                 let old = self.local.mask.clone();
                 self.circle = None;
                 self.set_mask(Bits::from_fn(old.h, old.w, |y, x| !old.at(y, x)));
             }
-            if ui.add_enabled(have, egui::Button::new("Clear")).on_hover_text("Everything foreground").clicked() {
+            if ui.add_enabled(have, egui::Button::new(tr("Clear"))).on_hover_text(tr("Everything foreground")).clicked() {
                 self.fill(false);
             }
-            if ui.add_enabled(source.is_some(), egui::Button::new("◯ Fisheye circle")).on_hover_text("For a circular fisheye pointing up (all-sky): sky = a disc inside the image circle, the ring outside it foreground").clicked() {
+            if ui.add_enabled(source.is_some(), egui::Button::new(tr("◯ Fisheye circle"))).on_hover_text(tr("For a circular fisheye pointing up (all-sky): sky = a disc inside the image circle, the ring outside it foreground")).clicked() {
                 if let Some(img) = &source {
                     self.fisheye(img);
                 }
             }
-            let t = if self.detecting.is_some() { "Detecting…" } else { "◎ Detect sky" };
-            if ui.add_enabled(source.is_some() && self.detecting.is_none(), egui::Button::new(t)).on_hover_text("Find the sky automatically (sky at the top), then correct it with the brush").clicked() {
+            let t = if self.detecting.is_some() { tr("Detecting…") } else { tr("◎ Detect sky") };
+            if ui.add_enabled(source.is_some() && self.detecting.is_none(), egui::Button::new(t)).on_hover_text(tr("Find the sky automatically (sky at the top), then correct it with the brush")).clicked() {
                 if let Some(img) = source {
                     self.detect(img);
                 }
@@ -182,7 +194,7 @@ impl MaskEditor {
         });
         if self.local.mask.w > 0 {
             let pct = 100.0 * self.local.mask.count() as f64 / self.local.mask.len().max(1) as f64;
-            ui.label(egui::RichText::new(format!("Sky: {pct:.0} % of the image.")).weak().size(12.0));
+            ui.label(egui::RichText::new(crate::trf!("Sky: {} % of the image.", format!("{pct:.0}"))).weak().size(12.0));
         }
     }
 

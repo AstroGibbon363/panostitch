@@ -4,6 +4,7 @@
 //! (through a brush mask) and shown on the selected frame; the video is made
 //! in the background (src/timelapse.rs).
 
+use crate::gui::i18n::tr;
 use super::dialogs::{self, Picked};
 use super::finish::{colour_controls, light_controls, section, temperature_controls};
 use super::mask::MaskEditor;
@@ -11,7 +12,7 @@ use super::{image_view, texture, JobReport, View};
 use crate::finish::{self, FinishParams, Local};
 use crate::image::Img;
 use crate::io::{self, basename};
-use crate::timelapse::{self as tl, Deflicker, Format, Pan, Resolution, Settings};
+use crate::timelapse::{self as tl, Aspect, Deflicker, Format, Pan, Resolution, Settings};
 use egui::{Color32, Stroke};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,9 +21,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Where a look applies.
-const TARGETS: [&str; 3] = ["Whole frame", "Sky", "Foreground"];
+const TARGETS: [&str; 3] = ["Whole frame", "Sky", "Foreground"]; // tr
 /// Longest side of the frame preview.
 const PREVIEW_EDGE: usize = 1600;
+
+/// What a file dialog was opened for.
+#[derive(Clone, Copy, PartialEq)]
+enum Dlg {
+    AddFrames,
+    VideoFile,
+    OpenProject,
+    SaveProject,
+}
 
 /// The selected frame: a preview copy, and the width of the frame as loaded.
 struct Frame {
@@ -70,7 +80,10 @@ pub struct TimelapseTab {
     s: Settings,
     selected: Option<usize>,
     path_edit: String,
-    dialog: Option<Receiver<Picked>>,
+    dialog: Option<(Receiver<Picked>, Dlg)>,
+    /// The project file open or last saved, and what it held then.
+    project: Option<String>,
+    saved_fp: Option<u64>,
     status: String,
     use_finish: bool,
     target: usize,
@@ -107,7 +120,9 @@ impl Default for TimelapseTab {
             selected: None,
             path_edit: String::new(),
             dialog: None,
-            status: "Add the frames (left), set the look, then make the video (right).".into(),
+            project: None,
+            saved_fp: None,
+            status: tr("Add the frames (left), set the look, then make the video (right).").into(),
             use_finish: false,
             target: 0,
             mask: MaskEditor::new(true),
@@ -132,7 +147,7 @@ impl Default for TimelapseTab {
 }
 
 fn panic_text() -> String {
-    format!("internal error (details in {})", super::crash_log().display())
+    crate::trf!("internal error (details in {})", super::crash_log().display())
 }
 
 impl TimelapseTab {
@@ -169,8 +184,122 @@ impl TimelapseTab {
         if self.selected.is_none() && !self.s.frames.is_empty() {
             self.selected = Some(0);
         }
-        self.status = format!("Added {n} frame(s); {} in total.", self.s.frames.len());
+        self.status = crate::trf!("Added {} frame(s); {} in total.", n, self.s.frames.len());
         self.count_raw();
+    }
+
+    fn extras(&self) -> tl::ProjectExtras {
+        let (fisheye, sky_radius) = self.mask.circle_state();
+        tl::ProjectExtras { use_finish: self.use_finish, fisheye, sky_radius }
+    }
+
+    /// Everything a project keeps, as one number.
+    fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut s = self.s.clone();
+        s.local = self.mask.local.clone();
+        let text = tl::project_text(&s, &self.extras(), std::path::Path::new("/")).unwrap_or_default();
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut h);
+        h.finish()
+    }
+
+    /// Whether there are frames whose setup is not saved in a project.
+    pub fn unsaved(&self) -> bool {
+        !self.s.frames.is_empty() && self.saved_fp != Some(self.fingerprint())
+    }
+
+    fn ask_open_project(&mut self) {
+        if self.running.is_some() {
+            self.status = tr("Wait until the video is made.").into();
+        } else if self.dialog.is_none() {
+            self.dialog = Some((dialogs::pick_open(tr("Open project"), tr("Timelapse projects"), tl::PROJECT_EXT), Dlg::OpenProject));
+        }
+    }
+
+    /// Save the project: `quick` saves straight to the open project file, if there is one.
+    pub fn ask_save_project(&mut self, quick: bool) {
+        if quick {
+            if let Some(p) = self.project.clone() {
+                self.save_project(&p);
+                return;
+            }
+        }
+        if self.dialog.is_none() {
+            let default = self.project.clone().unwrap_or_else(|| match self.s.frames.first() {
+                Some(f) => std::path::Path::new(f).parent().unwrap_or(std::path::Path::new(".")).join(format!("timelapse{}", tl::PROJECT_EXT)).to_string_lossy().to_string(),
+                None => format!("timelapse{}", tl::PROJECT_EXT),
+            });
+            self.dialog = Some((dialogs::pick_save(tr("Save timelapse project"), &default), Dlg::SaveProject));
+        }
+    }
+
+    pub fn save_project(&mut self, path: &str) {
+        self.status = match tl::save_project(path, &self.settings(), &self.extras()) {
+            Ok(p) => {
+                super::remember_project(&p);
+                self.project = Some(p.clone());
+                self.saved_fp = Some(self.fingerprint());
+                crate::trf!("Saved project {}.", p)
+            }
+            Err(e) => crate::trf!("Error: {}", e),
+        };
+    }
+
+    pub fn open_project(&mut self, path: &str) {
+        if self.running.is_some() {
+            self.status = tr("Wait until the video is made.").into();
+            return;
+        }
+        match tl::open_project(path) {
+            Ok(o) => {
+                super::remember_project(path);
+                let mut s = o.settings;
+                let local = std::mem::take(&mut s.local);
+                self.s = s;
+                self.mask.set_local(local);
+                self.mask.set_circle(o.extras.fisheye, o.extras.sky_radius);
+                self.use_finish = o.extras.use_finish;
+                self.selected = (!self.s.frames.is_empty()).then_some(0);
+                self.shown = None;
+                self.tex = None;
+                self.look_tex = None;
+                self.report = None;
+                self.count_raw();
+                self.project = Some(path.to_string());
+                self.saved_fp = Some(self.fingerprint());
+                let miss = if o.missing.is_empty() {
+                    String::new()
+                } else {
+                    let few: Vec<&str> = o.missing.iter().take(3).map(|m| m.as_str()).collect();
+                    format!(" {} frame(s) not found: {}{}.", o.missing.len(), few.join(", "), if o.missing.len() > 3 { " …" } else { "" })
+                };
+                self.status = crate::trf!("Opened {}: {} frames.{}", basename(path), self.s.frames.len(), miss);
+            }
+            Err(e) => self.status = e,
+        }
+    }
+
+    /// Files dropped on the window.
+    pub fn add_dropped(&mut self, ps: Vec<String>) {
+        if self.running.is_some() {
+            self.status = tr("Wait until the video is made, then drop the files again.").into();
+        } else {
+            self.add(ps);
+        }
+    }
+
+    /// The settings remembered between sessions: deflicker, camera move, output
+    /// and RAW reading; not the frames, the look or the mask.
+    pub fn remembered(&self) -> String {
+        let s = Settings { frames: Vec::new(), out: String::new(), look: FinishParams::default(), local: Local::default(), base: None, ..self.s.clone() };
+        tl::project_text(&s, &tl::ProjectExtras::default(), std::path::Path::new("/")).unwrap_or_default()
+    }
+    pub fn restore_remembered(&mut self, path: &std::path::Path) {
+        if let Ok(o) = tl::open_project(&path.to_string_lossy()) {
+            let s = o.settings;
+            self.s = Settings { frames: std::mem::take(&mut self.s.frames), out: std::mem::take(&mut self.s.out), look: self.s.look.clone(), local: Local::default(), base: None, ..s };
+        }
     }
 
     fn count_raw(&mut self) {
@@ -191,12 +320,12 @@ impl TimelapseTab {
             v
         });
         let name = |d: io::RawDecoder| match d {
-            io::RawDecoder::Builtin => "built-in (fast)",
-            io::RawDecoder::Auto => "auto (RawTherapee where edited)",
+            io::RawDecoder::Builtin => tr("built-in (fast)"),
+            io::RawDecoder::Auto => tr("auto (RawTherapee where edited)"),
             d => d.name(),
         };
         ui.horizontal_wrapped(|ui| {
-            ui.label("RAW via");
+            ui.label(tr("RAW via"));
             egui::ComboBox::from_id_salt("tl_raw_via").selected_text(name(self.s.decoder)).show_ui(ui, |ui| {
                 for &d in decs.iter() {
                     ui.selectable_value(&mut self.s.decoder, d, name(d));
@@ -209,20 +338,27 @@ impl TimelapseTab {
         let honoured = matches!(self.s.decoder, io::RawDecoder::RawTherapee | io::RawDecoder::Auto);
         if pp3 > 0 && !honoured {
             let has_rt = decs.contains(&io::RawDecoder::RawTherapee);
-            let how = if has_rt { "choose rawtherapee to apply them (several seconds per frame)" } else { "RawTherapee is not installed, so they are not applied" };
-            ui.label(egui::RichText::new(format!("{pp3} of {raw} RAW frames have RawTherapee edits (.pp3): {how}.")).weak().size(12.0));
+            let how = if has_rt { tr("choose rawtherapee to apply them (several seconds per frame)") } else { tr("RawTherapee is not installed, so they are not applied") };
+            ui.label(egui::RichText::new(crate::trf!("{} of {} RAW frames have RawTherapee edits (.pp3): {}.", pp3, raw, how)).weak().size(12.0));
         }
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
-        if let Some(rx) = &self.dialog {
+        if let Some((rx, kind)) = &self.dialog {
             if let Ok(r) = rx.try_recv() {
+                let kind = *kind;
                 self.dialog = None;
-                match r {
-                    Picked::NoTool => self.status = dialogs::NO_DIALOG.into(),
-                    Picked::Files(f) => self.add(f),
-                    Picked::Save(Some(p)) => self.s.out = p,
-                    Picked::Save(None) => {}
+                match (r, kind) {
+                    (Picked::NoTool, _) => self.status = dialogs::NO_DIALOG.into(),
+                    (Picked::Files(f), Dlg::OpenProject) => {
+                        if let Some(p) = f.first() {
+                            self.open_project(p);
+                        }
+                    }
+                    (Picked::Files(f), _) => self.add(f),
+                    (Picked::Save(Some(p)), Dlg::SaveProject) => self.save_project(&p),
+                    (Picked::Save(Some(p)), _) => self.s.out = p,
+                    (Picked::Save(None), _) => {}
                 }
             }
         }
@@ -241,23 +377,23 @@ impl TimelapseTab {
                             self.tex = Some(texture(ctx, "timelapse_frame", &img));
                             self.shown = Some(Frame { path, decoder, img: Arc::new(img), loaded_w });
                         }
-                        Err(e) => self.status = format!("Cannot show {}: {e}", basename(&path)),
+                        Err(e) => self.status = crate::trf!("Cannot show {}: {}", basename(&path), e),
                     }
                 }
                 Msg::Look(key, r) => {
                     self.look_busy = false;
                     match r {
                         Ok(img) => self.look_tex = Some((*key, texture(ctx, "timelapse_look", &img))),
-                        Err(e) => self.status = format!("Preview failed: {e}"),
+                        Err(e) => self.status = crate::trf!("Preview failed: {}", e),
                     }
                 }
                 Msg::Done(r, secs) => {
                     let s = self.running.take().unwrap_or_default();
                     self.report = Some(Self::report(&s, &r, secs));
                     self.status = match &r {
-                        Ok(d) if d.files > 1 => format!("Wrote {} images ({}).", d.files, super::duration(secs)),
-                        Ok(d) => format!("Saved {} ({}).", d.out, super::duration(secs)),
-                        Err(e) => format!("No video: {e}"),
+                        Ok(d) if d.files > 1 => crate::trf!("Wrote {} images ({}).", d.files, super::duration(secs)),
+                        Ok(d) => crate::trf!("Saved {} ({}).", d.out, super::duration(secs)),
+                        Err(e) => crate::trf!("No video: {}", e),
                     };
                 }
             }
@@ -320,11 +456,11 @@ impl TimelapseTab {
         }
         let s = self.settings();
         if s.frames.is_empty() {
-            self.status = "Add frames first.".into();
+            self.status = tr("Add frames first.").into();
             return;
         }
         if s.out.trim().is_empty() {
-            self.status = "Choose where to save the video.".into();
+            self.status = tr("Choose where to save the video.").into();
             return;
         }
         if s.format.needs_ffmpeg() && self.ffmpeg().is_none() {
@@ -332,12 +468,12 @@ impl TimelapseTab {
             return;
         }
         if let Err(e) = crate::sys::check_writable(s.out.trim()) {
-            self.status = format!("Cannot save: {e}");
+            self.status = crate::trf!("Cannot save: {}", e);
             return;
         }
         self.cancel.store(false, Ordering::Relaxed);
         let t0 = Instant::now();
-        *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = Progress { msg: "Starting…".into(), done: 0.0, total: 1.0, start: Some(t0) };
+        *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = Progress { msg: tr("Starting…").into(), done: 0.0, total: 1.0, start: Some(t0) };
         self.report = None;
         self.running = Some(s.clone());
         let (tx, cancel, prog) = (self.tx.clone(), self.cancel.clone(), self.progress.clone());
@@ -359,19 +495,19 @@ impl TimelapseTab {
         match r {
             Ok(d) => {
                 let len = d.video_frames as f64 / s.fps.max(1) as f64;
-                let rep = JobReport::new(if s.format == Format::Sequence { "Images written" } else { "Video made" }, true)
-                    .row("Frames", n.to_string())
-                    .row("Video", format!("{} × {} px, {} fps, {} ({} frames)", d.w, d.h, s.fps, super::duration(len), d.video_frames))
-                    .row("Time", super::duration(secs));
+                let rep = JobReport::new(if s.format == Format::Sequence { tr("Images written") } else { tr("Video made") }, true)
+                    .row(tr("Frames"), n.to_string())
+                    .row(tr("Video"), crate::trf!("{} × {} px, {} fps, {} ({} frames)", d.w, d.h, s.fps, super::duration(len), d.video_frames))
+                    .row(tr("Time"), super::duration(secs));
                 if s.format == Format::Sequence {
                     let first = format!("{}_0001.{}", std::path::Path::new(&d.out).with_extension("").to_string_lossy(), io::ext_of(&d.out));
-                    rep.row("Files", format!("{} images, from {}", d.files, basename(&first)))
+                    rep.row(tr("Files"), crate::trf!("{} images, from {}", d.files, basename(&first))).file(&first)
                 } else {
-                    rep.row("File", format!("{} ({})", basename(&d.out), super::file_size(&d.out)))
+                    rep.row(tr("File"), format!("{} ({})", basename(&d.out), super::file_size(&d.out))).file(&d.out)
                 }
             }
-            Err(e) if e == "Cancelled" => JobReport::new("Video cancelled", false).row("Frames", n.to_string()).row("Time", super::duration(secs)).row("File", "nothing kept"),
-            Err(e) => JobReport::new("Video failed", false).row("Frames", n.to_string()).row("Time", super::duration(secs)).row("Error", e.clone()),
+            Err(e) if e == "Cancelled" => JobReport::new(tr("Video cancelled"), false).row(tr("Frames"), n.to_string()).row(tr("Time"), super::duration(secs)).row(tr("File"), tr("nothing kept")),
+            Err(e) => JobReport::new(tr("Video failed"), false).row(tr("Frames"), n.to_string()).row(tr("Time"), super::duration(secs)).row(tr("Error"), e.clone()),
         }
     }
 
@@ -379,6 +515,16 @@ impl TimelapseTab {
         self.poll(ctx);
         if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.is_none()) {
             self.view.fit = true;
+        }
+        {
+            use egui::{Key, KeyboardShortcut as Ks, Modifiers as Mo};
+            let (save, open) = ctx.input_mut(|i| (i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::S)), i.consume_shortcut(&Ks::new(Mo::COMMAND, Key::O))));
+            if save {
+                self.ask_save_project(true);
+            }
+            if open {
+                self.ask_open_project();
+            }
         }
         egui::Panel::left("tl_left").default_size(380.0).size_range(320.0..=650.0).resizable(true).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("tll").show(ui, |ui| self.left(ui));
@@ -398,20 +544,33 @@ impl TimelapseTab {
 
     fn left(&mut self, ui: &mut egui::Ui) {
         let idle = self.running.is_none();
-        ui.heading("Frames");
         ui.add_enabled_ui(idle, |ui| {
             ui.horizontal_wrapped(|ui| {
-                let r = ui.add(egui::TextEdit::singleline(&mut self.path_edit).desired_width(ui.available_width().min(240.0)).hint_text("file or folder, Enter to add"));
+                if ui.button(tr("⇪ Open project…")).on_hover_text(tr("Ctrl+O")).clicked() {
+                    self.ask_open_project();
+                }
+                if ui.button(tr("⬇ Save project…")).on_hover_text(tr("Frames, look, mask and video settings. Ctrl+S saves to the open project at once")).clicked() {
+                    self.ask_save_project(false);
+                }
+            });
+        });
+        if let Some(p) = &self.project {
+            ui.label(egui::RichText::new(crate::trf!("Project: {}", basename(p))).weak().size(12.0));
+        }
+        ui.heading(tr("Frames"));
+        ui.add_enabled_ui(idle, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let r = ui.add(egui::TextEdit::singleline(&mut self.path_edit).desired_width(ui.available_width().min(240.0)).hint_text(tr("file or folder, Enter to add")));
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     let ps = dialogs::expand_paths(&self.path_edit);
                     self.add(ps);
                 }
-                if ui.button("Add…").on_hover_text("Add frames: JPEG, TIFF, PNG, camera RAW, FITS").clicked() && self.dialog.is_none() {
-                    self.dialog = Some(dialogs::pick_images());
+                if ui.button(tr("Add…")).on_hover_text(tr("Add frames: JPEG, TIFF, PNG, camera RAW, FITS")).clicked() && self.dialog.is_none() {
+                    self.dialog = Some((dialogs::pick_images(), Dlg::AddFrames));
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(self.selected.is_some(), egui::Button::new("Remove")).clicked() {
+                if ui.add_enabled(self.selected.is_some(), egui::Button::new(tr("Remove"))).clicked() {
                     if let Some(i) = self.selected {
                         if i < self.s.frames.len() {
                             self.s.frames.remove(i);
@@ -420,16 +579,16 @@ impl TimelapseTab {
                     }
                     self.count_raw();
                 }
-                if ui.add_enabled(!self.s.frames.is_empty(), egui::Button::new("Clear")).clicked() {
+                if ui.add_enabled(!self.s.frames.is_empty(), egui::Button::new(tr("Clear"))).clicked() {
                     self.s.frames.clear();
                     self.selected = None;
                     self.count_raw();
                 }
-                ui.label(format!("{} frame(s)", self.s.frames.len()));
+                ui.label(crate::trf!("{} frame(s)", self.s.frames.len()));
             });
             self.decoder_ui(ui);
         });
-        ui.label(egui::RichText::new("Frames play in file-name order (camera numbering). Click one to show it.").weak().size(12.0));
+        ui.label(egui::RichText::new(tr("Frames play in file-name order (camera numbering). Click one to show it.")).weak().size(12.0));
         egui::ScrollArea::vertical().id_salt("tl_list").max_height(180.0).show(ui, |ui| {
             for (i, f) in self.s.frames.iter().enumerate() {
                 if ui.selectable_label(self.selected == Some(i), format!("{:>4}  {}", i + 1, basename(f))).clicked() {
@@ -437,15 +596,16 @@ impl TimelapseTab {
                 }
             }
             if self.s.frames.is_empty() {
-                ui.label(egui::RichText::new("No frames yet.").weak());
+                ui.label(egui::RichText::new(tr("No frames yet.")).weak());
             }
         });
         ui.separator();
 
-        section(ui, "Look", true, |ui| {
+        section(ui, tr("Look"), true, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Adjust:");
+                ui.label(tr("Adjust:"));
                 for (k, t) in TARGETS.iter().enumerate() {
+                    let t = tr(t);
                     let edited = finish::look_used(self.look(k));
                     if ui.selectable_label(self.target == k, if edited { format!("{t} •") } else { t.to_string() }).clicked() {
                         self.target = k;
@@ -453,13 +613,13 @@ impl TimelapseTab {
                 }
             });
             let note = match self.target {
-                0 => "Applies to every pixel of every frame.",
-                1 => "On top of the whole-frame look, only where the mask is sky.",
-                _ => "On top of the whole-frame look, only where the mask is foreground.",
+                0 => tr("Applies to every pixel of every frame."),
+                1 => tr("On top of the whole-frame look, only where the mask is sky."),
+                _ => tr("On top of the whole-frame look, only where the mask is foreground."),
             };
             ui.label(egui::RichText::new(note).weak().size(12.0));
             if self.target > 0 && !self.mask.has_sky() {
-                ui.colored_label(Color32::from_rgb(230, 150, 30), "Paint the mask or detect the sky first (Mask below): nothing is sky yet.");
+                ui.colored_label(Color32::from_rgb(230, 150, 30), tr("Paint the mask or detect the sky first (Mask below): nothing is sky yet."));
             }
             let id = ["tl_whole", "tl_sky", "tl_fg"][self.target];
             let k = self.target;
@@ -467,15 +627,19 @@ impl TimelapseTab {
             light_controls(ui, p, &format!("{id}_light"));
             temperature_controls(ui, p, &format!("{id}_temp"));
             colour_controls(ui, p, &format!("{id}_col"));
-            if ui.small_button(format!("Reset {}", TARGETS[k].to_lowercase())).clicked() {
+            if ui.small_button(match k {
+                0 => tr("Reset whole frame"),
+                1 => tr("Reset sky"),
+                _ => tr("Reset foreground"),
+            }).clicked() {
                 *p = FinishParams::default();
             }
         });
 
-        section(ui, "Mask (sky / foreground)", true, |ui| {
+        section(ui, tr("Mask (sky / foreground)"), true, |ui| {
             let src = self.shown.as_ref().map(|f| f.img.clone());
             self.mask.controls(ui, src);
-            ui.label(egui::RichText::new("One mask serves every frame: on a tripod the foreground does not move.").weak().size(12.0));
+            ui.label(egui::RichText::new(tr("One mask serves every frame: on a tripod the foreground does not move.")).weak().size(12.0));
         });
     }
 
@@ -513,14 +677,14 @@ impl TimelapseTab {
             let p = self.progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let f = if p.total > 0.0 { (p.done / p.total) as f32 } else { 0.0 };
             super::progress_bar(ui, &p.msg, f, p.start);
-            if ui.button("✖ Cancel").on_hover_text("Stop; nothing is kept").clicked() {
+            if ui.button(tr("✖ Cancel")).on_hover_text(tr("Stop; nothing is kept")).clicked() {
                 self.cancel.store(true, Ordering::Relaxed);
             }
         } else {
             let ff_missing = self.s.format.needs_ffmpeg() && self.ffmpeg().is_none();
             let can = !self.s.frames.is_empty() && !ff_missing;
-            let b = ui.add_enabled(can, egui::Button::new(egui::RichText::new("▶ Make video").strong())).on_hover_text("Make the video from all frames, with the look and the settings above");
-            let b = if self.s.frames.is_empty() { b.on_disabled_hover_text("Add frames first") } else { b.on_disabled_hover_text(tl::NO_FFMPEG) };
+            let b = ui.add_enabled(can, egui::Button::new(egui::RichText::new(tr("▶ Make video")).strong())).on_hover_text(tr("Make the video from all frames, with the look and the settings above"));
+            let b = if self.s.frames.is_empty() { b.on_disabled_hover_text(tr("Add frames first")) } else { b.on_disabled_hover_text(tl::NO_FFMPEG) };
             if b.clicked() {
                 self.start();
             }
@@ -528,65 +692,65 @@ impl TimelapseTab {
     }
 
     fn video_settings(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Video");
+        ui.heading(tr("Video"));
         egui::Grid::new("tl_mode").num_columns(2).show(ui, |ui| {
-            ui.label("Deflicker");
+            ui.label(tr("Deflicker"));
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.s.deflicker, Deflicker::Off, "Off");
-                ui.selectable_value(&mut self.s.deflicker, Deflicker::Light, "Light").on_hover_text("Evens out brightness and colour jumps between neighbouring frames");
-                ui.selectable_value(&mut self.s.deflicker, Deflicker::Strong, "Strong").on_hover_text("Also evens out slower brightness changes (three times the smoothing)");
+                ui.selectable_value(&mut self.s.deflicker, Deflicker::Off, tr("Off"));
+                ui.selectable_value(&mut self.s.deflicker, Deflicker::Light, crate::gui::i18n::tr_ctx("deflicker: Light", "Light")).on_hover_text(tr("Evens out brightness and colour jumps between neighbouring frames"));
+                ui.selectable_value(&mut self.s.deflicker, Deflicker::Strong, crate::gui::i18n::tr_ctx("deflicker: Strong", "Strong")).on_hover_text(tr("Also evens out slower brightness changes (three times the smoothing)"));
             });
             ui.end_row();
             if self.s.deflicker != Deflicker::Off && !self.simple {
-                ui.label("Smoothing");
-                ui.add(egui::Slider::new(&mut self.s.deflicker_window, 3..=31).suffix(" frames")).on_hover_text("Brightness is evened out over this many neighbouring frames");
+                ui.label(tr("Smoothing"));
+                ui.add(egui::Slider::new(&mut self.s.deflicker_window, 3..=31).suffix(tr(" frames"))).on_hover_text(tr("Brightness is evened out over this many neighbouring frames"));
                 ui.end_row();
             }
         });
         if self.s.deflicker != Deflicker::Off {
             ui.horizontal_wrapped(|ui| {
-                ui.checkbox(&mut self.s.deflicker_colour, "Colour too").on_hover_text("Even out each colour on its own, so the colour cast does not jump between frames either (off: brightness only)");
-                ui.checkbox(&mut self.s.deflicker_regions, "Region by region").on_hover_text("Even out large-scale changes across the frame (light pollution, passing lights, dawn on one side) on a coarse grid; off: the whole frame alike");
+                ui.checkbox(&mut self.s.deflicker_colour, tr("Colour too")).on_hover_text(tr("Even out each colour on its own, so the colour cast does not jump between frames either (off: brightness only)"));
+                ui.checkbox(&mut self.s.deflicker_regions, tr("Region by region")).on_hover_text(tr("Even out large-scale changes across the frame (light pollution, passing lights, dawn on one side) on a coarse grid; off: the whole frame alike"));
             });
         }
         let have_finish = self.finish_look.is_some();
-        ui.add_enabled(have_finish, egui::Checkbox::new(&mut self.use_finish, "Start from the Post-processing tab's look"))
-            .on_hover_text("Every frame first gets the stretch, white balance, light, curves, colour and detail set in Post-processing (not its turn and crop), then the look set here")
-            .on_disabled_hover_text("Open an image in the Post-processing tab and set the look there first");
+        ui.add_enabled(have_finish, egui::Checkbox::new(&mut self.use_finish, tr("Start from the Post-processing tab's look")))
+            .on_hover_text(tr("Every frame first gets the stretch, white balance, light, curves, colour and detail set in Post-processing (not its turn and crop), then the look set here"))
+            .on_disabled_hover_text(tr("Open an image in the Post-processing tab and set the look there first"));
         if !have_finish {
             self.use_finish = false;
         }
         ui.separator();
-        ui.heading("Camera move");
+        ui.heading(tr("Camera move"));
         egui::Grid::new("tl_motion").num_columns(2).show(ui, |ui| {
-            ui.label("Slider move");
-            ui.add(egui::Slider::new(&mut self.s.pan, 0.0..=20.0).step_by(0.5).suffix(" %")).on_hover_text("As if the camera rode on a slider: the video shows a part this much smaller than the frame and moves it across the frame (0 = no move)");
+            ui.label(tr("Slider move"));
+            ui.add(egui::Slider::new(&mut self.s.pan, 0.0..=20.0).step_by(0.5).suffix(" %")).on_hover_text(tr("As if the camera rode on a slider: the video shows a part this much smaller than the frame and moves it across the frame (0 = no move)"));
             ui.end_row();
             if self.s.pan > 0.0 {
-                ui.label("Direction");
-                egui::ComboBox::from_id_salt("tl_pan").selected_text(self.s.pan_dir.name()).show_ui(ui, |ui| {
+                ui.label(tr("Direction"));
+                egui::ComboBox::from_id_salt("tl_pan").selected_text(tr(self.s.pan_dir.name())).show_ui(ui, |ui| {
                     for d in Pan::ALL {
-                        ui.selectable_value(&mut self.s.pan_dir, d, d.name());
+                        ui.selectable_value(&mut self.s.pan_dir, d, tr(d.name()));
                     }
                 });
                 ui.end_row();
             }
-            ui.label("Slow zoom in");
-            ui.add(egui::Slider::new(&mut self.s.zoom, 0.0..=30.0).step_by(0.5).suffix(" %")).on_hover_text("Zoom in slowly over the whole video (0 = still)");
+            ui.label(tr("Slow zoom in"));
+            ui.add(egui::Slider::new(&mut self.s.zoom, 0.0..=30.0).step_by(0.5).suffix(" %")).on_hover_text(tr("Zoom in slowly over the whole video (0 = still)"));
             ui.end_row();
         });
         if self.s.pan > 0.0 || self.s.zoom > 0.0 {
-            ui.checkbox(&mut self.s.ease, "Start and stop gently").on_hover_text("The move speeds up at the start and slows down at the end, like a motorised slider; off: the same speed all the way");
-            ui.label(egui::RichText::new("The preview outlines where the video starts (bright) and ends (faint).").weak().size(12.0));
+            ui.checkbox(&mut self.s.ease, tr("Start and stop gently")).on_hover_text(tr("The move speeds up at the start and slows down at the end, like a motorised slider; off: the same speed all the way"));
+            ui.label(egui::RichText::new(tr("The preview outlines where the video starts (bright) and ends (faint).")).weak().size(12.0));
         }
         ui.separator();
-        ui.heading("Output");
+        ui.heading(tr("Output"));
         egui::Grid::new("tl_out").num_columns(2).show(ui, |ui| {
-            ui.label("Format");
+            ui.label(tr("Format"));
             let before = self.s.format;
-            egui::ComboBox::from_id_salt("tl_fmt").selected_text(self.s.format.name()).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("tl_fmt").selected_text(tr(self.s.format.name())).show_ui(ui, |ui| {
                 for f in Format::ALL {
-                    ui.selectable_value(&mut self.s.format, f, f.name());
+                    ui.selectable_value(&mut self.s.format, f, tr(f.name()));
                 }
             });
             if self.s.format != before && !self.s.out.is_empty() {
@@ -594,15 +758,15 @@ impl TimelapseTab {
             }
             ui.end_row();
             if self.s.format == Format::Sequence {
-                ui.label("Image type");
+                ui.label(tr("Image type"));
                 let cur = io::ext_of(&self.s.out);
                 let name = match cur.as_str() {
-                    "png" => "PNG (16-bit)",
+                    "png" => tr("PNG (16-bit)"),
                     "jpg" | "jpeg" => "JPEG",
-                    _ => "TIFF (16-bit)",
+                    _ => tr("TIFF (16-bit)"),
                 };
                 egui::ComboBox::from_id_salt("tl_seq").selected_text(name).show_ui(ui, |ui| {
-                    for (e, l) in [("tif", "TIFF (16-bit)"), ("png", "PNG (16-bit)"), ("jpg", "JPEG")] {
+                    for (e, l) in [("tif", tr("TIFF (16-bit)")), ("png", tr("PNG (16-bit)")), ("jpg", "JPEG")] {
                         if ui.selectable_label(cur == e, l).clicked() {
                             self.s.out = io::with_ext(&self.s.out, e);
                         }
@@ -610,34 +774,45 @@ impl TimelapseTab {
                 });
                 ui.end_row();
             }
-            ui.label("Frame rate");
+            ui.label(tr("Frame rate"));
             egui::ComboBox::from_id_salt("tl_fps").selected_text(format!("{} fps", self.s.fps)).show_ui(ui, |ui| {
                 for f in [12, 24, 25, 30, 50, 60] {
                     ui.selectable_value(&mut self.s.fps, f, format!("{f} fps"));
                 }
             });
             ui.end_row();
-            ui.label("Resolution");
-            egui::ComboBox::from_id_salt("tl_res").selected_text(self.s.resolution.name()).show_ui(ui, |ui| {
+            ui.label(tr("Resolution"));
+            egui::ComboBox::from_id_salt("tl_res").selected_text(tr(self.s.resolution.name())).show_ui(ui, |ui| {
                 for r in Resolution::ALL {
-                    ui.selectable_value(&mut self.s.resolution, r, r.name());
+                    ui.selectable_value(&mut self.s.resolution, r, tr(r.name()));
                 }
             });
             ui.end_row();
-            ui.label("");
-            ui.checkbox(&mut self.s.crop_16_9, "Crop to 16:9").on_hover_text("Cut the 3:2 camera frame to a widescreen video (the preview outlines the cut)");
+            ui.label(tr("Shape"));
+            egui::ComboBox::from_id_salt("tl_shape").selected_text(tr(self.s.aspect.name())).show_ui(ui, |ui| {
+                for a in Aspect::ALL {
+                    ui.selectable_value(&mut self.s.aspect, a, tr(a.name()));
+                }
+            })
+            .response
+            .on_hover_text(tr("The video's shape: the frame is cut to it (the preview outlines the cut). 16:9, 3:2 and 4:3 follow the frames' orientation"));
             ui.end_row();
+            if !matches!(self.s.aspect, Aspect::Frame | Aspect::Square) && self.mask.circle_state().0.is_some() {
+                ui.label("");
+                ui.add(egui::Label::new(egui::RichText::new(tr("This cuts off part of the fisheye's image circle. Choose 1:1 square to keep the whole sky.")).color(Color32::from_rgb(230, 150, 30))).wrap());
+                ui.end_row();
+            }
             let jpeg = self.s.format == Format::Sequence && matches!(io::ext_of(&self.s.out).as_str(), "jpg" | "jpeg");
             if self.s.format.needs_ffmpeg() || jpeg {
-                ui.label("Quality");
-                ui.add(egui::Slider::new(&mut self.s.quality, 30..=100)).on_hover_text("Higher = better picture, bigger file");
+                ui.label(tr("Quality"));
+                ui.add(egui::Slider::new(&mut self.s.quality, 30..=100)).on_hover_text(tr("Higher = better picture, bigger file"));
                 ui.end_row();
             }
             ui.label("");
-            ui.checkbox(&mut self.s.bounce, "Play forward, then back").on_hover_text("The frames again in reverse at the end: loops smoothly");
+            ui.checkbox(&mut self.s.bounce, tr("Play forward, then back")).on_hover_text(tr("The frames again in reverse at the end: loops smoothly"));
             ui.end_row();
             if !self.simple {
-                ui.label("Hold last frame");
+                ui.label(tr("Hold last frame"));
                 ui.add(egui::Slider::new(&mut self.s.hold_last, 0.0..=5.0).suffix(" s").step_by(0.5));
                 ui.end_row();
             }
@@ -645,28 +820,28 @@ impl TimelapseTab {
         if self.s.format.needs_ffmpeg() {
             match self.ffmpeg() {
                 Some(p) => {
-                    ui.label(egui::RichText::new(format!("Made with ffmpeg ({})", p.display())).weak().size(12.0));
+                    ui.label(egui::RichText::new(crate::trf!("Made with ffmpeg ({})", p.display())).weak().size(12.0));
                 }
                 None => {
                     ui.colored_label(Color32::from_rgb(230, 150, 30), tl::NO_FFMPEG);
-                    if ui.small_button("Look for ffmpeg again").clicked() {
+                    if ui.small_button(tr("Look for ffmpeg again")).clicked() {
                         self.ffmpeg = None;
                     }
                 }
             }
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label("Save as");
-            ui.add(egui::TextEdit::singleline(&mut self.s.out).desired_width(ui.available_width().min(200.0)).hint_text("output file"));
-            if ui.button("…").on_hover_text("Choose the file").clicked() && self.dialog.is_none() {
-                self.dialog = Some(dialogs::pick_save("Save video", &self.s.out));
+            ui.label(tr("Save as"));
+            ui.add(egui::TextEdit::singleline(&mut self.s.out).desired_width(ui.available_width().min(200.0)).hint_text(tr("output file")));
+            if ui.button("…").on_hover_text(tr("Choose the file")).clicked() && self.dialog.is_none() {
+                self.dialog = Some((dialogs::pick_save(tr("Save video"), &self.s.out), Dlg::VideoFile));
             }
         });
         if self.s.format == Format::Sequence {
             let stem = std::path::Path::new(&self.s.out).with_extension("");
-            ui.label(egui::RichText::new(format!("Writes {}_0001.{}, _0002 … in that folder.", basename(&stem.to_string_lossy()), io::ext_of(&self.s.out))).weak().size(12.0));
+            ui.label(egui::RichText::new(crate::trf!("Writes {}_0001.{}, _0002 … in that folder.", basename(&stem.to_string_lossy()), io::ext_of(&self.s.out))).weak().size(12.0));
         } else if std::path::Path::new(&self.s.out).exists() {
-            ui.colored_label(Color32::from_rgb(230, 150, 30), "This file exists and will be replaced.");
+            ui.colored_label(Color32::from_rgb(230, 150, 30), tr("This file exists and will be replaced."));
         }
         ui.add_space(4.0);
         let n = self.s.frames.len();
@@ -678,12 +853,12 @@ impl TimelapseTab {
             tl::video_size((f.img.w as f64 * k).round() as usize, (f.img.h as f64 * k).round() as usize, &self.s)
         });
         let size_txt = size.map(|(w, h)| format!(", {w} × {h} px")).unwrap_or_default();
-        ui.label(format!("{n} frames at {} fps → {} of video{size_txt}", self.s.fps, super::duration(total / self.s.fps.max(1) as f64)));
+        ui.label(crate::trf!("{} frames at {} fps → {} of video{}", n, self.s.fps, super::duration(total / self.s.fps.max(1) as f64), size_txt));
         if self.s.format == Format::Gif {
             if size.is_some_and(|(w, h)| w.max(h) > 1280) {
-                ui.colored_label(Color32::from_rgb(230, 150, 30), "GIFs get very large above 720p: choose 720p or smaller.");
+                ui.colored_label(Color32::from_rgb(230, 150, 30), tr("GIFs get very large above 720p: choose 720p or smaller."));
             }
-            ui.label(egui::RichText::new("GIF suits short clips for forums and chats. Star fields compress badly: about 1 MB per frame at 720p. MP4 is 5–10 times smaller.").weak().size(12.0));
+            ui.label(egui::RichText::new(tr("GIF suits short clips for forums and chats. Star fields compress badly: about 1 MB per frame at 720p. MP4 is 5–10 times smaller.")).weak().size(12.0));
         }
     }
 
@@ -693,34 +868,34 @@ impl TimelapseTab {
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Fit").on_hover_text("Whole frame in view (F)").clicked() {
+            if ui.button(tr("Fit")).on_hover_text(tr("Whole frame in view (F)")).clicked() {
                 self.view.fit = true;
             }
             let n = self.s.frames.len();
-            if ui.add_enabled(n > 0, egui::Button::new("◀")).on_hover_text("Previous frame").clicked() {
+            if ui.add_enabled(n > 0, egui::Button::new("◀")).on_hover_text(tr("Previous frame")).clicked() {
                 self.selected = Some(self.selected.unwrap_or(0).saturating_sub(1));
             }
-            if ui.add_enabled(n > 0, egui::Button::new("▶")).on_hover_text("Next frame").clicked() {
+            if ui.add_enabled(n > 0, egui::Button::new("▶")).on_hover_text(tr("Next frame")).clicked() {
                 self.selected = Some((self.selected.map_or(0, |i| i + 1)).min(n.saturating_sub(1)));
             }
             if let (Some(i), Some(f)) = (self.selected, &self.shown) {
-                ui.label(format!("Frame {} of {n}: {}", i + 1, basename(&f.path)));
+                ui.label(crate::trf!("Frame {} of {}: {}", i + 1, n, basename(&f.path)));
             }
-            ui.checkbox(&mut self.show_look, "Show the look").on_hover_text("The selected frame with the look and the mask applied (off: as it is). Deflicker and the camera move show only in the video");
+            ui.checkbox(&mut self.show_look, tr("Show the look")).on_hover_text(tr("The selected frame with the look and the mask applied (off: as it is). Deflicker and the camera move show only in the video"));
             if self.loading.is_some() || self.look_busy {
                 ui.spinner();
             }
             if self.mask.painting {
-                ui.colored_label(Color32::from_rgb(120, 170, 255), "Painting: left = sky, right = foreground, wheel = brush size");
+                ui.colored_label(Color32::from_rgb(120, 170, 255), tr("Painting: left = sky, right = foreground, wheel = brush size"));
             }
         });
         ui.label(egui::RichText::new(&self.status).size(12.5));
         let (Some(f), Some(raw)) = (&self.shown, &self.tex) else {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {
-                ui.label(egui::RichText::new("Timelapse").size(22.0).weak());
+                ui.label(egui::RichText::new(tr("Timelapse")).size(22.0).weak());
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(if self.s.frames.is_empty() { "Add frames on the left; the selected frame shows here with its look, for painting the mask." } else { "Loading the frame…" }).weak());
+                ui.label(egui::RichText::new(if self.s.frames.is_empty() { tr("Add frames on the left; the selected frame shows here with its look, for painting the mask.") } else { tr("Loading the frame…") }).weak());
             });
             return;
         };
@@ -741,7 +916,7 @@ impl TimelapseTab {
         }
         let s = image_view(ui, &mut self.view, (w, h), &layers, !self.mask.painting);
         // The part of the frame the video shows: at the start, and at the end of the move or zoom.
-        if self.s.crop_16_9 || self.s.zoom > 0.0 || self.s.pan > 0.0 {
+        if self.s.aspect != Aspect::Frame || self.s.zoom > 0.0 || self.s.pan > 0.0 {
             let p = ui.painter().with_clip_rect(s.rect);
             let ends: &[f64] = if self.s.zoom > 0.0 || self.s.pan > 0.0 { &[0.0, 1.0] } else { &[0.0] };
             for &t in ends {

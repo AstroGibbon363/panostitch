@@ -1,6 +1,6 @@
 # Panorama Stitcher: uživatelská příručka
 
-*Další jazyky: [English](manual_en.md) · [Deutsch](manual_de.md)*
+*Další jazyky: [English](manual_en.md) · [Deutsch](manual_de.md) · [Español](manual_es.md) · [Français](manual_fr.md) · [Polski](manual_pl.md)*
 
 Program pro počítač, který spojí překrývající se snímky do jedné panoramy nebo
 mozaiky: JPEG, TIFF, PNG, RAW z fotoaparátu a astronomické snímky FITS. Každý
@@ -8,8 +8,10 @@ krok proběhne až po stisknutí příslušného tlačítka a každý výsledek 
 před pokračováním prohlédnout a opravit. Druhá karta skládá snímky hvězd do
 oblohy s nízkým šumem nebo do hvězdných stop ([Skládání hvězd](#13-skládání-hvězd)).
 
-Ovládací prvky programu jsou pojmenované anglicky. V této příručce jsou proto
-uvedeny **tučně v angličtině**, přesně tak, jak je uvidíte na obrazovce.
+Ovládací prvky jsou v této příručce uvedeny **tučně**, tak jak je uvidíte na
+obrazovce v češtině. Jazyk okna (čeština, angličtina, němčina, španělština,
+francouzština, polština) se přepíná vpravo
+nahoře; tato příručka je v programu i pod tlačítkem **? Nápověda** (F1).
 
 ---
 
@@ -71,11 +73,14 @@ Snímky nebo soubor projektu můžete rovnou předat k otevření:
 panostitch ~/Pictures/pano/*.NEF
 panostitch moje_pano.panoproj
 panostitch noc.stackproj            # otevře se na kartě skládání hvězd
+panostitch noc.tlproj               # otevře se na kartě Timelapse
 ```
 
 Poznámky:
 
-- Program automaticky využívá všechna jádra procesoru.
+- Program automaticky využívá jádra procesoru. Dlouhé úlohy jich používají
+  nejvýš 85 % a nechávají 15 % paměti volných, takže počítač zůstane
+  použitelný.
 - Okno se otevře do jedné až dvou sekund; nic se předem nepřipravuje.
 - Pokud se okno neobjeví, spusťte program z terminálu: vypíše tam chybová
   hlášení.
@@ -83,6 +88,24 @@ Poznámky:
   nastavení: `~/.config/panostitch` na Linuxu,
   `~/Library/Application Support/panostitch` na macOS,
   `%APPDATA%\panostitch` na Windows.
+- **Jazyk:** okno mluví česky, anglicky, německy, španělsky, francouzsky nebo
+  polsky; nabídka vpravo nahoře
+  přepne hned (první spuštění se řídí jazykem systému).
+- **Nápověda:** **? Nápověda** vpravo nahoře (nebo F1) otevře tuto příručku
+  přímo v programu, s obsahem, hledáním a odkazy; F1 otevře kapitolu zobrazené
+  karty.
+- **Pamatuje si mezi spuštěními:** kartu, na které jste byli, nastavení
+  skládání hvězd, nastavení videa v Timelapse (deflicker, pohyb kamery,
+  výstup, RAW via) a nastavení RAW ve skládání panoramat. Soubory, masky a
+  vzhled si nepamatuje; ty drží soubor projektu.
+- **Přetažení myší:** obrázky nebo složku přetažené do okna přidá na
+  zobrazenou kartu (Post-processing otevře první obrázek). Přetažený soubor
+  projektu se otevře na své kartě.
+- **Nedávné projekty** (horní lišta) ukazuje naposledy otevřené nebo uložené
+  projekty všech druhů; kliknutím se projekt otevře na své kartě.
+- Dialogy souborů začínají ve složce, kterou jste použili naposledy.
+- Po uložení otevře **Ukázat ve složce** (ve zprávě, nebo vedle Save v
+  Post-processing) složku ve správci souborů.
 
 ---
 
@@ -114,12 +137,12 @@ Poznámky:
 - **Červený stavový řádek** (pod náhledem): co program právě dělá, výsledky a
   chybová hlášení.
 
-Přepínače vpravo nahoře mění vzhled: **Dark** (tmavý), **Modern** (zaoblenější,
-vzdušnější ovládání) a **Simple** (jednoduchý). Jednoduchý režim skryje podrobné
+Přepínače vpravo nahoře mění vzhled: **Tmavý**, **Moderní** (zaoblenější,
+vzdušnější ovládání) a **Jednoduchý**. Jednoduchý režim skryje podrobné
 ovládání (nastavení hledání a párování bodů, prolínání, roztažení, posouvání)
-a ponechá, co potřebuje většina panoram: snímky, předvolbu, **Run all steps**,
+a ponechá, co potřebuje většina panoram: snímky, předvolbu, **Spustit všechny kroky**,
 projekci s ohniskovou vzdáleností, natočením (yaw), sklonem (pitch) a
-klopením (roll), expozici, **Even out**, ořez, náhled a uložení. Skrytá
+klopením (roll), expozici, **Vyrovnat**, ořez, náhled a uložení. Skrytá
 nastavení si ponechají hodnoty z předvolby. Program si přepínače pamatuje.
 
 ---
@@ -128,25 +151,25 @@ nastavení si ponechají hodnoty z předvolby. Program si přepínače pamatuje.
 
 **Fotografická panorama:**
 
-1. Nechte zapnuté **half size**. Je to rychlejší a na kontrolu výsledku to
+1. Nechte zapnuté **poloviční velikost**. Je to rychlejší a na kontrolu výsledku to
    bohatě stačí.
-2. Zvolte **Preset** podle námětu (viz [Předvolby](#50-předvolby)).
+2. Zvolte **Předvolba** podle námětu (viz [Předvolby](#50-předvolby)).
 3. Napište složku se snímky do pole pro cestu a stiskněte **Enter**, nebo
-   klikněte na **Add…** a snímky vyberte. **Na pořadí nezáleží.**
-4. Klikněte na **Run all steps** a počkejte, až stavový řádek ukáže *Done*.
-5. Vpravo zvolte **projekci**: **cylindrical** pro jednu řadu, **spherical**
+   klikněte na **Přidat…** a snímky vyberte. **Na pořadí nezáleží.**
+4. Klikněte na **Spustit všechny kroky** a počkejte, až stavový řádek ukáže *Done*.
+5. Vpravo zvolte **projekci**: **válcová** pro jednu řadu, **sférická**
    pro více řad nebo pro záběry sahající hodně nahoru či dolů. Je-li výsledek
-   tmavý, klikněte na **Auto exposure**; je-li horizont prohnutý, upravte
-   **Pitch**. Tlačítkem **Auto crop** odříznete zubaté okraje.
-6. Klikněte na **Save panorama…**. Chcete-li se k práci později vrátit,
-   klikněte i na **Save project…**.
+   tmavý, klikněte na **Automatická expozice**; je-li horizont prohnutý, upravte
+   **Sklon**. Tlačítkem **Automatický ořez** odříznete zubaté okraje.
+6. Klikněte na **Uložit panorama…**. Chcete-li se k práci později vrátit,
+   klikněte i na **Uložit projekt…**.
 
 **Mozaika hlubokého vesmíru ze souborů FITS:**
 
-1. Zvolte předvolbu **deep-sky mosaic**.
+1. Zvolte předvolbu **deep-sky mozaika**.
 2. Načtěte dlaždice FITS (složené nebo jednotlivé snímky). Pro zobrazení se
    automaticky roztáhnou.
-3. Klikněte na **Run all steps** a potom na **Auto stretch**, aby roztažení
+3. Klikněte na **Spustit všechny kroky** a potom na **Automatické roztažení**, aby roztažení
    odpovídalo celé mozaice. Podle potřeby ho dolaďte.
 4. Uložte jako **`.fits`**, pokud chcete lineární data dál zpracovávat, nebo
    jako **`.tif`**, pokud chcete roztažený obrázek tak, jak ho vidíte.
@@ -161,31 +184,31 @@ posuvníku.
 
 ### 5.0 Předvolby
 
-Nabídka **Preset** (levý sloupec, pod *RAW via*) nastaví najednou všechny
+Nabídka **Předvolba** (levý sloupec, pod *RAW přes*) nastaví najednou všechny
 hodnoty párování a skládání pro daný typ námětu. Každou hodnotu lze potom
 dál měnit.
 
 | Předvolba | Pro | Hlavní nastavení |
 |---|---|---|
-| **day landscape** | denní panoramy, fotoaparát otáčený na místě | slabé odšumění, homografie, cylindrická projekce |
-| **astro / night landscape** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, +1 EV (pak **Auto exposure**), vyšší práh rohů (méně falešných rohů v šumu) |
-| **deep-sky mosaic** | mozaiky hvězdných polí z dalekohledu, např. FITS | málo odšumění (hvězdy jsou malé), model podobnosti (posun + rotace pole), bez zpřesnění, přímočará projekce; použijte **Auto stretch** |
-| **macro / microscope** | preparát nebo stolek posouvaný pod pevným fotoaparátem | model posunu (snímky se jen posouvají), bez zpřesnění, přímočará projekce |
-| **scan / flat document** | mapy, obrazy, dokumenty fotografované po částech | afinní model, bez zpřesnění, přímočará projekce |
+| **denní krajina** | denní panoramy, fotoaparát otáčený na místě | slabé odšumění, homografie, cylindrická projekce |
+| **astro / noční krajina** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, +1 EV (pak **Automatická expozice**), vyšší práh rohů (méně falešných rohů v šumu) |
+| **deep-sky mozaika** | mozaiky hvězdných polí z dalekohledu, např. FITS | málo odšumění (hvězdy jsou malé), model podobnosti (posun + rotace pole), bez zpřesnění, přímočará projekce; použijte **Automatické roztažení** |
+| **makro / mikroskop** | preparát nebo stolek posouvaný pod pevným fotoaparátem | model posunu (snímky se jen posouvají), bez zpřesnění, přímočará projekce |
+| **sken / plochý dokument** | mapy, obrazy, dokumenty fotografované po částech | afinní model, bez zpřesnění, přímočará projekce |
 
 ### 5.1 Snímky (Images)
 
 | Prvek | Co dělá |
 |---|---|
-| **Add…** | Otevře dialog pro výběr souborů. Vybrat můžete více souborů (Ctrl/Shift + klik). |
+| **Přidat…** | Otevře dialog pro výběr souborů. Vybrat můžete více souborů (Ctrl/Shift + klik). |
 | **Pole pro cestu** | Napište cestu k souboru nebo ke **složce** a stiskněte Enter. Složka načte všechny snímky v ní, seřazené podle jména. Soubory pojmenované `panorama…` (dřívější výsledky) se přeskočí. |
 | **Seznam snímků** | Kliknutím snímek vyberete a zobrazíte. **Ctrl + klik** přidá snímek do výběru nebo ho z něj odebere, **Shift + klik** vybere rozsah a **Ctrl+A** (s myší nad seznamem) vybere vše. Seznam se posouvá kolečkem myši. |
-| **Remove** | Odstraní vybrané snímky. Totéž udělá klávesa **Delete**, když je myš nad seznamem. |
-| **Clear all** | Odstraní všechny snímky. |
+| **Odebrat** | Odstraní vybrané snímky. Totéž udělá klávesa **Smazat**, když je myš nad seznamem. |
+| **Vymazat vše** | Odstraní všechny snímky. |
 | **▲ / ▼** | Posune vybrané snímky v seznamu nahoru nebo dolů. Na pořadí záleží jen v režimech párování *sequential* a *grid*. |
-| **Reference** | Snímek, kolem kterého se ostatní umisťují; zůstane nezkreslený. **auto (centre)** zvolí snímek uprostřed skupiny, což obvykle dává nejvyrovnanější výsledek. |
-| **RAW via** | Který převodník RAW použít, viz [Soubory RAW](#8-soubory-raw). Platí pro snímky přidané poté. |
-| **half size** | Načte soubory RAW a soubory FITS z barevných kamer v poloviční velikosti: asi 4× rychleji a se čtvrtinou paměti. Platí pro snímky přidané poté. Při ukládání s **Output size** nad 50 % se soubory RAW načtou znovu v plné velikosti. |
+| **Reference** | Snímek, kolem kterého se ostatní umisťují; zůstane nezkreslený. **auto (střed)** zvolí snímek uprostřed skupiny, což obvykle dává nejvyrovnanější výsledek. |
+| **RAW přes** | Který převodník RAW použít, viz [Soubory RAW](#8-soubory-raw). Platí pro snímky přidané poté. |
+| **poloviční velikost** | Načte soubory RAW a soubory FITS z barevných kamer v poloviční velikosti: asi 4× rychleji a se čtvrtinou paměti. Platí pro snímky přidané poté. Při ukládání s **Výstupní velikost** nad 50 % se soubory RAW načtou znovu v plné velikosti. |
 
 Značky v seznamu:
 
@@ -206,12 +229,12 @@ rozpoznat na dvou překrývajících se snímcích.
 
 | Posuvník | Výchozí | Význam |
 |---|---|---|
-| **Detection size (px)** | 2000 | Před hledáním se snímek zmenší na tuto velikost (delší strana). Větší je přesnější, ale pomalejší. |
-| **Max keypoints** | 5000 | Horní mez na snímek. Body se rozmístí rovnoměrně po celém snímku. |
-| **Corner threshold** | 0,001 | Minimální síla rohu. Nižší najde i slabší rohy (užitečné u oblohy nebo mlhy), vyšší jen výrazné. |
-| **Denoise (σ px)** | 1,5 | Před hledáním rozmaže šum snímače. Pro **noční snímky** a zašuměné snímky s vysokým ISO ho zvyšte (2–3); pro hvězdná pole a čisté denní snímky s jemnými detaily ho snižte (0,5–1). |
+| **Velikost pro detekci (px)** | 2000 | Před hledáním se snímek zmenší na tuto velikost (delší strana). Větší je přesnější, ale pomalejší. |
+| **Max. počet bodů** | 5000 | Horní mez na snímek. Body se rozmístí rovnoměrně po celém snímku. |
+| **Práh rohů** | 0,001 | Minimální síla rohu. Nižší najde i slabší rohy (užitečné u oblohy nebo mlhy), vyšší jen výrazné. |
+| **Odšumění (σ px)** | 1,5 | Před hledáním rozmaže šum snímače. Pro **noční snímky** a zašuměné snímky s vysokým ISO ho zvyšte (2–3); pro hvězdná pole a čisté denní snímky s jemnými detaily ho snižte (0,5–1). |
 
-Klikněte na **Detect features**. Náhled ukáže aktuální snímek s body jako
+Klikněte na **Najít význačné body**. Náhled ukáže aktuální snímek s body jako
 **žlutými kroužky**. Měly by být rozložené po částech snímku, které se
 překrývají s jinými snímky. Znovu se zpracují jen snímky, u kterých se změnilo
 nastavení. Tmavé a lineární snímky (noční záběry, FITS) nevadí: detekce si
@@ -226,21 +249,21 @@ bodů, které odpovídají jednomu geometrickému modelu (tzv. *inliery*).
 
 | Pairs | Kdy použít |
 |---|---|
-| **all pairs** | Výchozí. Každý snímek se zkouší s každým, takže **na pořadí nezáleží** a i více řad funguje samo. U mnoha snímků trvá déle (74 fotek ≈ 35 s). |
-| **sequential** | Jedna řada, snímky v pořadí pořízení. Každý snímek se páruje jen s následujícím. Nejrychlejší. |
-| **grid** | Více řad ve známém pořadí: **Grid columns** snímků v řadě, řada za řadou. Zkoušejí se sousedé vpravo, dole a úhlopříčně. Pokud byla každá druhá řada fotografována opačným směrem, zapněte **snake**. |
+| **všechny páry** | Výchozí. Každý snímek se zkouší s každým, takže **na pořadí nezáleží** a i více řad funguje samo. U mnoha snímků trvá déle (74 fotek ≈ 35 s). |
+| **postupně** | Jedna řada, snímky v pořadí pořízení. Každý snímek se páruje jen s následujícím. Nejrychlejší. |
+| **mřížka** | Více řad ve známém pořadí: **Sloupce mřížky** snímků v řadě, řada za řadou. Zkoušejí se sousedé vpravo, dole a úhlopříčně. Pokud byla každá druhá řada fotografována opačným směrem, zapněte **had**. |
 
 **Nastavení:**
 
 | Prvek | Výchozí | Význam |
 |---|---|---|
-| **Grid columns** | 5 | Snímků v řadě (jen v režimu grid). |
-| **Ratio test** | 0,8 | O kolik lepší musí být nejlepší shoda než druhá nejlepší. Nižší je přísnější (méně, ale spolehlivějších shod), vyšší dá více shod. |
-| **Max distance** | 0,35 | Jak odlišně mohou dva body vypadat, aby se ještě spárovaly. |
-| **RANSAC tol. (px)** | 5,0 | Jak daleko (v pixelech) smí shoda ležet od modelu, aby se ještě počítala jako inlier. |
-| **Min. inliers** | 20 | Nejmenší počet inlierů, aby se dvojice počítala jako skutečný překryv. |
+| **Sloupce mřížky** | 5 | Snímků v řadě (jen v režimu grid). |
+| **Poměrový test** | 0,8 | O kolik lepší musí být nejlepší shoda než druhá nejlepší. Nižší je přísnější (méně, ale spolehlivějších shod), vyšší dá více shod. |
+| **Max. vzdálenost** | 0,35 | Jak odlišně mohou dva body vypadat, aby se ještě spárovaly. |
+| **Tolerance RANSAC (px)** | 5,0 | Jak daleko (v pixelech) smí shoda ležet od modelu, aby se ještě počítala jako inlier. |
+| **Min. inlierů** | 20 | Nejmenší počet inlierů, aby se dvojice počítala jako skutečný překryv. |
 | **Model** | homography | Jak se jeden snímek zobrazí na druhý, viz níže. |
-| **refine** | zapnuto | Globální zpřesnění, viz níže. |
+| **zpřesnit** | zapnuto | Globální zpřesnění, viz níže. |
 
 **Kdy se dvojice počítá jako skutečný překryv:** potřebuje alespoň *Min.
 inliers* inlierů, jasná většina jejích shod musí souhlasit a transformace musí
@@ -251,13 +274,13 @@ odfiltrují falešné shody mezi snímky, které se ve skutečnosti nepřekrýva
 
 | Model | Kdy použít |
 |---|---|
-| **homography** | Běžné panoramy: fotoaparát otáčený na místě. Výchozí. |
-| **affine** | Skeny nebo fotografie plochého předmětu z velké dálky. |
-| **similarity** | Jen posun, otočení a rovnoměrné zvětšení, např. mozaiky z dalekohledu s rotací pole. Stabilní i při malém počtu shod. |
-| **translation** | Jen posun, např. skener nebo stolek mikroskopu. Nejrobustnější, nejméně pružný. |
+| **homografie** | Běžné panoramy: fotoaparát otáčený na místě. Výchozí. |
+| **afinní** | Skeny nebo fotografie plochého předmětu z velké dálky. |
+| **podobnost** | Jen posun, otočení a rovnoměrné zvětšení, např. mozaiky z dalekohledu s rotací pole. Stabilní i při malém počtu shod. |
+| **posun** | Jen posun, např. skener nebo stolek mikroskopu. Nejrobustnější, nejméně pružný. |
 
 **Umístění a globální zpřesnění (refine):** snímky se propojí přes své
-nejsilnější dvojice, počínaje referenčním snímkem. Se zapnutým **refine** (jen
+nejsilnější dvojice, počínaje referenčním snímkem. Se zapnutým **zpřesnit** (jen
 u modelu homography) se pak všechny dvojice řeší najednou jako jeden otáčející
 se fotoaparát. Malé chyby se tak rozloží rovnoměrně, místo aby se sčítaly, a
 uzavřou se smyčky mezi řadami; to odstraní většinu „duchů“. Zároveň se odhadne
@@ -269,20 +292,20 @@ dvojic** (1–3 px je dobré).
 
 **Tlačítka:**
 
-- **Match**: spáruje dvojice zvolené v nabídce Pairs (paralelně), potom
+- **Spárovat**: spáruje dvojice zvolené v nabídce Pairs (paralelně), potom
   snímky umístí a zpřesní.
-- **Re-match pair**: znovu spáruje jen zobrazenou dvojici s aktuálním
+- **Znovu spárovat**: znovu spáruje jen zobrazenou dvojici s aktuálním
   nastavením.
-- **Discard pair**: přestane používat zobrazenou dvojici (pro shodu, která je
+- **Zahodit pár**: přestane používat zobrazenou dvojici (pro shodu, která je
   zjevně špatná); umístění se přepočítá bez ní.
-- **Run all steps**: body, párování, umístění a náhled najednou.
+- **Spustit všechny kroky**: body, párování, umístění a náhled najednou.
 
-Pohled **Pair matches** ukazuje dva snímky vedle sebe:
+Pohled **Shody párů** ukazuje dva snímky vedle sebe:
 
 - **zelené čáry**: inliery (správné shody)
-- **červené čáry**: outliery. Skryjete je přepínačem **outliers**.
+- **červené čáry**: outliery. Skryjete je přepínačem **odlehlé body**.
 
-Nabídka **Pair** vypisuje přijaté dvojice s počtem inlierů. Dvojice označené
+Nabídka **Pár** vypisuje přijaté dvojice s počtem inlierů. Dvojice označené
 *rejected* neprošly některou kontrolou; text pod nabídkou uvádí proč.
 
 **Jak vypadá dobrý výsledek:** desítky zelených čar nebo více, všechny
@@ -290,7 +313,7 @@ popisující stejný posun, a průměrná chyba 1–2 px.
 
 **Nepropojené snímky:** snímek bez přijaté dvojice k ostatním je v seznamu
 označen `UNLINKED` a **do panoramy se nezahrne**, aby ji nepokazil. Zapněte
-**show unlinked images** (pravý sloupec), aby se takové snímky ukázaly v řadě
+**ukázat nepropojené obrázky** (pravý sloupec), aby se takové snímky ukázaly v řadě
 pod panoramou, a umístěte je ručně pomocí **Ctrl + tažení**.
 
 ### 5.4 Krok 3: Projekce (Projection)
@@ -300,12 +323,12 @@ Jak jednotlivé projekce vypadají, popisuje kapitola [Projekce](#7-projekce).
 | Prvek | Význam |
 |---|---|
 | **Nabídka projekce** | 14 projekcí, viz [Projekce](#7-projekce) |
-| **Focal (× auto)** | Ohnisková vzdálenost se odhadne ze shod. Tento posuvník ji násobí. Vypadá-li panorama do stran stlačená nebo roztažená, zkuste hodnoty 0,8 až 1,2. |
-| **Yaw (°)** | Otočí celou panoramu doleva nebo doprava: určuje, který směr bude uprostřed. Hodí se u 360° panoram (např. aby jádro Mléčné dráhy bylo uprostřed, ne na okraji). |
-| **Pitch (°)** | Nakloní celou panoramu nahoru nebo dolů. Slouží k **narovnání prohnutého horizontu** (například když fotoaparát mířil dolů). |
-| **Roll (°)** | Otočí celou panoramu. Slouží k vyrovnání šikmého horizontu. |
+| **Ohnisko (× auto)** | Ohnisková vzdálenost se odhadne ze shod. Tento posuvník ji násobí. Vypadá-li panorama do stran stlačená nebo roztažená, zkuste hodnoty 0,8 až 1,2. |
+| **Natočení (°)** | Otočí celou panoramu doleva nebo doprava: určuje, který směr bude uprostřed. Hodí se u 360° panoram (např. aby jádro Mléčné dráhy bylo uprostřed, ne na okraji). |
+| **Sklon (°)** | Nakloní celou panoramu nahoru nebo dolů. Slouží k **narovnání prohnutého horizontu** (například když fotoaparát mířil dolů). |
+| **Naklonění (°)** | Otočí celou panoramu. Slouží k vyrovnání šikmého horizontu. |
 | *Jemné nastavení* | Yaw, pitch a roll mají posuvník, číselné pole a **◀ ▶**. Posuvníky pitch a roll jsou jemné u 0° (kde bývají opravy) a dál hrubší. Pomalým tažením číselného pole je to 0,02° na pixel, dvojklikem do něj můžete hodnotu napsat. **◀ ▶** krokují po 0,1° (se Shiftem po 1°). |
-| **Reset focal / yaw / pitch / roll** | Vrátí tyto čtyři posuvníky na výchozí hodnoty. |
+| **Vynulovat ohnisko / natočení / sklon / naklonění** | Vrátí tyto čtyři posuvníky na výchozí hodnoty. |
 
 Titulek náhledu ukazuje velikost panoramy, ohniskovou vzdálenost v pixelech,
 zorný úhel referenčního snímku a typickou chybu zarovnání.
@@ -316,16 +339,16 @@ Tyto prvky mění náhled okamžitě (jakmile náhled existuje).
 
 | Prvek | Význam |
 |---|---|
-| **Blend** | **smart** (výchozí): vícepásmové prolínání s odstraněním duchů. Jemné detaily pocházejí v každém místě z jednoho snímku, takže nevzniknou dvojité obrazy lidí, světel ani blízkých předmětů. Rozdíly jasu se prolnou v širokém pásu, takže nevzniknou ostré spoje. Kde se překrývající snímky neshodují (něco se pohnulo), převezme se celá oblast z jednoho snímku. **feather**: prosté plynulé míchání; kde se něco pohnulo, ukáže duchy. **seam**: každý pixel z nejvíce středového snímku; bez duchů, ale s ostrými spoji. **average**: prostý průměr; hlavně pro kontrolu zarovnání. |
-| **Preview size (px)** | Velikost náhledu (delší strana). Větší je ostřejší, ale pomalejší. Při přiblížení se detail stejně dopočítá (viz [Pohyb v náhledu](#6-pohyb-v-náhledu)). |
-| **Exposure (EV)** | Zesvětlí nebo ztmaví celou panoramu, od −3 do +8 EV (+1 EV = dvakrát jasnější). Tmavé astro panoramy často potřebují +1,5 až +4. |
-| **Brightness (sel.)** | Jasový faktor **vybraných** snímků. |
-| **show unlinked images** | Ukáže i snímky, které se nepodařilo propojit, v řadě pod panoramou, aby je šlo umístit ručně. |
-| **Auto exposure** | Nastaví **Exposure** podle aktuálního náhledu: typický jas na střední šedou, aniž by se přepálilo víc než nejjasnějších 0,5 % (hvězdy, lampy). |
-| **Even out** | Spočítá jasové faktory snímků tak, aby si překryvy odpovídaly. |
-| **Reset moves** | Zruší všechna ruční posunutí. |
-| **Auto crop** | Ořízne panoramu na největší obdélník, který je celý pokrytý snímky, takže zmizí černé zubaté okraje. Náhled pak ukazuje oříznutý výsledek a **Save panorama…** ho uloží. Stavový řádek uvede, kolik panoramy zůstalo. Nejdřív narovnejte horizont (Pitch, Roll); z prohnuté panoramy zbude jen úzký pruh. |
-| **Uncrop** | Zruší ořez. Ořez se zruší i automaticky, když změníte cokoli, co snímky posune (projekci, ohnisko, yaw, pitch, roll, ruční posuny, párování). |
+| **Prolnutí** | **chytré** (výchozí): vícepásmové prolínání s odstraněním duchů. Jemné detaily pocházejí v každém místě z jednoho snímku, takže nevzniknou dvojité obrazy lidí, světel ani blízkých předmětů. Rozdíly jasu se prolnou v širokém pásu, takže nevzniknou ostré spoje. Kde se překrývající snímky neshodují (něco se pohnulo), převezme se celá oblast z jednoho snímku. **prolnutí**: prosté plynulé míchání; kde se něco pohnulo, ukáže duchy. **šev**: každý pixel z nejvíce středového snímku; bez duchů, ale s ostrými spoji. **průměr**: prostý průměr; hlavně pro kontrolu zarovnání. |
+| **Velikost náhledu (px)** | Velikost náhledu (delší strana). Větší je ostřejší, ale pomalejší. Při přiblížení se detail stejně dopočítá (viz [Pohyb v náhledu](#6-pohyb-v-náhledu)). |
+| **Expozice (EV)** | Zesvětlí nebo ztmaví celou panoramu, od −3 do +8 EV (+1 EV = dvakrát jasnější). Tmavé astro panoramy často potřebují +1,5 až +4. |
+| **Jas (výběr)** | Jasový faktor **vybraných** snímků. |
+| **ukázat nepropojené obrázky** | Ukáže i snímky, které se nepodařilo propojit, v řadě pod panoramou, aby je šlo umístit ručně. |
+| **Automatická expozice** | Nastaví **Expozice** podle aktuálního náhledu: typický jas na střední šedou, aniž by se přepálilo víc než nejjasnějších 0,5 % (hvězdy, lampy). |
+| **Vyrovnat** | Spočítá jasové faktory snímků tak, aby si překryvy odpovídaly. |
+| **Vynulovat posuny** | Zruší všechna ruční posunutí. |
+| **Automatický ořez** | Ořízne panoramu na největší obdélník, který je celý pokrytý snímky, takže zmizí černé zubaté okraje. Náhled pak ukazuje oříznutý výsledek a **Uložit panorama…** ho uloží. Stavový řádek uvede, kolik panoramy zůstalo. Nejdřív narovnejte horizont (Pitch, Roll); z prohnuté panoramy zbude jen úzký pruh. |
+| **Zrušit ořez** | Zruší ořez. Ořez se zruší i automaticky, když změníte cokoli, co snímky posune (projekci, ohnisko, yaw, pitch, roll, ruční posuny, párování). |
 | **Nudge ← ↑ ↓ →** | Posune aktuální snímek o jeden pixel náhledu (viz níže). |
 
 V pohledu **Panorama** je obrys každého snímku vykreslen a očíslován:
@@ -336,12 +359,12 @@ V pohledu **Panorama** je obrys každého snímku vykreslen a očíslován:
 - **bíle**: ostatní snímky
 - **přerušované žluté čáry**: vazby použité k umístění snímků
 
-Přepínačem **overlays** v liště je vypnete a uvidíte samotnou panoramu.
+Přepínačem **překryvy** v liště je vypnete a uvidíte samotnou panoramu.
 
 **Kliknutím do obrysu** snímek vyberete (funguje i s vypnutými překryvy).
 
 **Ruční posouvání snímků:** držte **Ctrl** a táhněte snímek, nebo použijte
-šipky či tlačítka **Nudge**. Snímek se posune spolu se snímky, které jsou k
+šipky či tlačítka **Posunout vybraný**. Snímek se posune spolu se snímky, které jsou k
 němu připojené dál od reference (podél žlutých vazeb). Referenční snímek se
 nehýbe; celou panoramu posunete pomocí Pitch a Roll.
 
@@ -354,22 +377,22 @@ skoro černě. Roztažení histogramu je zviditelní.
 | Prvek | Význam |
 |---|---|
 | **Histogram** | Rozložení jasu v náhledu panoramy (v pohledu Panorama) nebo v aktuálním snímku (v ostatních pohledech), v logaritmickém měřítku. **Modrá čára** značí černý bod, **bílá čára** bílý bod a **oranžová křivka** ukazuje, jak se vstupní jas (zleva doprava) převádí na výstupní (zdola nahoru). |
-| **Black point** | Vše s tímto nebo nižším jasem bude černé. Nastavte ho těsně pod pozadí oblohy (levý okraj hlavního vrcholu histogramu). |
-| **Midtones** | Zesvětlí (menší hodnoty) nebo ztmaví (větší hodnoty) střední tóny bez ořezání. 0,5 je neutrální. Snímky hlubokého vesmíru obvykle potřebují 0,005–0,05. |
-| **White point** | Vše s tímto nebo vyšším jasem bude bílé. |
-| **Auto stretch** | Nastaví všechny tři hodnoty podle aktuálního histogramu: černý bod těsně pod pozadím oblohy, střední tóny tak, aby pozadí vyšlo asi na 25 % šedi (stejný princip jako automatické roztažení v PixInsightu). |
-| **Reset stretch** | Zpět bez roztažení (0 / 0,5 / 1). |
+| **Černý bod** | Vše s tímto nebo nižším jasem bude černé. Nastavte ho těsně pod pozadí oblohy (levý okraj hlavního vrcholu histogramu). |
+| **Středy** | Zesvětlí (menší hodnoty) nebo ztmaví (větší hodnoty) střední tóny bez ořezání. 0,5 je neutrální. Snímky hlubokého vesmíru obvykle potřebují 0,005–0,05. |
+| **Bílý bod** | Vše s tímto nebo vyšším jasem bude bílé. |
+| **Automatické roztažení** | Nastaví všechny tři hodnoty podle aktuálního histogramu: černý bod těsně pod pozadím oblohy, střední tóny tak, aby pozadí vyšlo asi na 25 % šedi (stejný princip jako automatické roztažení v PixInsightu). |
+| **Vynulovat roztažení** | Zpět bez roztažení (0 / 0,5 / 1). |
 
 - Roztažení mění jen to, jak se snímky **zobrazují** a jak se panorama ukládá
   do TIFF, PNG nebo JPEG. Párování pracuje vždy s původními daty.
 - **Soubory FITS** se při načtení automaticky roztáhnou pro zobrazení, a to
   podle všech načtených snímků FITS dohromady.
 - Změna roztažení je okamžitá, nic se nepřepočítává.
-- **Exposure** se uplatní před roztažením.
+- **Expozice** se uplatní před roztažením.
 
 ### 5.7 Zpět, znovu a projekty
 
-**Zpět / znovu:** tlačítka **Undo** a **Redo** v liště, nebo **Ctrl+Z** a
+**Zpět / znovu:** tlačítka **Zpět** a **Znovu** v liště, nebo **Ctrl+Z** a
 **Ctrl+Y** (také **Ctrl+Shift+Z**). Stavový řádek uvede, co se vrátilo, např.
 *„Undone: Pitch (°) 0 → 10“*.
 
@@ -381,11 +404,11 @@ skoro černě. Roztažení histogramu je zviditelní.
 - Odstraněné snímky zůstávají kvůli vrácení v paměti, takže se vrátí okamžitě
   i s výsledky párování.
 - Pamatuje se posledních 100 kroků. Vrátit nelze: věci týkající se jen
-  zobrazení (zoom, zvolený pohled, překryvy), *RAW via* a *half size* a
+  zobrazení (zoom, zvolený pohled, překryvy), *RAW přes* a *half size* a
   ukládání souborů.
 
-**Projekty:** **Save project…** (nahoře v levém sloupci) uloží soubor projektu
-s příponou **`.panoproj`**. **Open project…** ho znovu načte. Cestu k souboru
+**Projekty:** **Uložit projekt…** (nahoře v levém sloupci) uloží soubor projektu
+s příponou **`.panoproj`**. **Otevřít projekt…** ho znovu načte. Cestu k souboru
 `.panoproj` můžete také napsat do pole pro cestu a stisknout Enter, nebo s ním
 program spustit: `panostitch moje_pano.panoproj`.
 
@@ -395,7 +418,7 @@ Projekt obsahuje:
 - všechna nastavení: posuvníky, nabídky, přepínače, včetně roztažení
 - výsledky párování, takže se nic nemusí párovat znovu
 - ruční posuny, jasové faktory, referenční snímek a ořez
-- *RAW via* a *half size*, aby se snímky načetly stejně
+- *RAW přes* a *half size*, aby se snímky načetly stejně
 
 Samotné snímky v projektu **nejsou**; načítají se ze svých souborů. Přesunete-li
 fotografie spolu se souborem projektu (např. celou složku), najdou se přes
@@ -411,27 +434,27 @@ shodné body: asi 50 kB na snímek.
 | Akce | Myš | Klávesnice | Tlačítko |
 |---|---|---|---|
 | Posun | tažení **levým** tlačítkem | šipky (pohledy Image a Pair) | |
-| Přiblížení | kolečko nahoru | `+` | **Zoom +** |
-| Oddálení | kolečko dolů | `-` | **Zoom -** |
-| Zpět na celek | | `F`, `0` nebo `Home` | **Fit** |
+| Přiblížení | kolečko nahoru | `+` | **Přiblížit +** |
+| Oddálení | kolečko dolů | `-` | **Oddálit -** |
+| Zpět na celek | | `F`, `0` nebo `Home` | **Přizpůsobit** |
 | Výběr snímku (pohled Panorama) | klik do jeho obrysu | | |
-| Zobrazit / skrýt obrysy, čísla, vazby | | | přepínač **overlays** |
+| Zobrazit / skrýt obrysy, čísla, vazby | | | přepínač **překryvy** |
 | Posun snímku (pohled Panorama) | **Ctrl + tažení** | šipky (`Shift` = 10 kroků) | **← ↑ ↓ →** |
-| Zpět | | `Ctrl+Z` | **Undo** |
-| Znovu | | `Ctrl+Y` nebo `Ctrl+Shift+Z` | **Redo** |
+| Zpět | | `Ctrl+Z` | **Zpět** |
+| Znovu | | `Ctrl+Y` nebo `Ctrl+Shift+Z` | **Znovu** |
 
-Tlačítka **Image + keypoints**, **Pair matches** a **Panorama** přepínají mezi
+Tlačítka **Obrázek + body**, **Shody párů** a **Panorama** přepínají mezi
 třemi pohledy.
 
 **Další zkratky** (zkratku tlačítka ukáže najetí myší):
 
 | Klávesy | Panorama stitcher | Star stacking |
 |---|---|---|
-| `Ctrl+Enter` | **Run all steps** | **Start** |
-| `P` / `Ctrl+P` | `P`: **Preview panorama** | `Ctrl+P`: **Quick preview** |
+| `Ctrl+Enter` | **Spustit všechny kroky** | **Start** |
+| `P` / `Ctrl+P` | `P`: **Náhled panoramatu** | `Ctrl+P`: **Rychlý náhled** |
 | `Ctrl+S` | uloží projekt (do otevřeného souboru projektu hned; poprvé se zeptá na název) | totéž |
-| `Ctrl+Shift+S` | **Save panorama…** | |
-| `Ctrl+O` | **Open project…** | totéž |
+| `Ctrl+Shift+S` | **Uložit panorama…** | |
+| `Ctrl+O` | **Otevřít projekt…** | totéž |
 | `Esc` | | zruší běžící skládání |
 | `F` | přizpůsobí obraz náhledu | totéž |
 
@@ -454,23 +477,23 @@ Panorama zabírá víc, než dokáže ukázat plochá fotografie, takže ji prog
 
 | Projekce | Vypadá jako | Nejlepší pro | Omezení |
 |---|---|---|---|
-| **rectilinear** (přímočará) | běžná fotografie: rovné čáry zůstanou rovné | úzké panoramy (do ~100°), architektura, mozaiky z dalekohledu | se šířkou záběru se okraje extrémně roztahují |
-| **cylindrical** (válcová) | vodorovné čáry se ohýbají, svislé zůstanou svislé | většina vodorovných panoram | ne pro vysoké záběry (horní a dolní okraj se roztahují) |
-| **spherical** (sférická, ekvidistantní válcová) | jako válcová, ale méně roztažená svisle | velmi široké a 360° panoramy, prohlížeče panoram | rovné čáry se ohýbají |
-| **mercator** (Mercatorova) | mezi válcovou a sférickou | široké panoramy s určitou výškou | roztahuje se u horního a dolního okraje |
-| **stereographic** (stereografická) | podobná rybímu oku, tvary zůstávají kulaté | velmi široké zorné úhly, kreativní záběry | silné zakřivení |
-| **transverse_cylindrical** (příčná válcová) | válcová položená na bok: svislé čáry se ohýbají, vodorovné zůstávají rovné | **svislé panoramy** (od horizontu k zenitu), vztyčený oblouk Mléčné dráhy | ne pro široké vodorovné záběry (přetečou přes horní a dolní okraj) |
-| **transverse_mercator** (příčná Mercatorova) | jako příčná válcová, do stran méně roztažená | svislé panoramy s určitou šířkou | jako výše |
+| **přímočará** | běžná fotografie: rovné čáry zůstanou rovné | úzké panoramy (do ~100°), architektura, mozaiky z dalekohledu | se šířkou záběru se okraje extrémně roztahují |
+| **válcová** | vodorovné čáry se ohýbají, svislé zůstanou svislé | většina vodorovných panoram | ne pro vysoké záběry (horní a dolní okraj se roztahují) |
+| **sférická** (sférická, ekvidistantní válcová) | jako válcová, ale méně roztažená svisle | velmi široké a 360° panoramy, prohlížeče panoram | rovné čáry se ohýbají |
+| **Mercator** (Mercatorova) | mezi válcovou a sférickou | široké panoramy s určitou výškou | roztahuje se u horního a dolního okraje |
+| **stereografická** | podobná rybímu oku, tvary zůstávají kulaté | velmi široké zorné úhly, kreativní záběry | silné zakřivení |
+| **příčná válcová** | válcová položená na bok: svislé čáry se ohýbají, vodorovné zůstávají rovné | **svislé panoramy** (od horizontu k zenitu), vztyčený oblouk Mléčné dráhy | ne pro široké vodorovné záběry (přetečou přes horní a dolní okraj) |
+| **příčný Mercator** (příčná Mercatorova) | jako příčná válcová, do stran méně roztažená | svislé panoramy s určitou šířkou | jako výše |
 | **fisheye** (rybí oko, ekvidistantní) | kulatý obraz, vzdálenost od středu úměrná úhlu | **celooblohové pohledy**: Pitch nakloňte tak, aby byl zenit uprostřed | okraje stlačené |
-| **fisheye_equisolid** (rybí oko, plochojevné) | kulatý obraz zachovávající poměr ploch | celooblohové pohledy, jak vypadá většina objektivů typu rybí oko | okraje stlačené ještě víc |
-| **little_planet** (malá planeta) | země uprostřed, obloha kolem ní jako prstenec | 360° panoramy se zemí, kreativní | panorama musí sahat hodně dolů |
-| **tunnel** (tunel) | obloha uprostřed, horizont kolem ní | 360° noční obloha, stopy hvězd, stromy zespodu | panorama musí sahat hodně nahoru |
-| **orthographic** (ortografická) | zeměkoule viděná zvenku | kreativní; ukazuje polovinu koule | okraje jsou velmi stlačené |
-| **hammer** (Hammerova–Aitoffova) | oválná mapa celé koule se správným poměrem ploch | panoramy celé koule jako jeden obraz, celooblohové hvězdné mapy | tvary u okrajů zkreslené |
-| **mollweide** (Mollweideova) | oválná plochojevná mapa, u pólů plošší | jako Hammerova; klasická celooblohová mapa v astronomii | tvary u okrajů zkreslené |
+| **fisheye ekvisolidní** (rybí oko, plochojevné) | kulatý obraz zachovávající poměr ploch | celooblohové pohledy, jak vypadá většina objektivů typu rybí oko | okraje stlačené ještě víc |
+| **malá planeta** | země uprostřed, obloha kolem ní jako prstenec | 360° panoramy se zemí, kreativní | panorama musí sahat hodně dolů |
+| **tunel** | obloha uprostřed, horizont kolem ní | 360° noční obloha, stopy hvězd, stromy zespodu | panorama musí sahat hodně nahoru |
+| **ortografická** | zeměkoule viděná zvenku | kreativní; ukazuje polovinu koule | okraje jsou velmi stlačené |
+| **Hammer** (Hammerova–Aitoffova) | oválná mapa celé koule se správným poměrem ploch | panoramy celé koule jako jeden obraz, celooblohové hvězdné mapy | tvary u okrajů zkreslené |
+| **Mollweide** (Mollweideova) | oválná plochojevná mapa, u pólů plošší | jako Hammerova; klasická celooblohová mapa v astronomii | tvary u okrajů zkreslené |
 
-Vypadá-li horizont jako úsměv nebo zamračení, upravte **Pitch**. Je-li šikmý,
-upravte **Roll**. **Yaw** otáčí pohled do stran. U rybího oka, malé planety a
+Vypadá-li horizont jako úsměv nebo zamračení, upravte **Sklon**. Je-li šikmý,
+upravte **Naklonění**. **Natočení** otáčí pohled do stran. U rybího oka, malé planety a
 tunelu určuje Pitch, co bude uprostřed.
 
 ---
@@ -482,12 +505,12 @@ Olympus ORF, Panasonic RW2, Pentax PEF, Samsung SRW** a další. Přesná podpor
 fotoaparátů závisí na dekodéru; vestavěný zná většinu fotoaparátů posledních
 dvou desetiletí, LibRaw (je-li nainstalované) asi 1250 fotoaparátů.
 
-**RAW via** volí dekodér:
+**RAW přes** volí dekodér:
 
 | Volba | Dekodér | Charakter |
 |---|---|---|
 | **auto** | první, který uspěje, v pořadí níže; má-li snímek soubor `.pp3`, nejdřív RawTherapee | doporučeno |
-| **built-in** | vlastní dekodér programu | vždy k dispozici, rychlý; neutrální převod s barvami a vyvážením bílé fotoaparátu, bez automatického zesvětlení, takže všechny snímky mají stejnou expozici |
+| **vestavěný** | vlastní dekodér programu | vždy k dispozici, rychlý; neutrální převod s barvami a vyvážením bílé fotoaparátu, bez automatického zesvětlení, takže všechny snímky mají stejnou expozici |
 | **libraw** | `dcraw_emu` (LibRaw) | podobný vestavěnému; pro fotoaparáty, které vestavěný dekodér nezná |
 | **rawtherapee** | `rawtherapee-cli` | **použije vaše úpravy z RawTherapee** uložené v `snimek.NEF.pp3`; jinak výchozí vzhled RawTherapee |
 | **darktable** | `darktable-cli` | výchozí převod darktable (včetně korekce objektivu, kde je dostupná); nejpomalejší |
@@ -501,7 +524,7 @@ Vnější dekodéry zapisují 16bitový obraz do dočasné složky, která se po
 smaže. Vedle vašich fotografií se nic nezapisuje.
 
 **Tip:** pro jednotné barvy v celé panoramě použijte pro všechny snímky stejné
-úpravy (stejný profil `.pp3`), nebo použijte **built-in** a barvy opravte až
+úpravy (stejný profil `.pp3`), nebo použijte **vestavěný** a barvy opravte až
 nakonec.
 
 ---
@@ -516,7 +539,7 @@ softwaru. Podporováno:
 | **8-, 16-, 32- a 64bitová celá čísla, 32- a 64bitová desetinná čísla** | záznamy z kamer, výsledky skládání | převede se na 0…1 (16 bitů bez znaménka: 0…65535) |
 | **Barevné (3 roviny)** | složené výsledky ze Sirilu, PixInsightu, DSS | jako RGB |
 | **Černobílé** | černobílé kamery, jednotlivé filtry | jako šedá |
-| **Surová data barevné kamery (Bayer)** | snímky ze ZWO, ToupTek, QHY… s hlavičkou `BAYERPAT` (RGGB, BGGR, GRBG, GBRG) | rozloží se na barvy (debayer); s **half size** jeden barevný pixel na buňku 2×2 (rychlé, čisté), jinak interpolace v plné velikosti |
+| **Surová data barevné kamery (Bayer)** | snímky ze ZWO, ToupTek, QHY… s hlavičkou `BAYERPAT` (RGGB, BGGR, GRBG, GBRG) | rozloží se na barvy (debayer); s **poloviční velikost** jeden barevný pixel na buňku 2×2 (rychlé, čisté), jinak interpolace v plné velikosti |
 | **Pořadí řádků** | `ROWORDER` = `TOP-DOWN` nebo `BOTTOM-UP` (výchozí ve FITS) | snímek se zobrazí správně otočený |
 
 Nepodporováno: **dlaždicově komprimované soubory (`.fz`)**. Nejdřív je
@@ -525,7 +548,7 @@ se ignorují; použije se první obrázek.
 
 **Poznámky k mozaikám hlubokého vesmíru:**
 
-- Použijte předvolbu **deep-sky mosaic**. Dlaždice z dalekohledu se jen
+- Použijte předvolbu **deep-sky mozaika**. Dlaždice z dalekohledu se jen
   posouvají a otáčejí (rotace pole), což přesně popisuje model *similarity*.
 - Nejlépe se spojují **složené a kalibrované dlaždice**. Jednotlivé krátké
   snímky mají málo viditelných hvězd a hodně šumu.
@@ -539,7 +562,7 @@ se ignorují; použije se první obrázek.
 
 ## 10. Ukládání
 
-Klikněte na **Save panorama…** a zvolte název souboru. Typ souboru se
+Klikněte na **Uložit panorama…** a zvolte název souboru. Typ souboru se
 řídí příponou:
 
 | Přípona | Výsledek |
@@ -551,10 +574,10 @@ Klikněte na **Save panorama…** a zvolte název souboru. Typ souboru se
 
 Jsou-li všechny načtené snímky FITS, navržený název souboru končí na `.fits`.
 
-**Output size** (nad tlačítkem pro uložení) určuje velikost uložené panoramy
+**Výstupní velikost** (nad tlačítkem pro uložení) určuje velikost uložené panoramy
 v % plného rozlišení fotoaparátu; řádek pod ním ukazuje velikost v pixelech
 (po náhledu). Tlačítka ¼, ½, full a 2× jsou rychlá volba. 100 % zachová
-všechen detail; soubory RAW načtené s **half size** se při ukládání načtou
+všechen detail; soubory RAW načtené s **poloviční velikost** se při ukládání načtou
 znovu v plné velikosti, takže to trvá déle a potřebuje víc paměti. 50 % nebo
 25 % dají rychle menší soubor, nad 100 % se zvětšuje (bez nového detailu).
 
@@ -593,26 +616,26 @@ chyba, pokud se uložení nepovedlo. × ho zavře.
 | **Program se nečekaně zavřel** | Při dalším spuštění to oznámí stavový řádek. Podrobnosti jsou v `crash.log` ve složce nastavení (Linux `~/.config/panostitch`, Windows `%APPDATA%\panostitch`, macOS `~/Library/Application Support/panostitch`); přiložte ho prosím k hlášení problému. |
 | **Ovládací prvky jsou na okraji useknuté** | Rozšiřte boční panel tažením jeho okraje. |
 | **„Busy – wait…“** | Krok ještě běží; počkejte, až se stavový řádek změní. |
-| **Snímek se při načítání přeskočí** | Stavový řádek uvede soubor a důvod. U RAW zkuste jiný převodník v **RAW via**. Soubory FITS `.fz` nejdřív rozbalte. |
-| **Panorama je skoro černá** | Fotografie: klikněte na **Auto exposure** nebo zvyšte **Exposure (EV)** (noční záběry často potřebují +1,5 až +4), nebo snímky upravte v RawTherapee (jejich soubory `.pp3` se pak použijí). FITS a jiná lineární data: klikněte na **Auto stretch**. |
-| **Snímky FITS jsou po načtení černé nebo bílé** | Automatické roztažení při načtení vychází ze všech snímků FITS; jeden silně pře- nebo podexponovaný snímek ho může rozhodit. Takové snímky odstraňte a klikněte na **Auto stretch** (nebo na **Reset stretch** a nastavte ho ručně). |
+| **Snímek se při načítání přeskočí** | Stavový řádek uvede soubor a důvod. U RAW zkuste jiný převodník v **RAW přes**. Soubory FITS `.fz` nejdřív rozbalte. |
+| **Panorama je skoro černá** | Fotografie: klikněte na **Automatická expozice** nebo zvyšte **Expozice (EV)** (noční záběry často potřebují +1,5 až +4), nebo snímky upravte v RawTherapee (jejich soubory `.pp3` se pak použijí). FITS a jiná lineární data: klikněte na **Automatické roztažení**. |
+| **Snímky FITS jsou po načtení černé nebo bílé** | Automatické roztažení při načtení vychází ze všech snímků FITS; jeden silně pře- nebo podexponovaný snímek ho může rozhodit. Takové snímky odstraňte a klikněte na **Automatické roztažení** (nebo na **Vynulovat roztažení** a nastavte ho ručně). |
 | **Snímky FITS jsou zelené** | Surová data barevných kamer nemají vyvážení bílé. Nejdřív je složte a barevně zkalibrujte, nebo barvy výsledku upravte v astronomickém softwaru. |
-| **Málo žlutých bodů** | Snižte **Corner threshold**; zvyšte **Max keypoints**; zvyšte **Detection size**. |
-| **Body hlavně na trávě, obloze nebo šumu** | Zvyšte **Denoise** na 2–3. |
-| **Snímky označené UNLINKED** | Prohlédněte si je: opravdu se překrývají s jiným snímkem? Zvyšte **Ratio test** (0,85–0,9) a **Max distance** (0,4), snižte **Min. inliers**, zvyšte **Denoise** a znovu klikněte na **Match**. Pokud to nepomůže, zapněte **show unlinked images** a umístěte je pomocí **Ctrl + tažení**. |
+| **Málo žlutých bodů** | Snižte **Práh rohů**; zvyšte **Max. počet bodů**; zvyšte **Velikost pro detekci**. |
+| **Body hlavně na trávě, obloze nebo šumu** | Zvyšte **Odšumění** na 2–3. |
+| **Snímky označené UNLINKED** | Prohlédněte si je: opravdu se překrývají s jiným snímkem? Zvyšte **Poměrový test** (0,85–0,9) a **Max. vzdálenost** (0,4), snižte **Min. inlierů**, zvyšte **Odšumění** a znovu klikněte na **Spárovat**. Pokud to nepomůže, zapněte **ukázat nepropojené obrázky** a umístěte je pomocí **Ctrl + tažení**. |
 | **Mraky, voda nebo jiné pohyblivé věci** | Mezi snímky se mění, takže je nelze spolehlivě spárovat (snímky jen s mraky obvykle zůstanou nepropojené). Takové části foťte rychle po sobě, nebo je umístěte ručně. |
-| **Použila se špatná dvojice** (čáry všemi směry, snímky na špatném místě) | Vyberte ji v nabídce **Pair** a klikněte na **Discard pair**. Se zapnutým **refine** se většina takových dvojic vyřadí automaticky. |
-| **Duchové (zdvojené předměty)** | Nechte zapnuté **refine** a použijte **Blend → smart** (výchozí). Zbývající problémy pocházejí z věcí, které se mezi snímky změnily (např. svítilna rozsvícená jen na jednom snímku), nebo z **paralaxy**: blízké předměty se vůči pozadí posunou, když se fotoaparát neotáčí kolem objektivu (tzv. nodálního bodu). |
-| **Viditelné jasové skoky** | **Even out**, potom jednotlivé snímky dolaďte pomocí **Brightness (sel.)**. |
-| **Prohnutý horizont** | Upravte **Pitch** (a **Roll**, je-li šikmý). |
-| **Silně roztažený horní nebo dolní okraj** | Použijte projekci **spherical**; stavový řádek ji navrhne, když panorama sahá hodně nahoru nebo dolů. |
-| **Panorama stlačená nebo roztažená** | Upravte **Focal (× auto)**. |
-| **Obrovská, zkreslená panorama** | Špatná dvojice (zkontrolujte dvojice), nebo použijte **spherical** / **cylindrical** místo rectilinear. |
-| **Pomalé nebo dochází paměť** | Před načtením zapněte **half size**; snižte **Preview size**. Snímky v plném rozlišení potřebují zhruba 12 bajtů na pixel, asi 300 MB na 24MP snímek. U mnoha snímků trvá párování *all pairs* déle; *grid* je rychlejší, když rozložení znáte. |
-| **Auto crop ponechá jen úzký pruh** | Panorama je prohnutá. Nejdřív ji narovnejte pomocí **Pitch** a **Roll** (a zvolte vhodnou projekci), potom znovu **Auto crop**. |
+| **Použila se špatná dvojice** (čáry všemi směry, snímky na špatném místě) | Vyberte ji v nabídce **Pár** a klikněte na **Zahodit pár**. Se zapnutým **zpřesnit** se většina takových dvojic vyřadí automaticky. |
+| **Duchové (zdvojené předměty)** | Nechte zapnuté **zpřesnit** a použijte **Blend → smart** (výchozí). Zbývající problémy pocházejí z věcí, které se mezi snímky změnily (např. svítilna rozsvícená jen na jednom snímku), nebo z **paralaxy**: blízké předměty se vůči pozadí posunou, když se fotoaparát neotáčí kolem objektivu (tzv. nodálního bodu). |
+| **Viditelné jasové skoky** | **Vyrovnat**, potom jednotlivé snímky dolaďte pomocí **Jas (výběr)**. |
+| **Prohnutý horizont** | Upravte **Sklon** (a **Naklonění**, je-li šikmý). |
+| **Silně roztažený horní nebo dolní okraj** | Použijte projekci **sférická**; stavový řádek ji navrhne, když panorama sahá hodně nahoru nebo dolů. |
+| **Panorama stlačená nebo roztažená** | Upravte **Ohnisko (× auto)**. |
+| **Obrovská, zkreslená panorama** | Špatná dvojice (zkontrolujte dvojice), nebo použijte **sférická** / **válcová** místo rectilinear. |
+| **Pomalé nebo dochází paměť** | Před načtením zapněte **poloviční velikost**; snižte **Velikost náhledu**. Snímky v plném rozlišení potřebují zhruba 12 bajtů na pixel, asi 300 MB na 24MP snímek. U mnoha snímků trvá párování *all pairs* déle; *grid* je rychlejší, když rozložení znáte. |
+| **Auto crop ponechá jen úzký pruh** | Panorama je prohnutá. Nejdřív ji narovnejte pomocí **Sklon** a **Naklonění** (a zvolte vhodnou projekci), potom znovu **Automatický ořez**. |
 | **Projekt se otevře bez některých snímků** | Stavový řádek vypíše chybějící soubory. Byly přesunuty nebo přejmenovány, a ne spolu se souborem projektu. Vraťte je zpět, nebo je přidejte znovu a spárujte. |
 | **Zpět nic neudělá** | Zpět pracuje s ustálenými změnami; po poslední změně chvíli počkejte. Zatímco běží krok (*Busy*), čeká. |
-| **Všechno je pomalé** | Před načtením zapněte **half size** (RAW a FITS z barevných kamer); snižte **Preview size**. Na kartě skládání **Half size** v RAW conversion. |
+| **Všechno je pomalé** | Před načtením zapněte **poloviční velikost** (RAW a FITS z barevných kamer); snižte **Velikost náhledu**. Na kartě skládání **Poloviční velikost** v RAW conversion. |
 
 ---
 
@@ -628,7 +651,7 @@ chyba, pokud se uložení nepovedlo. × ho zavře.
   snímku.
 - **Držte fotoaparát vodorovně.** Nakloněný fotoaparát ohne horizont (oprava
   pomocí Pitch a Roll).
-- U dlouhých sérií nejdřív zkontrolujte výsledek se zapnutým **half size**.
+- U dlouhých sérií nejdřív zkontrolujte výsledek se zapnutým **poloviční velikost**.
 - Pokud načítáte snímky po složkách, neukládejte výsledek do složky se
   zdrojovými snímky. Soubory pojmenované `panorama…` se přeskakují, jiné názvy
   ale ne.
@@ -637,7 +660,7 @@ chyba, pokud se uložení nepovedlo. × ho zavře.
 
 ## 13. Skládání hvězd
 
-Druhá karta, **Star stacking (landscape / trails)**, spojí mnoho snímků téže
+Druhá karta, **Skládání hvězd (krajina / stopy)**, spojí mnoho snímků téže
 scény do jednoho obrázku: oblohy s nízkým šumem a ostrými hvězdami, nebo
 hvězdných stop. Je určená pro krajinářskou astrofotografii: fotoaparát stojí
 na stativu, obloha se mezi snímky pohybuje, popředí ne.
@@ -668,7 +691,7 @@ jak dlouho trval.
 seznamy se objeví její volby a vysvětlení.
 
 **Předvolby** (nad seznamem nastavení) nastaví vše pro typický námět jedním
-kliknutím: **Milky Way landscape** (zmrazené popředí, oblast oblohy
+kliknutím: **Krajina s Mléčnou dráhou** (zmrazené popředí, oblast oblohy
 detekovaná automaticky, korekce zkreslení, světelné znečištění), **Star
 trails** (vyplněné mezery) a **Deep sky (telescope)** (celý snímek je obloha,
 extrakce pozadí, kalibrace barev, automatické roztažení). Každé nastavení lze
@@ -680,44 +703,44 @@ uložený soubor s jeho velikostí, nebo co se pokazilo. × ho zavře.
 
 ### 13.1 Rychlý start
 
-1. Zvýrazněte **Light frames**, klikněte na **Add…** a vyberte snímky oblohy
+1. Zvýrazněte **Snímky oblohy**, klikněte na **Přidat…** a vyberte snímky oblohy
    (nebo zadejte cestu k souboru či složce do pole pro cestu a stiskněte Enter).
-2. Zvýrazněte **Sky region**, zvolte **Boundary line** a v náhledu základního
-   snímku táhněte čáru podél horizontu, nebo klikněte na **Detect sky** a
+2. Zvýrazněte **Oblast oblohy**, zvolte **Hraniční čára** a v náhledu základního
+   snímku táhněte čáru podél horizontu, nebo klikněte na **Rozpoznat oblohu** a
    masku opravte štětcem. Hvězdy se hledají jen na obloze.
-3. Klikněte na **Quick preview**: malý, rychlý výsledek z nejvýše 10 snímků
+3. Klikněte na **Rychlý náhled**: malý, rychlý výsledek z nejvýše 10 snímků
    pro kontrolu nastavení. Nic se neukládá.
-4. Zkontrolujte řádek **Save as** pod seznamem vstupů: napište název souboru
+4. Zkontrolujte řádek **Uložit jako** pod seznamem vstupů: napište název souboru
    nebo vyberte navržený název v rozbalovacím seznamu vedle, ve druhém
-   seznamu zvolte typ souboru a tlačítkem **Folder…** složku (výchozí:
+   seznamu zvolte typ souboru a tlačítkem **Složka…** složku (výchozí:
    `stacked.tif` vedle prvního snímku oblohy). Pokud soubor už existuje, řádek
-   to oznámí; **next free name** přidá číslo. Pod ním je odhad, kolik místa
+   to oznámí; **další volný název** přidá číslo. Pod ním je odhad, kolik místa
    snímky při skládání potřebují (podle počtu a velikosti) a zda zůstanou v
    paměti, nebo na disku; když místo nestačí, zbarví se oranžově (⚠). Potom
    klikněte na **Start**.
 5. Upravte dodatečné zpracování vpravo; výsledek se hned aktualizuje.
-   **Save result…** ho uloží znovu s novým nastavením.
+   **Uložit výsledek…** ho uloží znovu s novým nastavením.
 
 ### 13.2 Vstupní soubory
 
 | Položka | Co nafotit |
 |---|---|
-| **Light frames** (*Star images* v jednoduchém režimu) | Snímky oblohy: stejná ohnisková vzdálenost, clona a expozice. Nejlepší je RAW; TIFF, FITS nebo XISF jen pokud jsou data stále lineární (neupravená). **Unify exposure** vyrovná snímky pořízené za různých podmínek. |
-| **Base frame** (*Base image* v jednoduchém režimu) | Snímek, ke kterému se ostatní zarovnají. Prázdné = prostřední světlý snímek. Jiný zvolíte v rozbalovacím seznamu vedle **Base frame**, nebo vyberte snímek v seznamu světlých snímků a klikněte na **Use as base**. |
-| **Dark frames** (*Noise images* v jednoduchém režimu) | Tmavé snímky (darky): krytka na objektivu, stejné ISO a čas, pořízené těsně před snímky oblohy nebo po nich. Odstraní tepelný šum a horké pixely. |
-| **Bias frames** (*Bias images* v jednoduchém režimu) | Nejkratší čas, krytka na objektivu, stejné ISO. |
-| **Flat field frames** (*Vignetting images* v jednoduchém režimu) | Flaty: rovnoměrně osvětlená bílá plocha, stejná ohnisková vzdálenost a clona. Opraví tmavší rohy a stíny prachu. |
-| **Flat-dark frames** (*Flat-dark images* v jednoduchém režimu) | Darky k flatům: stejné ISO a čas jako vinětační snímky. |
-| **Foreground image** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Match brightness** ho přizpůsobí jasu složeného popředí; **Exposure (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
-| **Output** | Nastavuje se v řádku **Save as**: název, typ a složka. `.tif` / `.png` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
+| **Snímky oblohy** (*Snímky hvězd* v jednoduchém režimu) | Snímky oblohy: stejná ohnisková vzdálenost, clona a expozice. Nejlepší je RAW; TIFF, FITS nebo XISF jen pokud jsou data stále lineární (neupravená). **Sjednotit expozici** vyrovná snímky pořízené za různých podmínek. |
+| **Základní snímek** (*Základní snímek* v jednoduchém režimu) | Snímek, ke kterému se ostatní zarovnají. Prázdné = prostřední světlý snímek. Jiný zvolíte v rozbalovacím seznamu vedle **Základní snímek**, nebo vyberte snímek v seznamu světlých snímků a klikněte na **Použít jako základní**. |
+| **Tmavé snímky** (*Tmavé snímky* v jednoduchém režimu) | Tmavé snímky (darky): krytka na objektivu, stejné ISO a čas, pořízené těsně před snímky oblohy nebo po nich. Odstraní tepelný šum a horké pixely. |
+| **Bias snímky** (*Bias snímky* v jednoduchém režimu) | Nejkratší čas, krytka na objektivu, stejné ISO. |
+| **Flaty** (*Snímky vinětace* v jednoduchém režimu) | Flaty: rovnoměrně osvětlená bílá plocha, stejná ohnisková vzdálenost a clona. Opraví tmavší rohy a stíny prachu. |
+| **Flat darky** (*Flat darky* v jednoduchém režimu) | Darky k flatům: stejné ISO a čas jako vinětační snímky. |
+| **Snímek popředí** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Přizpůsobit jas** ho přizpůsobí jasu složeného popředí; **Expozice (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
+| **Výstup** | Nastavuje se v řádku **Uložit jako**: název, typ a složka. `.tif` / `.png` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
 
 Všechny kalibrační snímky jsou nepovinné. Při vysokém ISO hodně pomůže i
 několik tmavých snímků.
 
 **Seznamy souborů:** každá skupina má své soubory v rozbalovacím seznamu
 vedle svého názvu, takže ani stovky světlých snímků není třeba procházet.
-Vyberte v něm soubor a uvidíte ho v náhledu; **Remove** a **Use as base**
-pracují s tímto souborem, **Clear** vyprázdní celou skupinu.
+Vyberte v něm soubor a uvidíte ho v náhledu; **Odebrat** a **Použít jako základní**
+pracují s tímto souborem, **Vymazat** vyprázdní celou skupinu.
 
 **Zašuměné flaty** (málo snímků, nebo příliš tmavé v jedné barvě, např. při
 modrém zdroji světla) se automaticky vyhladí; záznam postupu to uvede i s
@@ -728,7 +751,7 @@ posunu hvězd by z něj vznikly jemné pruhy.
 paměti, nebo – zabírají-li víc než polovinu volné paměti – v jednom dočasném
 souboru ve složce výstupu, který se smaže hned po skončení (za běhu není ani
 vidět). Záznam postupu uvede, co platí. Pokud na něj není místo, běh se
-ještě před začátkem zastaví se zprávou: zapněte **Half size** (čtvrtina
+ještě před začátkem zastaví se zprávou: zapněte **Poloviční velikost** (čtvrtina
 místa) nebo ukládejte výstup na disk s víc volného místa. Ani mastery (dark,
 bias, flat) se neukládají.
 
@@ -736,23 +759,23 @@ bias, flat) se neukládají.
 
 | Nastavení | Co dělá |
 |---|---|
-| **Composition** | **Align stars**: snímky se zarovnají podle hvězd a spojí. **Accumulation** je průměruje; **Select best pixels** (výchozí) vynechá odlehlé hodnoty (letadla, satelity); **Freeze ground** zarovná jen oblohu, takže obloha i popředí zůstanou ostré (potřebuje oblast oblohy); **Align only** jen zapíše zarovnané snímky. **Star trails**: bez zarovnání, obloha si ponechá nejjasnější hodnotu každého pixelu. **Trail fade**: **Fade in** (stopy začínají slabě, efekt pohybu ze Sequatoru), **Fade out** nebo **Both ends** (zúžení na obou koncích jako u komety). **Fill gaps between frames**: krátké přestávky intervalu fotoaparátu se vyplní podle změřeného pohybu hvězd, takže stopy jsou souvislé čáry, ne čárkované. |
-| **Sky region** | Kde je obloha. **All sky**: celý snímek je obloha (bez popředí, např. snímky dalekohledem). **Boundary line**: táhněte čáru podél horizontu. **Gradient**: čára s plynulým přechodem. **Irregular mask**: oblohu malujte levým tlačítkem myši, mažte pravým; **Brush size** (posuvník nebo kolečko myši). **Detect sky** namaluje první masku podle jasu a hvězd – přibližně, proto ji zkontrolujte a opravte štětcem. **Mask feather** změkčí okraj masky, jen směrem do oblohy, takže popředí nedostane nic z oblohy (žádné svatozáře podél horizontu). **Show detected stars** zakroužkuje hvězdy, které poslední běh našel v zobrazeném snímku. |
+| **Kompozice** | **Zarovnat hvězdy**: snímky se zarovnají podle hvězd a spojí. **Akumulace** je průměruje; **Vybrat nejlepší pixely** (výchozí) vynechá odlehlé hodnoty (letadla, satelity); **Zmrazit zemi** zarovná jen oblohu, takže obloha i popředí zůstanou ostré (potřebuje oblast oblohy); **Jen zarovnat** jen zapíše zarovnané snímky. **Hvězdné stopy**: bez zarovnání, obloha si ponechá nejjasnější hodnotu každého pixelu. **Stmívání stop**: **Náběh** (stopy začínají slabě, efekt pohybu ze Sequatoru), **Doběh** nebo **Oba konce** (zúžení na obou koncích jako u komety). **Vyplnit mezery mezi snímky**: krátké přestávky intervalu fotoaparátu se vyplní podle změřeného pohybu hvězd, takže stopy jsou souvislé čáry, ne čárkované. |
+| **Oblast oblohy** | Kde je obloha. **Celá obloha**: celý snímek je obloha (bez popředí, např. snímky dalekohledem). **Hraniční čára**: táhněte čáru podél horizontu. **Přechod**: čára s plynulým přechodem. **Nepravidelná maska**: oblohu malujte levým tlačítkem myši, mažte pravým; **Velikost štětce** (posuvník nebo kolečko myši). **Rozpoznat oblohu** namaluje první masku podle jasu a hvězd – přibližně, proto ji zkontrolujte a opravte štětcem. **Rozmazání masky** změkčí okraj masky, jen směrem do oblohy, takže popředí nedostane nic z oblohy (žádné svatozáře podél horizontu). **Ukázat nalezené hvězdy** zakroužkuje hvězdy, které poslední běh našel v zobrazeném snímku. |
 | **Sigma clipping** | Jak přísně se odstraňují odlehlé hodnoty (dolní / horní × σ). Obvykle 2–3; nižší odstraní víc, ale nechá víc šumu. Potřebuje aspoň 4 snímky, nejlépe 10 a více. |
-| **Frame rejection** | Vynechá snímky zřetelně horší než typický: mraky nebo rosa (slabší hvězdy), málo hvězd, rozmazané nebo protáhlé hvězdy (zaostření, vítr, ťuknutí do stativu). |
-| **RAW conversion** | Vyvážení bílé (fotoaparát, průměr snímku, denní světlo), demozaikování (výchozí AHD; DHT nebo AAHD mají při vysokém ISO často méně barevného šumu) a **half size** (4× méně pixelů, mnohem rychlejší). |
-| **Reduce dynamic noises** | Najde a odstraní horké pixely i bez tmavých snímků. |
-| **Reduce distor. effects** | Opraví zkreslení objektivu, které v rozích dlouhých sérií zanechává krátké stopy: **Lens**, **Complex** (ultraširokoúhlé objektivy, refrakce u horizontu) nebo **Auto**. |
-| **Merge 4 pixels** | Sečte 2×2 pixely: jasnější a méně zašuměné, poloviční šířka i výška. |
-| **Time-lapse** | Složí vždy N po sobě jdoucích snímků do jednoho; vznikne očíslovaná řada snímků s nízkým šumem ve složce vedle výstupu. |
+| **Vyřazování snímků** | Vynechá snímky zřetelně horší než typický: mraky nebo rosa (slabší hvězdy), málo hvězd, rozmazané nebo protáhlé hvězdy (zaostření, vítr, ťuknutí do stativu). |
+| **Převod RAW** | Vyvážení bílé (fotoaparát, průměr snímku, denní světlo), demozaikování (výchozí AHD; DHT nebo AAHD mají při vysokém ISO často méně barevného šumu) a **poloviční velikost** (4× méně pixelů, mnohem rychlejší). |
+| **Omezit dynamický šum** | Najde a odstraní horké pixely i bez tmavých snímků. |
+| **Omezit zkreslení** | Opraví zkreslení objektivu, které v rozích dlouhých sérií zanechává krátké stopy: **Objektiv**, **Složitá** (ultraširokoúhlé objektivy, refrakce u horizontu) nebo **Automaticky**. |
+| **Sloučit 4 pixely** | Sečte 2×2 pixely: jasnější a méně zašuměné, poloviční šířka i výška. |
+| **Timelapse** | Složí vždy N po sobě jdoucích snímků do jednoho; vznikne očíslovaná řada snímků s nízkým šumem ve složce vedle výstupu. |
 
 ### 13.4 Zobrazení
 
-- **Base image**: snímek, ke kterému se ostatní zarovnávají; zde se kreslí
+- **Základní snímek**: snímek, ke kterému se ostatní zarovnávají; zde se kreslí
   oblast oblohy. Kliknutím na soubor v seznamu vstupů ho zobrazíte.
-- **Result**: výsledek po dodatečném zpracování. Tažením posouváte, kolečkem
-  myši zvětšujete, **Fit** ukáže celý.
-- **Frame report**: graf všech měření pro každý snímek, vždy vydělených
+- **Výsledek**: výsledek po dodatečném zpracování. Tažením posouváte, kolečkem
+  myši zvětšujete, **Přizpůsobit** ukáže celý.
+- **Report snímků**: graf všech měření pro každý snímek, vždy vydělených
   mediánem, takže špatný snímek vyčnívá (červeně = vynechaný, modře =
   základní snímek); pod ním řádek pro každý snímek oblohy: nalezené hvězdy,
   velikost hvězd (FWHM), protažení, úroveň oblohy, světlo (jas hvězd proti
@@ -769,22 +792,22 @@ result…** uloží znovu.
 
 | Nastavení | Co dělá |
 |---|---|
-| **Background extraction** | Odečte hladký model pozadí oblohy (přechody od světelného znečištění nebo Měsíce). |
-| **Color calibration** | Pozadí oblohy bude neutrálně šedé a průměrná hvězda bílá. |
-| **Reduce colour noise** | Vyhladí jen barvy a odstraní barevné tečky ze snímků s vysokým ISO. |
-| **Light pollution** | **Deep sky**: odstraní hladkou záři. **Uneven**: sleduje záři po dlaždicích (kopule světla měst na širokoúhlých snímcích). **Strength** určuje, kolik se odstraní. Nejdřív opravte vinětaci (vinětační snímky), jinak se zhorší. |
-| **Enhance star light** | Zvýrazní hvězdy nad pozadím oblohy, aniž by zesílilo jeho šum. |
-| **Auto brightness** | Nastaví oblohu na příjemný jas, aniž by se přepálily nejjasnější hvězdy. |
-| **High dynamic range** | Jasné hvězdy a světla stlačí místo přepálení. |
-| **Tone** | **sRGB curve** (jako fotoaparát), **Stretch** (černý bod, střední tóny, bílý bod; automaticky nebo ručně) nebo **Linear** (bez křivky). |
-| **Color space** | sRGB nebo Adobe RGB pro výstup TIFF a JPEG. |
-| **Linear (for processing)** | Vše vypne a uloží lineární 32bitový FITS: to, co očekává Siril nebo PixInsight. |
-| **Use in the Stitcher** | Přidá uložený výsledek do karty Panorama stitcher jako jeden díl panoramatu (viz 13.7). |
+| **Extrakce pozadí** | Odečte hladký model pozadí oblohy (přechody od světelného znečištění nebo Měsíce). |
+| **Kalibrace barev** | Pozadí oblohy bude neutrálně šedé a průměrná hvězda bílá. |
+| **Snížit barevný šum** | Vyhladí jen barvy a odstraní barevné tečky ze snímků s vysokým ISO. |
+| **Světelné znečištění** | **Deep sky**: odstraní hladkou záři. **Nerovnoměrné**: sleduje záři po dlaždicích (kopule světla měst na širokoúhlých snímcích). **Síla** určuje, kolik se odstraní. Nejdřív opravte vinětaci (vinětační snímky), jinak se zhorší. |
+| **Zesílit světlo hvězd** | Zvýrazní hvězdy nad pozadím oblohy, aniž by zesílilo jeho šum. |
+| **Automatický jas** | Nastaví oblohu na příjemný jas, aniž by se přepálily nejjasnější hvězdy. |
+| **Vysoký dynamický rozsah** | Jasné hvězdy a světla stlačí místo přepálení. |
+| **Tón** | **křivka sRGB** (jako fotoaparát), **Roztažení** (černý bod, střední tóny, bílý bod; automaticky nebo ručně) nebo **Lineární** (bez křivky). |
+| **Barevný prostor** | sRGB nebo Adobe RGB pro výstup TIFF a JPEG. |
+| **Lineární (ke zpracování)** | Vše vypne a uloží lineární 32bitový FITS: to, co očekává Siril nebo PixInsight. |
+| **Použít ve skládání panoramat** | Přidá uložený výsledek do karty Panorama stitcher jako jeden díl panoramatu (viz 13.7). |
 
 ### 13.6 Projekty
 
-**Save project…** zapíše soubor `.stackproj` se seznamy souborů, oblastí
-oblohy a všemi nastaveními. **Open project…** (nebo `panostitch
+**Uložit projekt…** zapíše soubor `.stackproj` se seznamy souborů, oblastí
+oblohy a všemi nastaveními. **Otevřít projekt…** (nebo `panostitch
 noc.stackproj`) ho znovu otevře. Soubory se hledají podle plné cesty, nebo
 relativně k souboru projektu, pokud byla složka přesunuta.
 
@@ -793,10 +816,10 @@ relativně k souboru projektu, pokud byla složka přesunuta.
 Panorama Mléčné dráhy s nízkým šumem: na každé pozici panoramatu pořiďte
 několik snímků (pozice se překrývají), potom:
 
-1. Složte snímky první pozice (Start) a klikněte na **Use in the Stitcher**.
+1. Složte snímky první pozice (Start) a klikněte na **Použít ve skládání panoramat**.
 2. Nahraďte snímky oblohy snímky další pozice, dejte výstupu nový název,
-   Start, znovu **Use in the Stitcher**; a tak dále.
-3. Na kartě Panorama stitcher spojí **Run all steps** složené díly.
+   Start, znovu **Použít ve skládání panoramat**; a tak dále.
+3. Na kartě Panorama stitcher spojí **Spustit všechny kroky** složené díly.
 
 Každý díl ukládejte jako `.tif`; stejné dodatečné zpracování všech dílů
 udrží jejich jas a barvy stejné.
@@ -806,10 +829,10 @@ udrží jejich jas a barvy stejné.
 - Pořiďte aspoň 10–20 snímků oblohy se stejným nastavením a hned potom
   10–20 tmavých snímků, aniž byste pohnuli fotoaparátem.
 - Oblast oblohy nastavte pečlivě: stromy a budovy započtené do oblohy zarovnání
-  rozmaže. **Detect sky** je rychlý začátek, ne poslední slovo.
+  rozmaže. **Rozpoznat oblohu** je rychlý začátek, ne poslední slovo.
 - Po Quick preview se podívejte do Frame report: graf hned ukáže, které
   snímky jsou horší (mraky, vítr, rosa).
-- Když záleží na popředí, použijte **Freeze ground**; když ne, **Select best
+- Když záleží na popředí, použijte **Zmrazit zemi**; když ne, **Select best
   pixels**.
 - Pro zpracování v jiných programech ukládejte do `.fits` a zapněte **Linear
   (for processing)**.
@@ -893,10 +916,11 @@ Skládání hvězd z kódu: vyplňte `stacker::StackConfig` (začněte od
 |---|---|
 | `panostitch` (`panostitch.exe`) | Program (okno). |
 | `panostack` (`panostack.exe`) | Skládání hvězd z příkazové řádky (`panostack --help`). |
-| `*.panoproj`, `*.stackproj` | Vaše soubory projektů (kamkoli je uložíte). |
+| `*.panoproj`, `*.stackproj`, `*.tlproj` | Vaše soubory projektů (kamkoli je uložíte). |
 | `ui.toml` ve složce nastavení | Přepínače vzhledu (viz [Spuštění programu](#2-spuštění-programu)). |
+| `remembered/`, `recent_projects.txt`, `last_folder.txt` ve složce nastavení | Nastavení pro příští spuštění, nedávné projekty, složka, ve které začínají dialogy. Smazáním začnete načisto. |
 | `docs/manual_cs.md` | Tato příručka (česky). |
-| `docs/manual_en.md`, `docs/manual_de.md` | Příručka v angličtině a němčině. |
+| `docs/manual_en.md`, `docs/manual_de.md`, `docs/manual_es.md`, `docs/manual_fr.md`, `docs/manual_pl.md` | Příručka v angličtině, němčině, španělštině, francouzštině a polštině. |
 
 Zdrojový kód (pro vlastní sestavení programu):
 
@@ -907,7 +931,7 @@ Zdrojový kód (pro vlastní sestavení programu):
 | `src/stitcher/` | Spojování: body, párování, umístění, zpřesnění, projekce, prolínání. |
 | `src/stacker/` | Skládání hvězd. |
 | `src/finish.rs` | Dodatečné úpravy: geometrie, roztažení (MTF, arcsinh, GHS), vyvážení bílé, světla, křivky, barvy, detail. |
-| `src/gui/` | Okno: čtyři karty a dialogy souborů. |
+| `src/gui/` | Okno: čtyři karty, dialogy souborů, vestavěná příručka a texty okna v šesti jazycích (`i18n_*.rs`). |
 | `src/bin/` | Oba programy, `panostitch` a `panostack`. |
 | `tests/` | Testy: skládání na umělých nočních scénách, spojování, dodatečné úpravy, formáty souborů a karty okna. Spustíte je příkazem `cargo test --release`. |
 | `examples/scripted.rs` | Použití spojování z vlastního kódu v Rustu. |
@@ -916,20 +940,20 @@ Zdrojový kód (pro vlastní sestavení programu):
 
 ## 16. Dodatečné úpravy
 
-*Novinka ve verzi 0.4 (ve vývoji).* Karta **Post-processing** provede
+*Novinka ve verzi 0.4 (ve vývoji).* Karta **Dodatečné úpravy** provede
 poslední kroky se složeným nebo spojeným snímkem, takže na ně nepotřebujete
 jiný program: otočení a ořez, roztažení lineárních dat, vyvážení bílé, světla,
 křivky, barvy, šum, hvězdy, doostření a uložení v požadované velikosti.
 
-**Jak dostat snímek dovnitř:** **Open…** (Ctrl+O) nebo napište cestu a
-stiskněte Enter; tlačítko **✎ Use in Post-processing** na kartě skládání
-hvězd; nebo **✎ Post-process** ve spojování po uložení panoramy. Soubory FITS
+**Jak dostat snímek dovnitř:** **Otevřít…** (Ctrl+O) nebo napište cestu a
+stiskněte Enter; tlačítko **✎ Použít v Dodatečných úpravách** na kartě skládání
+hvězd; nebo **✎ Dodatečně upravit** ve spojování po uložení panoramy. Soubory FITS
 a XISF se berou jako lineární data a začínají automatickým roztažením; JPEG,
 TIFF a PNG jako hotové snímky (bez roztažení). Ručně to přepíná **Linear data
 (needs stretching)**.
 
 Náhled pracuje s kopií o nejvýše 2000 px, takže na posuvníky reaguje téměř
-hned. **Save** zpracuje celý snímek na pozadí přesně se stejným nastavením;
+hned. **Uložit** zpracuje celý snímek na pozadí přesně se stejným nastavením;
 hodnoty, které program měří (automatické roztažení, neutrální pozadí), se
 převezmou z náhledu, takže uložený soubor vypadá jako náhled.
 
@@ -937,45 +961,45 @@ Kroky běží vždy v tomto pořadí, vlevo shora dolů:
 
 | Oddíl | Co dělá |
 |---|---|
-| **Turn and crop** | ⟲ ⟳ otočení o 90°, **Mirror** (zrcadlení), **Rotate** o libovolný úhel (jemné u 0°, jako Yaw/Pitch/Roll ve spojování), **Cut away the empty corners** (odříznout prázdné rohy po otočení), ořez z každé strany nebo na tvar (3:2, 4:3, 16:9, 4:5, 1:1, 2:1). |
-| **Stretch** (lineární data) | Nejdřív **Background extraction** a **Colour calibration** (obojí volitelné, na lineárních datech), potom metoda roztažení (viz níže). |
-| **White balance** | Na lineárním světle, před roztažením. **◎ Sample grey**, potom táhněte obdélník přes něco, co má být neutrální (pozadí oblohy, mrak): podle něj se nastaví násobitele barev. **Neutral background** udělá tmavší polovinu šedou. **Temperature** a **Tint** doladí. Hotové snímky se kvůli tomu vyjmou z křivky sRGB a pak do ní vrátí, takže vyvážení sedí v každém jasu. |
-| **Light** | **Exposure** (EV), **Contrast**, **Highlights** (kolem 75 %), **Midtones** (50 %), **Shadows** (25 %), **Whites** a **Blacks** (krajní body), jako ve fotoeditorech. |
-| **Curves** | Jedna křivka pro všechny barvy (**RGB**) a po jedné pro **Red**, **Green**, **Blue**. Kliknutím přidáte bod, tažením ho posunete, pravým tlačítkem odeberete. Histogram za křivkou je histogram toho, co do ní vstupuje. • označuje změněné křivky. |
-| **Colour** | **Saturation** (0 = černobílé) a **Vibrance** (mdlé barvy víc než sytré). |
-| **Detail** | **Noise reduction** (vyhladí plochá místa, zachová hrany a hvězdy), **Colour noise**, **Star reduction** (menší hvězdy), **Sharpen** a jeho poloměr. Poloměry jsou v pixelech celého snímku, takže náhled odpovídá uloženému výsledku. |
-| **Sky and foreground** | Vlastní vzhled pro oblohu a pro popředí, navíc ke všemu výše, přes masku (viz níže). |
+| **Otočit a oříznout** | ⟲ ⟳ otočení o 90°, **Zrcadlit** (zrcadlení), **Otočit** o libovolný úhel (jemné u 0°, jako Yaw/Pitch/Roll ve spojování), **Odříznout prázdné rohy** (odříznout prázdné rohy po otočení), ořez z každé strany nebo na tvar (3:2, 4:3, 16:9, 4:5, 1:1, 2:1). |
+| **Roztažení** (lineární data) | Nejdřív **Extrakce pozadí** a **Kalibrace barev** (obojí volitelné, na lineárních datech), potom metoda roztažení (viz níže). |
+| **Vyvážení bílé** | Na lineárním světle, před roztažením. **◎ Vzorek šedé**, potom táhněte obdélník přes něco, co má být neutrální (pozadí oblohy, mrak): podle něj se nastaví násobitele barev. **Neutrální pozadí** udělá tmavší polovinu šedou. **Teplota** a **Odstín** doladí. Hotové snímky se kvůli tomu vyjmou z křivky sRGB a pak do ní vrátí, takže vyvážení sedí v každém jasu. |
+| **Světlo** | **Expozice** (EV), **Kontrast**, **Světla** (kolem 75 %), **Středy** (50 %), **Stíny** (25 %), **Bílé** a **Černé** (krajní body), jako ve fotoeditorech. |
+| **Křivky** | Jedna křivka pro všechny barvy (**RGB**) a po jedné pro **Červená**, **Zelená**, **Modrá**. Kliknutím přidáte bod, tažením ho posunete, pravým tlačítkem odeberete. Histogram za křivkou je histogram toho, co do ní vstupuje. • označuje změněné křivky. |
+| **Barvy** | **Sytost** (0 = černobílé) a **Živost** (mdlé barvy víc než sytré). |
+| **Detaily** | **Redukce šumu** (vyhladí plochá místa, zachová hrany a hvězdy), **Barevný šum**, **Zmenšení hvězd** (menší hvězdy), **Doostřit** a jeho poloměr. Poloměry jsou v pixelech celého snímku, takže náhled odpovídá uloženému výsledku. |
+| **Obloha a popředí** | Vlastní vzhled pro oblohu a pro popředí, navíc ke všemu výše, přes masku (viz níže). |
 
 **Metody roztažení:**
 
 | Metoda | Použití |
 |---|---|
-| **Off** | Snímek je už hotový. |
-| **sRGB curve** | Jako fotoaparát: pro lineární data, kterým stačí běžná gama. |
-| **MTF, automatic** | Černý bod těsně pod pozadím oblohy, střední tóny tak, aby pozadí mělo jas **Background** (jako AutoStretch v Sirilu / STF v PixInsightu). **Each colour on its own** (výchozí) měří červenou, zelenou a modrou zvlášť, takže barevný nádech složeného snímku obraz neschová; data se přitom nemění. **Auto → manual** pokračuje ručně od naměřených hodnot. |
-| **MTF, manual** | Černý bod, střední tóny a bílý bod (midtones transfer function). |
-| **Arcsinh** | Inverzní hyperbolický sinus: silné roztažení, které zachová barvy hvězd. **Stretch factor** 1–10000; hluboké snímky se slabým pozadím potřebují několik tisíc. |
-| **Generalized hyperbolic (GHS)** | **Stretch ln(D+1)** (síla), **Local intensity b** (jak úzce se roztažení soustředí kolem bodu symetrie), **Symmetry point** (kde je roztažení nejsilnější: dejte ho na pozadí oblohy), **Protect shadows** a **Protect highlights** (pod / nad nimi přímka). |
+| **Vypnuto** | Snímek je už hotový. |
+| **křivka sRGB** | Jako fotoaparát: pro lineární data, kterým stačí běžná gama. |
+| **MTF, automaticky** | Černý bod těsně pod pozadím oblohy, střední tóny tak, aby pozadí mělo jas **Pozadí** (jako AutoStretch v Sirilu / STF v PixInsightu). **Každá barva zvlášť** (výchozí) měří červenou, zelenou a modrou zvlášť, takže barevný nádech složeného snímku obraz neschová; data se přitom nemění. **Automaticky → ručně** pokračuje ručně od naměřených hodnot. |
+| **MTF, ručně** | Černý bod, střední tóny a bílý bod (midtones transfer function). |
+| **Arcsinh** | Inverzní hyperbolický sinus: silné roztažení, které zachová barvy hvězd. **Faktor roztažení** 1–10000; hluboké snímky se slabým pozadím potřebují několik tisíc. |
+| **Zobecněná hyperbolická (GHS)** | **Roztažení ln(D+1)** (síla), **Lokální intenzita b** (jak úzce se roztažení soustředí kolem bodu symetrie), **Bod symetrie** (kde je roztažení nejsilnější: dejte ho na pozadí oblohy), **Chránit stíny** a **Chránit světla** (pod / nad nimi přímka). |
 
-U Arcsinh a GHS: **Inverse** použije inverzní křivku (stlačuje místo
-roztahování, např. když je roztažení příliš silné); **Keep star colours**
+U Arcsinh a GHS: **Inverzní** použije inverzní křivku (stlačuje místo
+roztahování, např. když je roztažení příliš silné); **Zachovat barvy hvězd**
 roztahuje jas a zachová barvu každého pixelu (vypnuto: každá barva zvlášť,
-sytější obloha, bledší hvězdy); **Points from the background** nastaví černý
+sytější obloha, bledší hvězdy); **Body z pozadí** nastaví černý
 bod těsně pod pozadí nejtmavší barvy a u GHS bod symetrie na pozadí.
 
-**Display** (nad náhledem) mění jen zobrazení náhledu, nikdy uložený snímek,
-jako režimy zobrazení v Sirilu: **Linear (as saved)**, **Logarithm**,
-**Square root**, **Squared**, **Asinh**, **AutoStretch**, **Histogram
+**Zobrazení** (nad náhledem) mění jen zobrazení náhledu, nikdy uložený snímek,
+jako režimy zobrazení v Sirilu: **Lineární (jak je uloženo)**, **Logaritmus**,
+**Odmocnina**, **Druhá mocnina**, **Asinh**, **AutoStretch**, **Histogram
 equalisation**. Hodí se k nahlédnutí do stínů nebo kontrole pozadí, aniž byste
 cokoli měnili. Dokud není zvoleno Linear, svítí „view only".
 
-**◐ Compare** (podržte ho, nebo podržte B) ukáže výchozí bod: otočeno,
+**◐ Porovnat** (podržte ho, nebo podržte B) ukáže výchozí bod: otočeno,
 oříznuto a roztaženo, nic víc.
 
-**Save** (vpravo): **Size** (plná velikost, nebo delší strana např. 2048 px
-pro fóra), název a typ souboru, **JPEG quality**. Řádek pod tím říká, kolik
+**Uložit** (vpravo): **Velikost** (plná velikost, nebo delší strana např. 2048 px
+pro fóra), název a typ souboru, **Kvalita JPEG**. Řádek pod tím říká, kolik
 paměti uložení potřebuje. FITS / XISF dostanou hotový (roztažený) snímek jako
-32bitová desetinná čísla. **Keep settings for the next image** (vlevo) dá
+32bitová desetinná čísla. **Ponechat nastavení pro další obrázek** (vlevo) dá
 několika snímkům stejný vzhled, např. dílům panoramy.
 
 | Klávesa | Akce |
@@ -987,32 +1011,32 @@ několika snímkům stejný vzhled, např. dílům panoramy.
 | B (držet) | Porovnat s výchozím bodem |
 | Ctrl+Z, Ctrl+Y | Zpět, znovu |
 
-**Sky and foreground** (obloha a popředí; na začátku zavřené): krajina pod
+**Obloha a popředí** (obloha a popředí; na začátku zavřené): krajina pod
 hvězdami často potřebuje obě části upravit jinak, např. méně šumu a menší
 hvězdy na obloze, světlejší a teplejší popředí. Masku namalujte pomocí
-**✎ Paint** (levé tlačítko = obloha, pravé = popředí, kolečko myši = velikost
-štětce) nebo ji nechte najít **◎ Detect sky** (obloha nahoře; opravte ji
-štětcem; pro kruhové rybí oko **◯ Fisheye circle**, kapitola 17); **All sky**, **Invert** a **Clear** začnou znovu. Pak zvolte
-**Sky** nebo **Foreground** a nastavte jejich světla, teplotu, barvy a
-detail. **Soft edge** prolne oba vzhledy na hranici; **Show mask** obarví
+**✎ Malovat** (levé tlačítko = obloha, pravé = popředí, kolečko myši = velikost
+štětce) nebo ji nechte najít **◎ Rozpoznat oblohu** (obloha nahoře; opravte ji
+štětcem; pro kruhové rybí oko **◯ Kruh fisheye**, kapitola 17); **Celá obloha**, **Invertovat** a **Vymazat** začnou znovu. Pak zvolte
+**Obloha** nebo **Popředí** a nastavte jejich světla, teplotu, barvy a
+detail. **Měkký okraj** prolne oba vzhledy na hranici; **Ukázat masku** obarví
 oblohu modře a popředí oranžově (při malování vždy). Maska leží na samotném
 snímku, takže při otočení nebo ořezu zůstane na místě. Uložený soubor dostane
 stejné úpravy; • za názvem oddílu ukazuje, že se používají.
 
-**↶ Undo** a **↷ Redo** (Ctrl+Z, Ctrl+Y nebo Ctrl+Shift+Z) vracejí a
+**↶ Zpět** a **↷ Znovu** (Ctrl+Z, Ctrl+Y nebo Ctrl+Shift+Z) vracejí a
 opakují změny; tažení posuvníku nebo tah štětcem je jeden krok a popisek
 tlačítka říká, co vrátí.
 
-**✂ Crop** ořízne přímo v obraze: ukáže se celý snímek s rámečkem; tažením
+**✂ Ořez** ořízne přímo v obraze: ukáže se celý snímek s rámečkem; tažením
 nakreslíte nový rámeček, tažením za hrany nebo rohy ho upravíte, tažením
-uvnitř ho posunete. **✂ Crop: done** ukáže výsledek. Tlačítka tvarů a
-posuvníky ořezu v **Turn and crop** nastavují tentýž rámeček.
+uvnitř ho posunete. **✂ Ořez: hotovo** ukáže výsledek. Tlačítka tvarů a
+posuvníky ořezu v **Otočit a oříznout** nastavují tentýž rámeček.
 
-**Předvolby** (nahoře, pod snímkem): napište název a **Save** uloží současný
+**Předvolby** (nahoře, pod snímkem): napište název a **Uložit** uloží současný
 vzhled: roztažení, vyvážení bílé, světla, křivky, barvy, detail a vzhled oblohy
 a popředí, ale ne otočení, ořez a velikost exportu (ty patří k jednomu
-snímku). **Preset** použije uložený vzhled na otevřený snímek (Ctrl+Z ho
-vrátí); **Delete** smaže předvolbu s napsaným názvem. Předvolby jsou ve složce
+snímku). **Předvolba** použije uložený vzhled na otevřený snímek (Ctrl+Z ho
+vrátí); **Smazat** smaže předvolbu s napsaným názvem. Předvolby jsou ve složce
 nastavení (`presets`).
 
 ## 17. Timelapse
@@ -1022,10 +1046,17 @@ video: krajinu pod noční oblohou fotografovanou ze stativu, kde se obloha
 otáčí nad nehybným popředím. Pomalý zoom nebo posun přes snímek, jako by
 fotoaparát jel na slideru, dodá pohyb kamery.
 
+**Projekty:** **⬇ Uložit projekt…** uloží snímky, vzhledy, masku (i kruh
+fisheye) a všechna nastavení videa do souboru `.tlproj`;
+**⇪ Otevřít projekt…** (Ctrl+O) vše vrátí, i když se složka mezitím
+přesunula. Ctrl+S uloží rovnou do otevřeného projektu. „Start from the
+Post-processing tab's look“ se ukládá jen jako přepínač: použije obrázek,
+který je právě otevřený v Post-processing.
+
 **Snímky:** přidejte soubory nebo složku; přehrávají se v pořadí názvů
 souborů (číslování fotoaparátu). Kliknutím se snímek zobrazí uprostřed;
-◀ ▶ listují. U snímků RAW volba **RAW via** určuje, jak se načtou:
-**built-in** (výchozí) je rychlý a zachází se všemi snímky stejně;
+◀ ▶ listují. U snímků RAW volba **RAW přes** určuje, jak se načtou:
+**vestavěný** (výchozí) je rychlý a zachází se všemi snímky stejně;
 **rawtherapee** použije úpravy uložené v souborech `.pp3` programu
 RawTherapee vedle snímků, ale trvá několik sekund na snímek (asi desetkrát
 déle); **auto** použije RawTherapee jen u snímků, které soubor `.pp3` mají.
@@ -1035,21 +1066,21 @@ byla upravena.
 
 **Look (vzhled):** stejné posuvníky světla a barev jako v Post-processing
 (expozice, kontrast, světla, střední tóny, stíny, bílé, černé, teplota,
-odstín, sytost, živost), zvlášť pro **Whole frame** (celý snímek), **Sky**
-(oblohu) a **Foreground** (popředí). Obloha a popředí se přidávají k vzhledu
+odstín, sytost, živost), zvlášť pro **Celý snímek**, **Obloha**
+(oblohu) a **Popředí**. Obloha a popředí se přidávají k vzhledu
 celého snímku, jen ve své části masky; • označuje změněné části. Vybraný
-snímek ukazuje vzhled (**Show the look**; vypnuto = snímek tak, jak je).
+snímek ukazuje vzhled (**Ukázat vzhled**; vypnuto = snímek tak, jak je).
 Odstranění blikání a pohyb kamery jsou vidět jen ve videu.
 
-**Maska:** jako v Post-processing (kapitola 16): **✎ Paint**,
-**◎ Detect sky**, **All sky**, **Invert**, **Clear**, **Soft edge**,
-**Show mask**. Jedna maska platí pro všechny snímky, protože na stativu se
+**Maska:** jako v Post-processing (kapitola 16): **✎ Malovat**,
+**◎ Rozpoznat oblohu**, **Celá obloha**, **Invertovat**, **Vymazat**, **Měkký okraj**,
+**Ukázat masku**. Jedna maska platí pro všechny snímky, protože na stativu se
 popředí nehýbe.
 
 Pro celooblohový timelapse s kruhovým rybím okem namířeným nahoru najde
-**◯ Fisheye circle** osvětlený obrazový kruh a oblohou udělá kotouč uprostřed;
-prstenec kolem (obzor, stromy, světla) je popředí. **Sky circle** nastaví,
-kolik poloměru kruhu je obloha, a velká hodnota **Soft edge** (až 25 %) udělá
+**◯ Kruh fisheye** osvětlený obrazový kruh a oblohou udělá kotouč uprostřed;
+prstenec kolem (obzor, stromy, světla) je popředí. **Kruh oblohy** nastaví,
+kolik poloměru kruhu je obloha, a velká hodnota **Měkký okraj** (až 25 %) udělá
 z hranice radiální přechod. Zbytek opravte štětcem, např. dalekohled nebo
 člověka, který zasahuje do oblohy.
 
@@ -1057,27 +1088,28 @@ z hranice radiální přechod. Zbytek opravte štětcem, např. dalekohled nebo
 
 | Nastavení | Co dělá |
 |---|---|
-| **Deflicker** | Vyrovná skoky jasu i barvy mezi snímky (kroky expozice, měnící se světlo, vyvážení bílé fotoaparátu). **Light** porovná každý snímek se sousedy (**Smoothing**, ve snímcích); **Strong** jich použije třikrát víc. Pomalé změny, jako soumrak, zůstanou. **Colour too** vyrovná každou barvu zvlášť; **Region by region** to dělá na hrubé mřížce přes snímek, takže změny ve velkém měřítku v jedné části (světelné znečištění, projíždějící světlo, svítání na jedné straně) se vyrovnají tam, kde vznikly. Obojí funguje pro běžné objektivy i rybí oko. Měření přečte každý snímek ještě jednou. |
-| **Start from the Post-processing tab's look** | Každý snímek nejdřív dostane nastavení snímku otevřeného v Post-processing (roztažení, vyvážení bílé, světla, křivky, barvy, detail; ne jeho otočení a ořez), potom vzhled nastavený zde. Hodnoty měřené automatickým roztažením se vezmou z prvního snímku a platí pro všechny, takže video nebliká. |
-| **Slider move** | Jako by fotoaparát jel na motorizovaném slideru: video ukazuje část snímku o tolik procent menší (až 20 %) a posouvá ji přes snímek, **Left → right** (zleva doprava), **Right → left**, **Up** (nahoru) nebo **Down** (dolů). Posun je plynulý, ne po celých pixelech. |
-| **Slow zoom in** | Pomalé přiblížení během celého videa; lze kombinovat s posunem. |
-| **Start and stop gently** | Posun i zoom se na začátku rozjedou a na konci zpomalí; vypnuto: stále stejnou rychlostí. Náhled ukáže obrys začátku (jasný) a konce (slabý) videa. |
+| **Odstranění blikání** | Vyrovná skoky jasu i barvy mezi snímky (kroky expozice, měnící se světlo, vyvážení bílé fotoaparátu). **Mírné** porovná každý snímek se sousedy (**Vyhlazení**, ve snímcích); **Silné** jich použije třikrát víc. Pomalé změny, jako soumrak, zůstanou. **I barvy** vyrovná každou barvu zvlášť; **Po oblastech** to dělá na hrubé mřížce přes snímek, takže změny ve velkém měřítku v jedné části (světelné znečištění, projíždějící světlo, svítání na jedné straně) se vyrovnají tam, kde vznikly. Obojí funguje pro běžné objektivy i rybí oko. Měření přečte každý snímek ještě jednou. |
+| **Začít od vzhledu z karty Dodatečné úpravy** | Každý snímek nejdřív dostane nastavení snímku otevřeného v Post-processing (roztažení, vyvážení bílé, světla, křivky, barvy, detail; ne jeho otočení a ořez), potom vzhled nastavený zde. Hodnoty měřené automatickým roztažením se vezmou z prvního snímku a platí pro všechny, takže video nebliká. |
+| **Posun jako na slideru** | Jako by fotoaparát jel na motorizovaném slideru: video ukazuje část snímku o tolik procent menší (až 20 %) a posouvá ji přes snímek, **Zleva doprava**, **Zprava doleva**, **Nahoru** nebo **Dolů**. Posun je plynulý, ne po celých pixelech. |
+| **Pomalý zoom** | Pomalé přiblížení během celého videa; lze kombinovat s posunem. |
+| **Plynulý rozjezd a dojezd** | Posun i zoom se na začátku rozjedou a na konci zpomalí; vypnuto: stále stejnou rychlostí. Náhled ukáže obrys začátku (jasný) a konce (slabý) videa. |
 
 **Výstup:**
 
 | Nastavení | Co dělá |
 |---|---|
-| **Format** | **MP4** (H.264) a **WebM** (VP9) vyrábí ffmpeg. Nainstalujte ho (ffmpeg.org; Windows: `winget install ffmpeg`; Linux: správce balíčků; macOS: Homebrew) nebo ho dejte vedle programu; karta ukáže, kde ho našla. **Animated GIF** a **Numbered images** (číslované snímky TIFF nebo PNG 16 bitů, JPEG) nic dalšího nepotřebují. GIFy hvězdných polí jsou velké (asi 1 MB na snímek při 720p; MP4 je 5–10× menší), hodí se tedy na krátké ukázky. |
-| **Frame rate** | 12–60 snímků za sekundu. |
-| **Resolution** | Jako snímky, 4K, 1440p, 1080p nebo 720p; nikdy se nezvětšuje. Do 1080p se snímky RAW čtou v poloviční velikosti, což je rychlejší a stále dost ostré. |
-| **Crop to 16:9** | Ořízne snímek 3:2 na širokoúhlé video; náhled ukáže obrys ořezu. |
-| **Quality** | Pro MP4, WebM a snímky JPEG: vyšší = lepší obraz, větší soubor. |
-| **Play forward, then back** | Na konci snímky ještě jednou pozpátku, takže video plynule navazuje ve smyčce. |
-| **Hold last frame** | Nechá poslední snímek pár sekund stát. |
+| **Formát** | **MP4** (H.264) a **WebM** (VP9) vyrábí ffmpeg. Nainstalujte ho (ffmpeg.org; Windows: `winget install ffmpeg`; Linux: správce balíčků; macOS: Homebrew) nebo ho dejte vedle programu; karta ukáže, kde ho našla. **Animovaný GIF** a **Číslované obrázky** (číslované snímky TIFF nebo PNG 16 bitů, JPEG) nic dalšího nepotřebují. GIFy hvězdných polí jsou velké (asi 1 MB na snímek při 720p; MP4 je 5–10× menší), hodí se tedy na krátké ukázky. |
+| **Snímková frekvence** | 12–60 snímků za sekundu. |
+| **Rozlišení** | Jako snímky, 4K, 1440p, 1080p nebo 720p; nikdy se nezvětšuje. Do 1080p se snímky RAW čtou v poloviční velikosti, což je rychlejší a stále dost ostré. |
+| **Tvar** | Tvar videa; snímek se na něj ořízne a náhled ukáže obrys ořezu. **Jako snímky** (bez ořezu), **16:9**, **3:2** a **4:3** (řídí se orientací snímků), **1:1 čtverec** (celý kruh celooblohového fisheye) nebo **9:16 na výšku** (telefony). V 1080p: 1920 × 1080, 1620 × 1080, 1440 × 1080, 1080 × 1080 a 1080 × 1920. S kruhem fisheye karta upozorní, když tvar odřízne část oblohy. |
+| **Kvalita** | Pro MP4, WebM a snímky JPEG: vyšší = lepší obraz, větší soubor. |
+| **Přehrát dopředu, pak zpět** | Na konci snímky ještě jednou pozpátku, takže video plynule navazuje ve smyčce. |
+| **Podržet poslední snímek** | Nechá poslední snímek pár sekund stát. |
 
 Pod nastavením: kolik je snímků, jak dlouho video poběží a jeho velikost v
-pixelech. **▶ Make video** pracuje na pozadí, po čtyřech snímcích, s
-ukazatelem průběhu (uplynulý a zbývající čas) a **✖ Cancel** (nic se
+pixelech. **▶ Vytvořit video** pracuje na pozadí, nejvýš po osmi snímcích
+(po méně, když chybí paměť), s
+ukazatelem průběhu (uplynulý a zbývající čas) a **✖ Zrušit** (nic se
 neponechá). Potom zpráva ukáže snímky, velikost, snímkovou frekvenci a délku
 videa, jak dlouho to trvalo a soubor s jeho velikostí, případně co se
 nepovedlo. Například z 69 snímků RAW (24 MP) vzniklo video MP4 1080p s

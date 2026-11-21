@@ -495,6 +495,41 @@ pub struct Bits {
 }
 
 impl Bits {
+    /// Run lengths (alternately false / true), column by column: how project
+    /// files keep masks (the order the Julia version used).
+    pub fn to_runs(&self) -> Vec<i64> {
+        let (mut out, mut cur, mut n) = (Vec::new(), false, 0i64);
+        for c in 0..self.w {
+            for r in 0..self.h {
+                let b = self.at(r, c);
+                if b == cur {
+                    n += 1;
+                } else {
+                    out.push(n);
+                    cur = b;
+                    n = 1;
+                }
+            }
+        }
+        out.push(n);
+        out
+    }
+
+    /// The mask back from [`Bits::to_runs`].
+    pub fn from_runs(r: &[i64], rows: usize, cols: usize) -> Bits {
+        let mut m = Bits::new(rows, cols);
+        let mut p = 0usize;
+        for (k, &n) in r.iter().enumerate() {
+            for q in p..(p + n.max(0) as usize).min(rows * cols) {
+                if k % 2 == 1 {
+                    m.set(q % rows, q / rows, true);
+                }
+            }
+            p += n.max(0) as usize;
+        }
+        m
+    }
+
     pub fn new(h: usize, w: usize) -> Self {
         Self { w, h, v: vec![false; w * h] }
     }
