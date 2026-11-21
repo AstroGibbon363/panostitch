@@ -290,6 +290,32 @@ vykreslení se opraví. Dvojice, které do společného řešení nezapadají, s
 pohnulo. Stavový řádek ukáže, kolik jich bylo vyřazeno, a **typickou chybu
 dvojic** (1–3 px je dobré).
 
+**Noční obloha: párování podle hvězd.** Rohové body jen zřídka spárují snímky,
+na kterých je jen obloha: každá hvězda vypadá jako každá jiná. Když body
+dvojice selžou, porovnají se proto její **hvězdy**: trojúhelníky sousedních
+hvězd podle úhlů mezi nimi. Ty se nemění, když se otočí fotoaparát ani když se
+otočí obloha, takže se spárují i snímky pořízené minuty po sobě. Takové dvojice
+mají v menu **Pár** poznámku *(hvězdy)* a stavový řádek je spočítá. Přijmou se
+jen dvojice s dostatkem hvězd v překryvu, z nichž se velká část shoduje.
+U fotoaparátů mířících daleko od sebe (řada nahoru a řada dolů) leží vzdálené
+rohy snímku za druhým fotoaparátem; tam se posuzuje jen část, kterou pokrývají
+shody.
+
+**Zoom, který se posunul.** Při míření nahoru nebo dolů se kroužek zoomu může
+mezi snímky pootočit vlastní vahou. U souborů RAW je ohnisková vzdálenost
+každého snímku známá: body se hledají ve všech snímcích ve stejném měřítku a
+zpřesnění dopasuje každou ohniskovou vzdálenost zvlášť. Stavový řádek pak
+napíše *Ohnisková vzdálenost se mezi snímky měnila (15–17 mm)*.
+
+**Otáčející se obloha.** Obloha se otáčí o 15° za hodinu, takže řady pořízené
+deset minut po sobě ji vidí posunutou o 2,5°. U souborů RAW (zaznamenávají čas
+pořízení) zpřesnění změří toto otáčení z dvojic podle hvězd spolu s dvojicemi
+na zemi, takže fotoaparáty jsou umístěné správně. Stavový řádek napíše *obloha
+se mezi snímky otáčela o 14,9°/h*: blízko 15 znamená, že se to povedlo. Při
+vykreslení se hvězdy všech snímků ukážou tak, jak byly v jednom okamžiku
+(uprostřed focení), zatímco země a světlo oblohy zůstanou na svém místě; u
+stromů a jiných siluet zůstane každý snímek, jak byl pořízen.
+
 **Tlačítka:**
 
 - **Spárovat**: spáruje dvojice zvolené v nabídce Pairs (paralelně), potom
@@ -623,6 +649,8 @@ chyba, pokud se uložení nepovedlo. × ho zavře.
 | **Málo žlutých bodů** | Snižte **Práh rohů**; zvyšte **Max. počet bodů**; zvyšte **Velikost pro detekci**. |
 | **Body hlavně na trávě, obloze nebo šumu** | Zvyšte **Odšumění** na 2–3. |
 | **Snímky označené UNLINKED** | Prohlédněte si je: opravdu se překrývají s jiným snímkem? Zvyšte **Poměrový test** (0,85–0,9) a **Max. vzdálenost** (0,4), snižte **Min. inlierů**, zvyšte **Odšumění** a znovu klikněte na **Spárovat**. Pokud to nepomůže, zapněte **ukázat nepropojené obrázky** a umístěte je pomocí **Ctrl + tažení**. |
+| **Díra v zenitu nebo snímky jen s oblohou nepropojené** | Použijte soubory RAW (je potřeba jejich ohnisková vzdálenost a čas pořízení), nechte **všechny páry** a znovu **Spárovat**: snímky jen s oblohou se pak spárují podle hvězd. Každý snímek oblohy potřebuje pár desítek hvězd a dobrý překryv se sousedy. |
+| **Řady mířící dolů (nebo nadir) nepropojené** | Země fotografovaná zblízka se posune při sebemenším pohybu fotoaparátu (paralaxa) a tráva v noci je hlavně šum. Foťte řady se zemí z panoramatické hlavy, která se otáčí kolem objektivu, nebo nadir dodatečně zakryjte. |
 | **Mraky, voda nebo jiné pohyblivé věci** | Mezi snímky se mění, takže je nelze spolehlivě spárovat (snímky jen s mraky obvykle zůstanou nepropojené). Takové části foťte rychle po sobě, nebo je umístěte ručně. |
 | **Použila se špatná dvojice** (čáry všemi směry, snímky na špatném místě) | Vyberte ji v nabídce **Pár** a klikněte na **Zahodit pár**. Se zapnutým **zpřesnit** se většina takových dvojic vyřadí automaticky. |
 | **Duchové (zdvojené předměty)** | Nechte zapnuté **zpřesnit** a použijte **Blend → smart** (výchozí). Zbývající problémy pocházejí z věcí, které se mezi snímky změnily (např. svítilna rozsvícená jen na jednom snímku), nebo z **paralaxy**: blízké předměty se vůči pozadí posunou, když se fotoaparát neotáčí kolem objektivu (tzv. nodálního bodu). |
@@ -647,6 +675,9 @@ chyba, pokud se uložení nepovedlo. × ho zavře.
   použijte stativ, ideálně s panoramatickou hlavou.
 - **Zamkněte expozici, vyvážení bílé a ostření** (ruční režim), aby si všechny
   snímky odpovídaly.
+- **Přelepte kroužek zoomu** u nočních panoramat: při míření nahoru se zoom
+  může posunout. PanoStitch si s tím poradí, ale pevná ohnisková vzdálenost se
+  páruje nejlépe.
 - Vyhněte se pohyblivým předmětům v překryvech, nebo je zachyťte jen na jednom
   snímku.
 - **Držte fotoaparát vodorovně.** Nakloněný fotoaparát ohne horizont (oprava

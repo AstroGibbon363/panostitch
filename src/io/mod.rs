@@ -8,7 +8,7 @@ pub mod xisf;
 use crate::image::{Img, Rgb};
 use std::path::Path;
 
-pub use raw::{available_raw_decoders, RawDecoder, WhiteBalance};
+pub use raw::{available_raw_decoders, shot_info, RawDecoder, ShotInfo, WhiteBalance};
 
 pub const RAW_EXTS: &[&str] = &[
     "cr2", "cr3", "nef", "nrw", "arw", "srf", "dng", "raf", "orf", "rw2", "pef", "srw", "raw", "3fr", "iiq",

@@ -306,6 +306,35 @@ automatiquement**, car ce sont en général de fausses correspondances ou
 quelque chose qui a bougé. La ligne d'état indique combien ont été rejetées et
 l'**erreur typique par paire** (1–3 px, c'est bien).
 
+**Ciels de nuit : appariement par les étoiles.** Les points de coin apparient
+rarement des images qui ne montrent que du ciel : chaque étoile ressemble à
+toutes les autres. Quand les points d'une paire échouent, ce sont donc ses
+**étoiles** qui sont comparées : des triangles d'étoiles voisines, par les
+angles entre elles. Ces angles ne changent ni quand l'appareil tourne ni quand
+le ciel tourne, si bien que des images prises à quelques minutes d'écart
+s'apparient quand même. Ces paires portent *(étoiles)* dans le menu **Paire**
+et la ligne d'état les compte. Seules les paires ayant assez d'étoiles dans le
+recouvrement, dont une bonne part correspond, sont acceptées. Quand les
+appareils visent très loin l'un de l'autre (une rangée vers le haut, une vers
+le bas), les coins éloignés d'une photo sont derrière l'autre appareil ; seule
+la partie couverte par les correspondances est alors jugée.
+
+**Un zoom qui a glissé.** Tourné vers le haut ou le bas, une bague de zoom peut
+tourner sous son propre poids entre les prises. Avec des fichiers RAW, la
+focale de chaque photo est connue : les points sont cherchés à la même échelle
+dans toutes, et l'affinage ajuste chaque focale séparément. La ligne d'état
+indique alors *Le zoom a changé entre les prises (15–17 mm)*.
+
+**Le ciel qui tourne.** Le ciel tourne de 15° par heure : des rangées prises à
+dix minutes d'écart le voient décalé de 2,5°. Avec des fichiers RAW (ils
+enregistrent l'heure de chaque prise), l'affinage mesure cette rotation à
+partir des paires d'étoiles et des paires au sol ensemble, et les appareils
+sont bien placés. La ligne d'état indique *le ciel a tourné de 14,9°/heure
+entre les prises* : proche de 15, c'est réussi. Au rendu, les étoiles de toutes
+les photos apparaissent comme à un même instant (le milieu de la séance), tandis
+que le sol et la lueur du ciel restent à leur place ; près des arbres et autres
+silhouettes, chaque photo reste telle que prise.
+
 **Boutons :**
 
 - **Apparier** : apparie les paires choisies dans le menu Paires (en
@@ -663,6 +692,8 @@ et le fichier avec sa taille, ou l'erreur en cas d'échec. × le ferme.
 | **Peu de points clés jaunes** | Baissez le **Seuil des coins** ; montez **Points clés max.** ; montez **Taille de détection (px)**. |
 | **Points clés surtout sur l'herbe, le ciel ou le bruit** | Montez **Débruitage (σ px)** à 2–3. |
 | **Images marquées UNLINKED** | Regardez-les : chevauchent-elles vraiment une autre image ? Montez **Test du ratio** (0,85–0,9) et **Distance max.** (0,4), baissez **Inliers min.**, montez **Débruitage (σ px)**, puis **Apparier** à nouveau. Si cela échoue encore, activez **montrer les images non reliées** et placez-les avec **Ctrl+glisser**. |
+| **Un trou au zénith, ou des images de ciel seul non reliées (UNLINKED)** | Utilisez les fichiers RAW (leur focale et leur heure de prise sont nécessaires), gardez **toutes les paires** et cliquez de nouveau sur **Apparier** : les images de ciel seul sont alors appariées par leurs étoiles. Chaque image de ciel a besoin de quelques dizaines d'étoiles et d'un bon recouvrement avec ses voisines. |
+| **Rangées vers le bas (ou le nadir) non reliées** | Le sol photographié de près se décale au moindre mouvement de l'appareil (parallaxe), et l'herbe de nuit n'est presque que du bruit. Prenez les rangées du sol avec une tête panoramique qui tourne autour de l'objectif, ou masquez le nadir après coup. |
 | **Nuages, eau ou autres choses qui bougent** | Ils changent d'une prise à l'autre et ne peuvent pas être appariés de façon fiable (les images ne montrant que des nuages restent en général non reliées). Photographiez ces parties vite, l'une après l'autre, ou placez-les à la main. |
 | **Une mauvaise paire est utilisée** (lignes dans tous les sens, images au mauvais endroit) | Sélectionnez-la dans le menu **Paire** et cliquez sur **Écarter la paire**. Avec **affiner** activé, la plupart de ces paires sont rejetées automatiquement. |
 | **Fantômes (objets dédoublés)** | Gardez **affiner** activé et utilisez **Fusion → intelligent** (par défaut). Les problèmes restants viennent de choses qui ont changé entre les prises (p. ex. une lampe allumée sur une seule photo), ou de la **parallaxe** : les objets proches se décalent par rapport au fond quand l'appareil ne tourne pas autour de son objectif (le « point nodal »). |
@@ -687,6 +718,9 @@ et le fichier avec sa taille, ou l'erreur en cas d'échec. × le ferme.
   trépied si possible, idéalement avec une tête panoramique.
 - **Verrouillez l'exposition, la balance des blancs et la mise au point** (mode
   manuel), pour que toutes les images concordent.
+- **Scotchez la bague de zoom** pour les panoramas de nuit : tourné vers le
+  haut, un zoom peut glisser. PanoStitch s'en accommode, mais une focale fixe
+  s'apparie le mieux.
 - Évitez les objets en mouvement dans les zones de recouvrement, ou prenez-les
   sur une seule image.
 - **Gardez l'appareil de niveau.** Un appareil penché courbe l'horizon (se

@@ -11,7 +11,7 @@ use crate::gui::i18n::tr;
 use super::dialogs::{self, Picked};
 use super::{combo, image_view, slider, texture, View};
 use crate::image::{luminance, quantiles, resize, Bits, HalfImg, Img, Source};
-use crate::io::{self, basename, LoadOptions, RawDecoder};
+use crate::io::{self, basename, LoadOptions, RawDecoder, ShotInfo};
 use crate::stitcher::*;
 use egui::{Color32, Pos2, Stroke};
 use rayon::prelude::*;
@@ -36,6 +36,12 @@ pub struct Item {
     pub offset: [f64; 2],
     /// Full (sensor) size ÷ loaded size: 2 for a RAW loaded at half size, else 1.
     pub native: f64,
+    /// Focal length and capture time from the camera.
+    pub shot: ShotInfo,
+    /// Stars in the sky part (found when needed for matching by stars).
+    pub stars: Option<Arc<Vec<Pt>>>,
+    /// Where it shows sky, and its background (found when needed for rendering a turning sky).
+    pub sky_map: Option<Arc<SkyMap>>,
 }
 
 pub type FeatKey = (usize, usize, u64, u64);
@@ -52,6 +58,8 @@ pub struct PairRes {
     /// Shown in the Pair menu (accepted, or matched on purpose).
     pub listed: bool,
     pub msg: String,
+    /// Matched by star patterns (the sky may have turned between the two shots).
+    pub stars: bool,
 }
 
 #[derive(Clone)]
@@ -65,6 +73,41 @@ pub struct Placement {
     pub f: f64,
     pub lens: Lens,
     pub typical: Option<f64>,
+    /// Turning of the sky found from the star pairs (°/hour), if any.
+    pub sky_rate: Option<f64>,
+    /// The sky's turning, to show all stars as at one moment (None: not known).
+    pub sky: Option<SkyMotion>,
+}
+
+/// How the sky turned while the panorama was shot.
+#[derive(Clone, Debug)]
+pub struct SkyMotion {
+    /// Axis × rad/s, in the reference image's frame.
+    pub w: [f64; 3],
+    /// Each image's capture time minus the common moment (s); NaN: show it as shot.
+    pub dt: Vec<f64>,
+}
+
+/// The sky alignment of a render, before the missing sky maps are found.
+struct SkyJob {
+    g: Vec<Option<M3>>,
+    maps: Vec<Option<Arc<SkyMap>>>,
+    /// (index among the rendered images, item index, image) whose map is still needed.
+    todo: Vec<(usize, usize, Arc<Img>)>,
+}
+
+impl SkyJob {
+    /// Find the missing maps (sent back to be kept with the images) and finish.
+    fn finish(mut self, tx: &Sender<Msg>) -> Arc<SkyAlign> {
+        let found: Vec<(usize, usize, Arc<SkyMap>)> = self.todo.par_iter().map(|(k, i, img)| (*k, *i, Arc::new(stars::sky_map(img)))).collect();
+        if !found.is_empty() {
+            let _ = tx.send(Msg::SkyMaps(found.iter().map(|(_, i, m)| (*i, m.clone())).collect()));
+        }
+        for (k, _, m) in found {
+            self.maps[k] = Some(m);
+        }
+        Arc::new(SkyAlign { g: self.g, maps: self.maps })
+    }
 }
 
 struct Preview {
@@ -137,8 +180,16 @@ impl Params {
     fn stretched(&self) -> bool {
         !(self.black == 0.0 && self.mid == 0.5 && self.white == 1.0)
     }
-    fn featkey(&self) -> FeatKey {
-        (self.det_px, self.nkp, self.thr.to_bits(), self.denoise.to_bits())
+    /// Feature settings of an image detected at `scale`.
+    fn featkey_at(&self, scale: f64) -> FeatKey {
+        ((scale * 1e6).round() as usize, self.nkp, self.thr.to_bits(), self.denoise.to_bits())
+    }
+    /// Detection scale of each image: the detection size, and frames shot at
+    /// another zoom resized so that every frame's pixels cover the same angle
+    /// (otherwise their features do not compare).
+    fn det_scales(&self, items: &[Item]) -> Vec<f64> {
+        let rho = zoom(&items.iter().map(|it| it.shot).collect::<Vec<_>>()).1;
+        items.iter().zip(rho).map(|(it, r)| ((self.det_px as f64 / it.img.w.max(it.img.h) as f64).min(1.0) / r).min(2.0)).collect()
     }
 }
 
@@ -156,9 +207,10 @@ enum Msg {
     Loaded(Vec<Option<Item>>, Vec<String>),
     Detail(u64, Img, (f64, f64, f64, f64), f64),
     DetailFailed,
-    Detected(Vec<(usize, Arc<Features>)>, FeatKey),
-    Matched { feats: Vec<(usize, Arc<Features>)>, key: FeatKey, pairs: Vec<PairRes>, layout: Option<Placement>, msg: String },
+    Detected(Vec<(usize, Arc<Features>, FeatKey)>),
+    Matched { feats: Vec<(usize, Arc<Features>, FeatKey)>, stars: Vec<(usize, Arc<Vec<Pt>>)>, pairs: Vec<PairRes>, layout: Option<Placement>, msg: String },
     Preview(Img, (f64, f64, f64, f64), f64, Vec<Vec<Pt>>, Option<Bits>),
+    SkyMaps(Vec<(usize, Arc<SkyMap>)>),
     Done(String),
     Error(String),
 }
@@ -411,6 +463,34 @@ impl Default for StitchTab {
     }
 }
 
+/// Zoom groups (images shot at the same focal length; the most common one is
+/// group 0) and each image's focal length ÷ that of group 0. Images without a
+/// recorded focal length count as group 0.
+pub fn zoom(shots: &[ShotInfo]) -> (Vec<usize>, Vec<f64>) {
+    let key = |s: &ShotInfo| s.focal_mm.map(|f| (f * 10.0).round() as i64);
+    let mut count: HashMap<i64, usize> = HashMap::new();
+    for k in shots.iter().filter_map(key) {
+        *count.entry(k).or_insert(0) += 1;
+    }
+    let Some(mode) = count.iter().max_by_key(|(k, c)| (**c, -**k)).map(|(k, _)| *k) else { return (vec![0; shots.len()], vec![1.0; shots.len()]) };
+    let mut keys: Vec<i64> = count.keys().copied().filter(|&k| k != mode).collect();
+    keys.sort_unstable();
+    let grp = shots.iter().map(|s| key(s).filter(|&k| k != mode).map(|k| 1 + keys.iter().position(|&x| x == k).unwrap()).unwrap_or(0)).collect();
+    let rho = shots.iter().map(|s| key(s).map(|k| k as f64 / mode as f64).unwrap_or(1.0)).collect();
+    (grp, rho)
+}
+
+/// Focal length (px) of zoom group 0, from accepted pairs within one zoom group.
+fn group_focal(pairs: &[PairRes], sizes: &[(usize, usize)], grp: &[usize], rho: &[f64]) -> Option<f64> {
+    let cs = |i: usize| [(sizes[i].1 as f64 + 1.0) / 2.0, (sizes[i].0 as f64 + 1.0) / 2.0];
+    let est: Vec<f64> = pairs
+        .iter()
+        .filter(|q| q.ok && grp[q.i] == grp[q.j])
+        .filter_map(|q| estimate_focal(&[(q.h, cs(q.i), cs(q.j))]).map(|f| f / rho[q.i]))
+        .collect();
+    (!est.is_empty()).then(|| crate::image::median_f64(est))
+}
+
 fn center(img: &Img) -> Pt {
     [(img.w as f64 + 1.0) / 2.0, (img.h as f64 + 1.0) / 2.0]
 }
@@ -418,11 +498,13 @@ fn center(img: &Img) -> Pt {
 /// Placement from the accepted pairs: spanning tree, reference image, transforms
 /// and (optionally) the global refinement. Pairs that do not fit the refined
 /// solution are rejected and the placement is redone (up to 3 times).
-pub fn relayout(sizes: &[(usize, usize)], pairs: &mut [PairRes], ref_choice: Option<usize>, p: &Params) -> (Option<Placement>, String) {
+pub fn relayout(sizes: &[(usize, usize)], shots: &[ShotInfo], pairs: &mut [PairRes], ref_choice: Option<usize>, p: &Params) -> (Option<Placement>, String) {
     let n = sizes.len();
     if n == 0 {
         return (None, String::new());
     }
+    let shots: Vec<ShotInfo> = (0..n).map(|i| shots.get(i).copied().unwrap_or_default()).collect();
+    let (grp, rho) = zoom(&shots);
     let cs: Vec<Pt> = sizes.iter().map(|&(h, w)| [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0]).collect();
     let mut nrej = 0;
     for pass in 0..4 {
@@ -433,13 +515,21 @@ pub fn relayout(sizes: &[(usize, usize)], pairs: &mut [PairRes], ref_choice: Opt
         let (parent, order, comp) = walk_tree(&adj, &roots);
         let members: Vec<usize> = (0..n).filter(|&i| comp[i] == comp[ref_]).collect();
         let hd: HashMap<(usize, usize), M3> = e.iter().map(|&k| ((pairs[k].i, pairs[k].j), pairs[k].h)).collect();
-        let f = estimate_focal(&e.iter().map(|&k| (pairs[k].h, cs[pairs[k].i], cs[pairs[k].j])).collect::<Vec<_>>())
+        // Focal length of the reference image (its zoom group's, from pairs within one group).
+        let f = group_focal(pairs, sizes, &grp, &rho).map(|f| f * rho[ref_])
+            .or_else(|| estimate_focal(&e.iter().map(|&k| (pairs[k].h, cs[pairs[k].i], cs[pairs[k].j])).collect::<Vec<_>>()))
             .unwrap_or(sizes[ref_].0.max(sizes[ref_].1) as f64);
         let mut g = place(&hd, &parent, &order, ref_, &sizes.iter().map(|s| s.1).collect::<Vec<_>>());
-        let (mut f, mut k1, mut typical) = (f, 0.0, None);
+        let (mut f, mut k1, mut typical, mut sky_rate, mut sky) = (f, 0.0, None, None, None);
         if p.refine && p.model == Model::Homography && members.len() > 1 {
             let m: Vec<MatchSet> = e.iter().map(|&k| { let pr = &pairs[k]; (pr.i, pr.j, pr.inl.iter().map(|&q| pr.p1[q]).collect(), pr.inl.iter().map(|&q| pr.p2[q]).collect()) }).collect();
-            let b = bundle_adjust(&g, &cs, ref_, f, &members, &m, 40, p.tol, 60, true);
+            let opts = BundleOpts {
+                group: grp.clone(),
+                focal: rho.iter().map(|r| r / rho[ref_]).collect(),
+                time: shots.iter().map(|s| s.time.unwrap_or(f64::NAN)).collect(),
+                sky: e.iter().map(|&k| pairs[k].stars).collect(),
+            };
+            let b = bundle_adjust_with(&g, &cs, ref_, f, &members, &m, 40, p.tol, 60, true, &opts);
             let fin: Vec<f64> = b.med.iter().copied().filter(|v| v.is_finite()).collect();
             let typ = if fin.is_empty() { 0.0 } else { crate::image::median_f64(fin) };
             typical = Some(typ);
@@ -460,10 +550,38 @@ pub fn relayout(sizes: &[(usize, usize)], pairs: &mut [PairRes], ref_choice: Opt
             g = b.g;
             f = b.f;
             k1 = b.k1;
+            // The sky turns 15.04°/hour; far from that, the fit did not find it (too few loops of star and ground pairs).
+            let rate = |w: &[f64; 3]| nalgebra::Vector3::new(w[0], w[1], w[2]).norm().to_degrees() * 3600.0;
+            let found = b.sky.filter(|w| (10.0..20.0).contains(&rate(w)));
+            sky_rate = found.as_ref().map(rate);
+            if let Some(w) = found {
+                // Turn the stars of every image with star pairs back to the middle moment of those images.
+                let mut starry = vec![false; n];
+                for &k in &e {
+                    if pairs[k].stars {
+                        starry[pairs[k].i] = true;
+                        starry[pairs[k].j] = true;
+                    }
+                }
+                let ts: Vec<f64> = (0..n).filter(|&i| starry[i]).filter_map(|i| shots[i].time).collect();
+                if !ts.is_empty() {
+                    let t0 = crate::image::median_f64(ts);
+                    let dt = (0..n).map(|i| if starry[i] { shots[i].time.map(|t| t - t0).unwrap_or(f64::NAN) } else { f64::NAN }).collect();
+                    sky = Some(SkyMotion { w, dt });
+                }
+            }
         }
         let g = park_unlinked(g, &parent, &order, &comp, ref_, &members, f, &cs, sizes[ref_]);
-        let note = if nrej == 0 { String::new() } else { crate::trf!(" Rejected {} pair(s) that did not fit the others.", nrej) };
-        return (Some(Placement { parent, order, comp, ref_, members, g, f, lens: (k1, f), typical }), note);
+        let mut note = if nrej == 0 { String::new() } else { crate::trf!(" Rejected {} pair(s) that did not fit the others.", nrej) };
+        let mm: Vec<f64> = members.iter().filter_map(|&i| shots[i].focal_mm).collect();
+        let (lo, hi) = (mm.iter().copied().fold(f64::MAX, f64::min), mm.iter().copied().fold(f64::MIN, f64::max));
+        if hi > lo {
+            note += &crate::trf!(" The zoom changed between the shots ({}–{} mm): each focal length was fitted on its own.", format!("{lo}"), format!("{hi}"));
+        }
+        if let Some(r) = sky_rate {
+            note += &crate::trf!(" Star pairs used; the sky turned {}°/hour between the shots.", format!("{r:.1}"));
+        }
+        return (Some(Placement { parent, order, comp, ref_, members, g, f, lens: (k1, f), typical, sky_rate, sky }), note);
     }
     (None, String::new())
 }
@@ -581,7 +699,7 @@ impl StitchTab {
                     let r = io::load_any(p, &opt).map(|img| {
                         let f = (DISP_MAX as f64 / img.w.max(img.h) as f64).min(1.0);
                         let disp = if f < 1.0 { resize(&img, f) } else { img.clone() };
-                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native }
+                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native, shot: io::shot_info(p), stars: None, sky_map: None }
                     });
                     if available_memory() < reserve {
                         full.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -704,17 +822,18 @@ impl StitchTab {
             return;
         }
         let p = self.p.clone();
-        let key = p.featkey();
-        let todo: Vec<(usize, Arc<Img>)> = self.items.iter().enumerate().filter(|(_, it)| it.featkey != Some(key)).map(|(i, it)| (i, it.img.clone())).collect();
+        let dets = p.det_scales(&self.items);
+        let todo: Vec<(usize, Arc<Img>, f64)> =
+            self.items.iter().enumerate().filter(|(i, it)| it.featkey != Some(p.featkey_at(dets[*i]))).map(|(i, it)| (i, it.img.clone(), dets[i])).collect();
         self.spawn(&crate::trf!("Detecting features in {} image(s)…", todo.len()), move |_| {
-            let feats: Vec<(usize, Arc<Features>)> = todo
+            let feats: Vec<(usize, Arc<Features>, FeatKey)> = todo
                 .par_iter()
-                .map(|(i, img)| {
-                    let dp = DetectParams { scale: (p.det_px as f64 / img.w.max(img.h) as f64).min(1.0), nkeypoints: p.nkp, threshold: p.thr, denoise: p.denoise, oriented: false };
-                    (*i, Arc::new(detect(img, &dp)))
+                .map(|(i, img, det)| {
+                    let dp = DetectParams { scale: *det, nkeypoints: p.nkp, threshold: p.thr, denoise: p.denoise, oriented: false };
+                    (*i, Arc::new(detect(img, &dp)), p.featkey_at(*det))
                 })
                 .collect();
-            Ok(Msg::Detected(feats, key))
+            Ok(Msg::Detected(feats))
         });
     }
 
@@ -725,8 +844,11 @@ impl StitchTab {
             return;
         }
         let p = self.p.clone();
-        let key = p.featkey();
-        let imgs: Vec<(Arc<Img>, Option<Arc<Features>>)> = self.items.iter().map(|it| (it.img.clone(), if it.featkey == Some(key) { it.feats.clone() } else { None })).collect();
+        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot).collect();
+        let dets = p.det_scales(&self.items);
+        let imgs: Vec<(Arc<Img>, Option<Arc<Features>>)> =
+            self.items.iter().enumerate().map(|(i, it)| (it.img.clone(), if it.featkey == Some(p.featkey_at(dets[i])) { it.feats.clone() } else { None })).collect();
+        let known_stars: Vec<Option<Arc<Vec<Pt>>>> = self.items.iter().map(|it| it.stars.clone()).collect();
         let n = imgs.len();
         let given = ij.is_some();
         let ij = ij.unwrap_or_else(|| candidate_pairs(n, p.layout, p.cols, p.snake));
@@ -741,8 +863,9 @@ impl StitchTab {
         self.spawn(tr("Detecting features…"), move |tx| {
             let feats: Vec<Arc<Features>> = imgs
                 .par_iter()
-                .map(|(img, f)| f.clone().unwrap_or_else(|| {
-                    let dp = DetectParams { scale: (p.det_px as f64 / img.w.max(img.h) as f64).min(1.0), nkeypoints: p.nkp, threshold: p.thr, denoise: p.denoise, oriented: false };
+                .enumerate()
+                .map(|(i, (img, f))| f.clone().unwrap_or_else(|| {
+                    let dp = DetectParams { scale: dets[i], nkeypoints: p.nkp, threshold: p.thr, denoise: p.denoise, oriented: false };
                     Arc::new(detect(img, &dp))
                 }))
                 .collect();
@@ -754,22 +877,64 @@ impl StitchTab {
                     let name = crate::trf!("Pair {}–{} ({})", i + 1, j + 1, p.model.name());
                     match ransac(&p2, &p1, p.model, 2000, p.tol) {
                         Ok((h, inl)) => {
-                            let (ok, why) = accept_pair(p1.len(), inl.len(), &h, sizes[j].0, sizes[j].1, p.mininl);
+                            let (ok, why) = accept_pair(p1.len(), inl.len(), &h, sizes[j].0, sizes[j].1, p.mininl, &inl.iter().map(|&k| p2[k]).collect::<Vec<_>>());
                             let err = inl.iter().map(|&k| reproj_err(&h, p2[k], p1[k])).sum::<f64>() / inl.len().max(1) as f64;
                             let msg = crate::trf!("{}: {} matches, {} inliers ({}%), mean error {} px{}", name, p1.len(), inl.len(), 100 * inl.len() / p1.len().max(1), format!("{err:.2}"), if ok { String::new() } else { format!("\nREJECTED: {why}.") });
-                            PairRes { i, j, p1, p2, h, inl, ok, listed: listed || ok, msg }
+                            PairRes { i, j, p1, p2, h, inl, ok, listed: listed || ok, msg, stars: false }
                         }
-                        Err(e) => PairRes { i, j, p1, p2, h: M3::zeros(), inl: vec![], ok: false, listed, msg: format!("{name} FAILED: {e}") },
+                        Err(e) => PairRes { i, j, p1, p2, h: M3::zeros(), inl: vec![], ok: false, listed, msg: format!("{name} FAILED: {e}"), stars: false },
                     }
                 })
                 .collect();
+            // Night sky: pairs the features could not match may still match by their stars.
+            let (grp, rho) = zoom(&shots);
+            let failed: Vec<usize> = (0..res.len()).filter(|&k| !res[k].ok).collect();
+            let mut found_stars: Vec<(usize, Arc<Vec<Pt>>)> = Vec::new();
+            if !failed.is_empty() {
+                let _ = tx.send(Msg::Status(tr("Matching the sky by its stars…").into()));
+                let mut all = res.clone();
+                all.extend(old.iter().cloned());
+                let f0 = group_focal(&all, &sizes, &grp, &rho).unwrap_or(sizes[0].0.max(sizes[0].1) as f64);
+                let mut want = vec![false; n];
+                for &k in &failed {
+                    want[res[k].i] = true;
+                    want[res[k].j] = true;
+                }
+                let stars: Vec<Option<Arc<Vec<Pt>>>> = (0..n)
+                    .into_par_iter()
+                    .map(|i| known_stars[i].clone().or_else(|| want[i].then(|| Arc::new(stars::sky_stars(&imgs[i].0)))))
+                    .collect();
+                found_stars = (0..n).filter(|&i| known_stars[i].is_none()).filter_map(|i| stars[i].clone().map(|s| (i, s))).collect();
+                let index: Vec<Option<stars::SkyIndex>> = (0..n)
+                    .into_par_iter()
+                    .map(|i| stars[i].as_ref().filter(|s| s.len() >= stars::MIN_STARS).map(|s| stars::SkyIndex::new(s, sizes[i].0, sizes[i].1, f0 * rho[i])))
+                    .collect();
+                let found: Vec<(usize, PairRes)> = failed
+                    .par_iter()
+                    .filter_map(|&k| {
+                        let (i, j) = (res[k].i, res[k].j);
+                        let (a, b) = (index[i].as_ref()?, index[j].as_ref()?);
+                        let m = stars::match_stars(a, b, p.tol).ok()?;
+                        let nm = m.p1.len();
+                        let msg = crate::trf!("Pair {}–{} (stars): {} of {} stars in the overlap match, mean error {} px", i + 1, j + 1, nm, m.expected, format!("{:.2}", m.err));
+                        Some((k, PairRes { i, j, p1: m.p1, p2: m.p2, h: m.h, inl: (0..nm).collect(), ok: true, listed: true, msg, stars: true }))
+                    })
+                    .collect();
+                for (k, pr) in found {
+                    res[k] = pr;
+                }
+            }
             let nacc = res.iter().filter(|r| r.ok).count();
             let ntried = res.len();
             res.extend(old);
             res.sort_by_key(|r| (r.i, r.j));
             let _ = tx.send(Msg::Status(crate::trf!("Placing images{}", if p.refine { tr(" and refining globally…") } else { "…" })));
-            let (layout, note) = relayout(&sizes, &mut res, ref_choice, &p);
+            let nstars = res.iter().filter(|r| r.ok && r.stars).count();
+            let (layout, note) = relayout(&sizes, &shots, &mut res, ref_choice, &p);
             let mut msg = crate::trf!("{} of {} pairs accepted.{}", nacc, ntried, note);
+            if nstars > 0 {
+                msg = crate::trf!("{} of {} pairs accepted ({} of them by their stars).{}", nacc, ntried, nstars, note);
+            }
             if let Some(l) = &layout {
                 if let Some(t) = l.typical {
                     msg += &crate::trf!(" Typical pair error after refinement: {} px.", format!("{t:.1}"));
@@ -791,13 +956,14 @@ impl StitchTab {
                     }
                 }
             }
-            Ok(Msg::Matched { feats: feats.into_iter().enumerate().collect(), key, pairs: res, layout, msg })
+            Ok(Msg::Matched { feats: feats.into_iter().enumerate().map(|(i, f)| (i, f, p.featkey_at(dets[i]))).collect(), stars: found_stars, pairs: res, layout, msg })
         });
     }
 
     fn relayout_now(&mut self) -> String {
         let sizes: Vec<(usize, usize)> = self.items.iter().map(|it| (it.img.h, it.img.w)).collect();
-        let (l, note) = relayout(&sizes, &mut self.pairs, self.ref_choice, &self.p);
+        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot).collect();
+        let (l, note) = relayout(&sizes, &shots, &mut self.pairs, self.ref_choice, &self.p);
         self.layout = l;
         note
     }
@@ -845,10 +1011,12 @@ impl StitchTab {
         let side = (box_.1 - box_.0).max(box_.3 - box_.2) + 1.0;
         let scale = (p.prev_px as f64 / side).min(1.0);
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
+        let sky = self.sky_job(&vis, &g);
         let uncropped = self.crop.is_none();
-        self.spawn(tr("Rendering preview…"), move |_| {
+        self.spawn(tr("Rendering preview…"), move |tx| {
+            let sky = sky.map(|j| j.finish(tx));
             let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None };
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky };
             let (img, cov) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, uncropped);
             Ok(Msg::Preview(img, box_, scale, outlines, cov))
         });
@@ -866,16 +1034,38 @@ impl StitchTab {
         (imgs, scales, sizes, gains, gv)
     }
 
+    /// The sky alignment for rendering images `vis` placed by `g` (None without a turning sky).
+    fn sky_job(&self, vis: &[usize], g: &[M3]) -> Option<SkyJob> {
+        let l = self.layout.as_ref()?;
+        let sm = l.sky.as_ref()?;
+        let k = kmat(l.f, center(&self.items[l.ref_].img));
+        let w = nalgebra::Vector3::new(sm.w[0], sm.w[1], sm.w[2]);
+        let mut job = SkyJob { g: vec![None; vis.len()], maps: vec![None; vis.len()], todo: vec![] };
+        for (kk, &i) in vis.iter().enumerate() {
+            let Some(&dt) = sm.dt.get(i).filter(|d| d.is_finite()) else { continue };
+            // Back in time by dt: the reference plane turned with the sky, then the image's own placement.
+            let turn = k * rodrigues(&(w * -dt)) * inv(&k);
+            job.g[kk] = Some(g[i] * inv(&l.g[i]) * turn * l.g[i]);
+            match &self.items[i].sky_map {
+                Some(m) => job.maps[kk] = Some(m.clone()),
+                None => job.todo.push((kk, i, self.items[i].img.clone())),
+            }
+        }
+        job.g.iter().any(|x| x.is_some()).then_some(job)
+    }
+
     /// Re-render the visible part of the panorama at screen resolution (in the background).
     fn render_detail(&mut self, key: u64, box_: (f64, f64, f64, f64), scale: f64) {
         let Some((f, c, g, vis, lens)) = self.geometry() else { return };
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
+        let sky = self.sky_job(&vis, &g);
         let (proj, blend, tx) = (self.p.proj, self.p.blend, self.tx.clone());
         self.detail_busy = true;
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| {
+                let sky = sky.map(|j| j.finish(&tx));
                 let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12, levels: None };
+                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky };
                 compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, false).0
             });
             let _ = tx.send(match r {
@@ -1039,6 +1229,9 @@ impl StitchTab {
                 t.insert("accepted".into(), pr.ok.into());
                 t.insert("listed".into(), pr.listed.into());
                 t.insert("message".into(), pr.msg.clone().into());
+                if pr.stars {
+                    t.insert("stars".into(), true.into());
+                }
                 Value::Table(t)
             })
             .collect();
@@ -1155,6 +1348,7 @@ impl StitchTab {
                 ok: r.get("accepted").and_then(|v| v.as_bool()).unwrap_or(false),
                 listed: r.get("listed").and_then(|v| v.as_bool()).unwrap_or(true),
                 msg: r.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                stars: r.get("stars").and_then(|v| v.as_bool()).unwrap_or(false),
             });
         }
         let reference = d.get("reference").and_then(|v| v.as_integer()).filter(|&r| r > 0).map(|r| r as usize - 1);
@@ -1250,6 +1444,7 @@ impl StitchTab {
             return;
         }
         let (imgs, mut scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
+        let sky = self.sky_job(&vis, &g);
         // Above the loaded resolution, read RAWs loaded at half size again at full size.
         let reread: Vec<(usize, String)> = vis.iter().enumerate().filter(|(_, &i)| self.items[i].native > 1.0 && scale > 1.0).map(|(k, &i)| (k, self.items[i].path.clone())).collect();
         if let Err(e) = crate::sys::check_writable(&out) {
@@ -1284,7 +1479,8 @@ impl StitchTab {
                 }
             }
             let refs: Vec<&Source> = srcs.iter().collect();
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None };
+            let sky = sky.map(|j| j.finish(tx));
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky };
             let (wu, hu) = (w as usize, h as usize);
             let astro = io::is_astro(&out);
             // The panorama in the file's own format, filled band by band.
@@ -1407,6 +1603,13 @@ impl StitchTab {
                     }
                 }
                 Msg::DetailFailed => self.detail_busy = false,
+                Msg::SkyMaps(ms) => {
+                    for (i, m) in ms {
+                        if let Some(it) = self.items.get_mut(i) {
+                            it.sky_map = Some(m);
+                        }
+                    }
+                }
                 Msg::Loaded(items, failed) if self.pending_project.is_some() => {
                     self.busy = false;
                     let pd = self.pending_project.take().unwrap();
@@ -1441,10 +1644,10 @@ impl StitchTab {
                     }
                     self.status = format!("Loaded {n} image(s). Next: Run all steps (or detect, match, preview).{note}{}{lowmem_note}", if failed.is_empty() { String::new() } else { format!("\nSkipped {}:\n{}", failed.len(), failed.join("\n")) });
                 }
-                Msg::Detected(feats, key) => {
+                Msg::Detected(feats) => {
                     self.busy = false;
                     let changed: Vec<usize> = feats.iter().map(|f| f.0).collect();
-                    for (i, f) in feats {
+                    for (i, f, key) in feats {
                         if let Some(it) = self.items.get_mut(i) {
                             it.feats = Some(f);
                             it.featkey = Some(key);
@@ -1458,12 +1661,17 @@ impl StitchTab {
                     self.view = ViewKind::Image;
                     self.status = tr("Features detected. Look for keypoints spread over the overlap areas; if too few, lower the corner threshold or raise Denoise. Then match.").into();
                 }
-                Msg::Matched { feats, key, pairs, layout, msg } => {
+                Msg::Matched { feats, stars, pairs, layout, msg } => {
                     self.busy = false;
-                    for (i, f) in feats {
+                    for (i, f, key) in feats {
                         if let Some(it) = self.items.get_mut(i) {
                             it.feats = Some(f);
                             it.featkey = Some(key);
+                        }
+                    }
+                    for (i, s) in stars {
+                        if let Some(it) = self.items.get_mut(i) {
+                            it.stars = Some(s);
                         }
                     }
                     self.pairs = pairs;
@@ -2438,6 +2646,10 @@ impl StitchTab {
     pub fn t_pano_size(&self) -> Option<(usize, usize)> {
         self.pano.as_ref().map(|p| (p.img.w, p.img.h))
     }
+    pub fn t_set_blend(&mut self, b: Blend) {
+        self.p.blend = b;
+        self.request_preview();
+    }
     pub fn t_set_projection(&mut self, p: Projection) {
         self.p.proj = p;
         self.crop = None;
@@ -2501,5 +2713,50 @@ impl StitchTab {
     }
     pub fn t_keypoints(&self) -> Vec<usize> {
         self.items.iter().map(|i| i.feats.as_ref().map(|f| f.pts.len()).unwrap_or(0)).collect()
+    }
+    pub fn t_preview(&self) -> Option<&Img> {
+        self.pano.as_ref().map(|p| &p.img)
+    }
+    /// Images whose outline in the preview contains preview pixel (x, y).
+    pub fn t_images_at(&self, x: f64, y: f64) -> Vec<usize> {
+        let Some(pv) = &self.pano else { return vec![] };
+        let (u, v) = (x / pv.scale + pv.box_.0, y / pv.scale + pv.box_.2);
+        pv.outlines.iter().enumerate().filter(|(_, o)| {
+            let o: Vec<&Pt> = o.iter().filter(|p| p[0].is_finite() && p[1].is_finite()).collect();
+            let mut inside = false;
+            for k in 0..o.len() {
+                let (a, b) = (o[k], o[(k + 1) % o.len()]);
+                if (a[1] > v) != (b[1] > v) && u < a[0] + (v - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) {
+                    inside = !inside;
+                }
+            }
+            inside
+        }).map(|(i, _)| i).collect()
+    }
+    /// Accepted pairs: (i, j, by stars).
+    pub fn t_links(&self) -> Vec<(usize, usize, bool)> {
+        self.pairs.iter().filter(|q| q.ok).map(|q| (q.i, q.j, q.stars)).collect()
+    }
+    /// Images not linked to the reference image.
+    pub fn t_unlinked(&self) -> Vec<usize> {
+        self.layout.as_ref().map(|l| (0..self.items.len()).filter(|&i| l.comp[i] != l.comp[l.ref_]).collect()).unwrap_or_default()
+    }
+    /// Every matched pair: (i, j, accepted, matches, inliers, message).
+    pub fn t_pair_results(&self) -> Vec<(usize, usize, bool, usize, usize, String)> {
+        self.pairs.iter().map(|q| (q.i, q.j, q.ok, q.p1.len(), q.inl.len(), q.msg.clone())).collect()
+    }
+    /// Where each image points: (yaw, elevation) in degrees, relative to the reference image.
+    pub fn t_directions(&self) -> Vec<(f64, f64)> {
+        let Some(l) = &self.layout else { return vec![] };
+        let kr = inv(&kmat(l.f, center(&self.items[l.ref_].img)));
+        self.items.iter().enumerate().map(|(i, it)| {
+            let c = center(&it.img);
+            let d = kr * l.g[i] * nalgebra::Vector3::new(c[0], c[1], 1.0);
+            let d = d / d.norm() * d[2].signum();
+            (d[0].atan2(d[2]).to_degrees(), (-d[1]).asin().to_degrees())
+        }).collect()
+    }
+    pub fn t_sky_rate(&self) -> Option<f64> {
+        self.layout.as_ref().and_then(|l| l.sky_rate)
     }
 }

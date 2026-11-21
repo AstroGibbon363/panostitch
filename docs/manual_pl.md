@@ -297,6 +297,33 @@ wspólnego rozwiązania, są **odrzucane automatycznie**, bo to zwykle fałszywe
 dopasowania lub coś, co się poruszyło. Pasek stanu podaje, ile odrzucono, i
 **typowy błąd pary** (1–3 px to dobrze).
 
+**Nocne niebo: dopasowanie po gwiazdach.** Punkty narożne rzadko dopasowują
+klatki, na których jest tylko niebo: każda gwiazda wygląda jak każda inna. Gdy
+punkty pary zawiodą, porównywane są więc jej **gwiazdy**: trójkąty sąsiednich
+gwiazd, według kątów między nimi. Te kąty nie zmieniają się, gdy obraca się
+aparat ani gdy obraca się niebo, więc dopasowują się nawet klatki zrobione w
+odstępie minut. Takie pary mają w menu **Para** dopisek *(gwiazdy)*, a pasek
+stanu je liczy. Akceptowane są tylko pary z wystarczającą liczbą gwiazd w
+części wspólnej, z których spora część pasuje. Gdy aparaty celują daleko od
+siebie (rząd w górę i rząd w dół), dalekie rogi zdjęcia leżą za drugim
+aparatem; wtedy oceniana jest tylko część pokryta dopasowaniami.
+
+**Zoom, który się przesunął.** Skierowany w górę lub w dół pierścień zoomu może
+się obrócić pod własnym ciężarem między ujęciami. W plikach RAW ogniskowa
+każdego zdjęcia jest znana: punkty są szukane we wszystkich w tej samej skali,
+a dopracowanie dopasowuje każdą ogniskową osobno. Pasek stanu pisze wtedy *Zoom
+zmieniał się między zdjęciami (15–17 mm)*.
+
+**Obracające się niebo.** Niebo obraca się o 15° na godzinę, więc rzędy
+zrobione w odstępie dziesięciu minut widzą je przesunięte o 2,5°. W plikach RAW
+(zapisują czas każdego ujęcia) dopracowanie mierzy ten obrót z par gwiazd
+razem z parami na ziemi, więc aparaty są rozmieszczone poprawnie. Pasek stanu
+pisze *niebo obracało się między zdjęciami o 14,9°/godz.*: blisko 15 znaczy, że
+się udało. Przy renderowaniu gwiazdy wszystkich zdjęć są pokazane tak, jak były
+w jednej chwili (w środku sesji), a ziemia i poświata nieba zostają na swoim
+miejscu; przy drzewach i innych sylwetkach każde zdjęcie zostaje takie, jak
+zostało zrobione.
+
 **Przyciski:**
 
 - **Dopasuj**: dopasowuje pary wybrane w menu Pary (równolegle), potem
@@ -646,6 +673,8 @@ rozmiarem albo błąd, jeśli zapis się nie udał. × go zamyka.
 | **Mało żółtych punktów** | Obniż **Próg narożników**; zwiększ **Maks. punktów**; zwiększ **Rozmiar wykrywania (px)**. |
 | **Punkty głównie na trawie, niebie lub szumie** | Zwiększ **Odszumianie (σ px)** do 2–3. |
 | **Zdjęcia oznaczone UNLINKED** | Obejrzyj je: czy naprawdę zachodzą na inne zdjęcie? Zwiększ **Test proporcji** (0,85–0,9) i **Maks. odległość** (0,4), obniż **Min. inlierów**, zwiększ **Odszumianie (σ px)**, potem znów **Dopasuj**. Jeśli dalej się nie udaje, włącz **pokaż niepołączone zdjęcia** i rozmieść je przez **Ctrl+przeciąganie**. |
+| **Dziura w zenicie lub klatki z samym niebem niepołączone (UNLINKED)** | Użyj plików RAW (potrzebne są ich ogniskowa i czas wykonania), zostaw **wszystkie pary** i znów kliknij **Dopasuj**: klatki z samym niebem są wtedy dopasowywane po gwiazdach. Każda klatka nieba potrzebuje kilkudziesięciu gwiazd i dobrego zachodzenia na sąsiednie. |
+| **Rzędy skierowane w dół (lub nadir) niepołączone** | Ziemia fotografowana z bliska przesuwa się przy najmniejszym ruchu aparatu (paralaksa), a trawa nocą to głównie szum. Fotografuj rzędy z ziemią z głowicy panoramicznej obracającej się wokół obiektywu albo zasłoń nadir później. |
 | **Chmury, woda lub inne ruchome rzeczy** | Zmieniają się między ujęciami, więc nie da się ich pewnie dopasować (klatki z samymi chmurami zwykle zostają niepołączone). Fotografuj takie części szybko jedna po drugiej albo rozmieść je ręcznie. |
 | **Używana jest zła para** (linie we wszystkich kierunkach, zdjęcia w złym miejscu) | Wybierz ją w menu **Para** i kliknij **Odrzuć parę**. Z włączonym **dopracuj** większość takich par jest odrzucana automatycznie. |
 | **Duchy (podwojone obiekty)** | Zostaw włączone **dopracuj** i użyj **Mieszanie → inteligentne** (domyślnie). Pozostałe problemy wynikają z rzeczy, które zmieniły się między ujęciami (np. latarka włączona tylko na jednym zdjęciu), albo z **paralaksy**: bliskie obiekty przesuwają się względem tła, gdy aparat nie obraca się wokół obiektywu („punkt nodalny”). |
@@ -670,6 +699,9 @@ rozmiarem albo błąd, jeśli zapis się nie udał. × go zamyka.
   możesz, najlepiej z głowicą panoramiczną.
 - **Zablokuj ekspozycję, balans bieli i ostrość** (tryb ręczny), żeby
   wszystkie klatki pasowały.
+- **Zaklej pierścień zoomu** przy nocnych panoramach: skierowany w górę zoom
+  może się przesunąć. PanoStitch sobie z tym radzi, ale stała ogniskowa
+  dopasowuje się najlepiej.
 - Unikaj ruchomych obiektów w obszarach zakładki albo uchwyć je tylko na
   jednej klatce.
 - **Trzymaj aparat w poziomie.** Przechylony aparat wygina horyzont (poprawia

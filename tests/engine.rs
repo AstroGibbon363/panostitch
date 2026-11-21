@@ -308,7 +308,7 @@ fn features_match_a_shift() {
     assert!((h[(0, 2)] - 300.0).abs() < 1.0 && h[(1, 2)].abs() < 1.0, "H = {h}");
     let (hh, inl2) = st::ransac(&pb, &pa, st::Model::Homography, 500, 3.0).unwrap();
     assert!(inl2.len() >= 15 && (hh[(0, 2)] - 300.0).abs() < 2.0);
-    assert!(st::accept_pair(pa.len(), inl2.len(), &hh, 400, 500, 10).0);
+    assert!(st::accept_pair(pa.len(), inl2.len(), &hh, 400, 500, 10, &inl2.iter().map(|&k| pb[k]).collect::<Vec<_>>()).0);
 }
 
 #[test]
@@ -453,3 +453,174 @@ fn implausible_alignments_are_refused() {
     assert!(sk::plausible_warp(&m([-1.0565, -0.7797, -0.00047, 2.9394, 2.1693, 0.0013, 2241.8, 100.0, 1.0]).transpose(), w).is_err());
 }
 
+// ---------------------------------------------------------------------------
+// Night-sky panoramas: star matching, zoom groups, the turning sky
+// ---------------------------------------------------------------------------
+
+type V3 = nalgebra::Vector3<f64>;
+
+fn rot(axis: [f64; 3], deg: f64) -> st::M3 {
+    st::rodrigues(&(V3::new(axis[0], axis[1], axis[2]).normalize() * deg.to_radians()))
+}
+
+/// Pixel (1-based) of world direction `d` in a camera turned by `r` (world → camera) with focal `f`, if in an h×w frame.
+fn project(r: &st::M3, d: &V3, f: f64, h: usize, w: usize) -> Option<st::Pt> {
+    let c = r * d;
+    if c[2] <= 0.0 {
+        return None;
+    }
+    let (x, y) = ((w as f64 + 1.0) / 2.0 + f * c[0] / c[2], (h as f64 + 1.0) / 2.0 + f * c[1] / c[2]);
+    (x >= 1.0 && x <= w as f64 && y >= 1.0 && y <= h as f64).then_some([x, y])
+}
+
+fn random_sky(n: usize, seed: u64) -> Vec<V3> {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    (0..n).map(|_| V3::new(randn(&mut rng), randn(&mut rng), randn(&mut rng)).normalize()).collect()
+}
+
+#[test]
+fn stars_match_across_turn_and_zoom() {
+    let (h, w) = (1000usize, 1500usize);
+    let sky = random_sky(20000, 7);
+    // Second frame: camera turned 25° and rolled 10°, zoomed out (focal 900 instead of 1000),
+    // and the sky turned 2° between the shots.
+    let ra = st::M3::identity();
+    let rb = rot([0.0, 0.0, 1.0], 10.0) * rot([0.0, 1.0, 0.0], 25.0);
+    let turn = rot([0.3, -0.8, 0.5], 2.0);
+    let (fa, fb) = (1000.0, 900.0);
+    let pa: Vec<st::Pt> = sky.iter().filter_map(|d| project(&ra, d, fa, h, w)).take(150).collect();
+    let pb: Vec<st::Pt> = sky.iter().filter_map(|d| project(&rb, &(turn * d), fb, h, w)).take(150).collect();
+    let (a, b) = (st::stars::SkyIndex::new(&pa, h, w, fa), st::stars::SkyIndex::new(&pb, h, w, fb));
+    let m = st::stars::match_stars(&a, &b, 2.0).expect("frames should match by their stars");
+    assert!(m.p1.len() >= 20, "{} stars matched of {}", m.p1.len(), m.expected);
+    assert!(m.err < 0.5, "mean error {} px", m.err);
+    // The homography takes stars of b onto the same stars in a.
+    for (p, q) in m.p1.iter().zip(&m.p2) {
+        assert!(st::reproj_err(&m.h, *q, *p) < 1.0);
+    }
+    // A different patch of sky does not match.
+    let rc = rot([0.0, 1.0, 0.0], 150.0);
+    let pc: Vec<st::Pt> = sky.iter().filter_map(|d| project(&rc, d, fa, h, w)).take(150).collect();
+    assert!(st::stars::match_stars(&a, &st::stars::SkyIndex::new(&pc, h, w, fa), 2.0).is_err());
+}
+
+#[test]
+fn refinement_finds_zoom_and_turning_sky() {
+    let (h, w) = (800usize, 1200usize);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    // Four frames: two at focal 1000, two at 900 (the zoom crept); shot over 11 minutes.
+    let rs = [st::M3::identity(), rot([0.0, 1.0, 0.0], 30.0), rot([1.0, 0.0, 0.0], -35.0), rot([1.0, 0.0, 0.0], -35.0) * rot([0.0, 1.0, 0.0], 30.0)];
+    let fs = [1000.0, 1000.0, 900.0, 900.0];
+    let ts = [0.0, 40.0, 600.0, 660.0];
+    let omega = V3::new(0.2, -0.7, 0.4).normalize() * (15.041f64 / 3600.0).to_radians();
+    let at = |t: f64| st::rodrigues(&(omega * t));
+    let pts = random_sky(20000, 11);
+    // Ground pairs see fixed points; star pairs see the sky as it was at each shot.
+    let pairs: [(usize, usize, bool); 6] = [(0, 1, false), (2, 3, false), (0, 2, false), (1, 3, true), (0, 3, true), (1, 2, true)];
+    let mut matches: Vec<st::MatchSet> = Vec::new();
+    let mut skyflags = Vec::new();
+    for &(i, j, sky) in &pairs {
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        for d in &pts {
+            let (di, dj) = if sky { (at(ts[i]) * d, at(ts[j]) * d) } else { (*d, *d) };
+            if let (Some(p), Some(q)) = (project(&rs[i], &di, fs[i], h, w), project(&rs[j], &dj, fs[j], h, w)) {
+                a.push(p);
+                b.push(q);
+            }
+            if a.len() >= 60 {
+                break;
+            }
+        }
+        assert!(a.len() >= 20, "pair {i}-{j} overlaps too little");
+        matches.push((i, j, a, b));
+        skyflags.push(sky);
+    }
+    // Start a little off: rotations disturbed, focal 5 % long, the zoom ratio from EXIF.
+    let k = |f: f64| st::kmat(f, c);
+    let g0: Vec<st::M3> = (0..4).map(|i| k(1000.0) * (rot([0.3, 0.5, 0.1], 0.4 * i as f64) * rs[i]).transpose() * st::inv(&k(fs[i]))).collect();
+    let opts = st::BundleOpts { group: vec![0, 0, 1, 1], focal: vec![1.0, 1.0, 0.9, 0.9], time: ts.to_vec(), sky: skyflags };
+    let b = st::bundle_adjust_with(&g0, &[c; 4], 0, 1050.0, &[0, 1, 2, 3], &matches, 60, 5.0, 60, false, &opts);
+    assert!(b.rms_after < 0.2, "rms {} → {}", b.rms_before, b.rms_after);
+    assert!((b.f - 1000.0).abs() < 2.0, "focal {}", b.f);
+    assert!((b.focal[2] - 0.9).abs() < 0.003 && (b.focal[3] - 0.9).abs() < 0.003, "zoom ratios {:?}", b.focal);
+    let w = b.sky.expect("the sky's turning");
+    let rate = V3::new(w[0], w[1], w[2]).norm().to_degrees() * 3600.0;
+    assert!((rate - 15.041).abs() < 0.5, "sky turned {rate}°/h");
+    // Without star pairs flagged, the same data cannot be fitted as well.
+    let plain = st::BundleOpts { sky: vec![], ..opts };
+    let b2 = st::bundle_adjust_with(&g0, &[c; 4], 0, 1050.0, &[0, 1, 2, 3], &matches, 60, 5.0, 60, false, &plain);
+    assert!(b2.rms_after > 5.0 * b.rms_after.max(0.05), "rms without the turning sky {}", b2.rms_after);
+}
+
+#[test]
+fn steep_pairs_are_judged_on_their_overlap() {
+    // Cameras pointing 70° apart (a row looking up, one looking down): the far
+    // corners of one photo lie behind the other camera, the overlap is fine.
+    let (h, w, f) = (1500usize, 1000usize, 700.0);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let hm = st::kmat(f, c) * rot([1.0, 0.0, 0.0], 70.0) * st::inv(&st::kmat(f, c));
+    assert!(!st::plausible(&hm, h, w));
+    // Points of the second photo that land in the first.
+    let pts: Vec<st::Pt> = (0..40)
+        .flat_map(|a| (0..40).map(move |b| [1.0 + a as f64 * (w as f64 - 1.0) / 39.0, 1.0 + b as f64 * (h as f64 - 1.0) / 39.0]))
+        .filter(|p| {
+            let q = hm * V3::new(p[0], p[1], 1.0);
+            q[2] > 0.0 && (1.0..=w as f64).contains(&(q[0] / q[2])) && (1.0..=h as f64).contains(&(q[1] / q[2]))
+        })
+        .collect();
+    assert!(pts.len() > 50, "{} points in the overlap", pts.len());
+    assert!(st::plausible_overlap(&hm, &pts, h, w));
+    assert!(st::accept_pair(pts.len(), pts.len(), &hm, h, w, 20, &pts).0);
+    // A mirrored transform stays refused.
+    let mirror = hm * st::M3::new(-1.0, 0.0, w as f64 + 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+    assert!(!st::plausible_overlap(&mirror, &pts, h, w));
+}
+
+#[test]
+fn sky_alignment_moves_only_the_stars() {
+    // One photo: stars on a smooth gradient. Rendering it with its sky turned
+    // (a shift here) must move the stars and keep the gradient in place.
+    let (h, w) = (200usize, 300usize);
+    let mut img = Img::from_fn(h, w, |_, j| { let v = 0.2 + 0.3 * j as f32 / w as f32; [v, v, v] });
+    for k in 0..40 {
+        let (y, x) = (10 + (k * 37) % 180, 10 + (k * 53) % 280);
+        for (dy, dx) in (0..3).flat_map(|a| (0..3).map(move |b| (a, b))) {
+            img.px[(y + dy) * w + x + dx] = [1.0; 3];
+        }
+    }
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let cp = st::ComposeParams { projection: st::Projection::Rectilinear, f: 500.0, c, blend: st::Blend::Average, ..Default::default() };
+    let box_ = st::bounds(&[st::outline(&st::M3::identity(), h, w, cp.projection, cp.f, c, cp.lens, 24)]);
+    let (plain, _) = st::compose(&[&img], &[st::M3::identity()], box_, &cp, &[1.0], &[1.0], &[(h, w)], false);
+    let shift = st::translation(6.0, 0.0);
+    let map = st::SkyMap { open: Bits { w: w / 4, h: h / 4, v: vec![true; (w / 4) * (h / 4)] }, bg: blur(&panostitch::image::resize(&img, 1.0 / 16.0), 1.0) };
+    let sky = st::SkyAlign { g: vec![Some(shift)], maps: vec![Some(std::sync::Arc::new(map))] };
+    let cp2 = st::ComposeParams { sky: Some(std::sync::Arc::new(sky)), ..cp.clone() };
+    let (turned, _) = st::compose(&[&img], &[st::M3::identity()], box_, &cp2, &[1.0], &[1.0], &[(h, w)], false);
+    // Every star now shows 6 px to the right; the background stays where it was.
+    let stars: Vec<(usize, usize)> = (0..plain.h * plain.w).filter(|&k| luminance(plain.px[k]) > 0.9).map(|k| (k / plain.w, k % plain.w)).collect();
+    assert!(stars.len() > 40, "{} star pixels", stars.len());
+    for &(y, x) in stars.iter().filter(|p| p.1 + 6 < plain.w) {
+        assert!(luminance(turned.at(y, x + 6)) > 0.9, "star at {y},{x} not moved: {:?}", turned.at(y, x + 6));
+    }
+    let (a, b) = (luminance(plain.at(150, 150)), luminance(turned.at(150, 150)));
+    assert!((a - b).abs() < 0.01, "background moved: {a} → {b}");
+    // No open sky: the photo as shot.
+    let closed = st::SkyMap { open: Bits { w: w / 4, h: h / 4, v: vec![false; (w / 4) * (h / 4)] }, bg: Img::new(4, 4) };
+    let sky = st::SkyAlign { g: vec![Some(shift)], maps: vec![Some(std::sync::Arc::new(closed))] };
+    let (same, _) = st::compose(&[&img], &[st::M3::identity()], box_, &st::ComposeParams { sky: Some(std::sync::Arc::new(sky)), ..cp }, &[1.0], &[1.0], &[(h, w)], false);
+    assert_eq!(same.px, plain.px);
+}
+
+#[test]
+fn capture_times_and_zoom_groups() {
+    let t = |s: &str| io::raw::exif_seconds(s).unwrap();
+    assert_eq!(t("2026:11:14 22:08:30") - t("2026:11:14 21:08:30"), 3600.0);
+    assert_eq!(t("2026:03:01 00:00:10") - t("2026:02:28 23:59:50"), 20.0);
+    assert_eq!(t("2025:01:01 00:00:00") - t("2024:12:31 23:00:00"), 3600.0);
+    assert!(io::raw::exif_seconds("garbage").is_none());
+    let shot = |f: Option<f64>| io::ShotInfo { focal_mm: f, time: None };
+    let (g, r) = panostitch::gui::stitch::zoom(&[shot(Some(17.0)), shot(Some(17.0)), shot(Some(15.0)), shot(None), shot(Some(11.5))]);
+    assert_eq!(g, vec![0, 0, 2, 0, 1]);
+    assert!((r[2] - 15.0 / 17.0).abs() < 1e-9 && r[3] == 1.0 && (r[4] - 11.5 / 17.0).abs() < 1e-9, "{r:?}");
+}

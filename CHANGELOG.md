@@ -25,6 +25,12 @@
 - **Projects** (`.tlproj`): the frames, looks, mask and every video setting; frames are found again after the folder moved.
 - Up to eight frames at a time, fewer when memory is short (120 fisheye RAW frames: 56 s → 46 s).
 
+### Night panoramas
+- **Sky-only frames match by their stars.** Where corner features fail (frames near the zenith show nothing but stars), pairs are matched by triangles of neighbouring stars, compared by the angles between them, which neither the camera's turning nor the sky's changes. A 120-frame all-sky panorama that left a hole at the zenith (48 frames linked) now links every frame up to the zenith (107 frames; only the nadir shots of grass stay out).
+- **A zoom lens that crept** between shots (pointed up, a zoom ring turns by its own weight; 17 → 15 mm in that set): RAW files give each photo's focal length, features are found at the same scale in all of them, and the refinement fits a focal length per zoom setting.
+- **The turning sky:** from the capture times, the refinement measures how the sky turned between rows shot minutes apart (it found 14.9°/hour; the true rate is 15.04°), so star pairs and ground pairs agree. When rendering, the stars of every photo are shown as at one moment while the ground and the sky's glow stay in place, so stars meet across rows instead of doubling.
+- Pairs of cameras pointing far apart (a row looking up and one looking down) were refused as "folding the image", because the far corners of one photo lie behind the other camera. They are now judged on the part the matches cover.
+
 ### Speed and memory
 - **Big panoramas in less memory:** the full-size panorama is rendered in bands of rows when it does not fit in one piece and kept in the file's own format (6 bytes per pixel for 16-bit TIFF instead of about 50); photos read again at full size are kept in half precision. Smart blending renders each band with overlap, so the bands join seamlessly.
 - Star stacking loads the calibration frames in parallel (they were read one by one) and loads and measures as many light frames at once as the free memory allows (it was at most 4). 60 frames of 24 MP with darks, flats and bias: 118 s → 81 s on a 28-thread PC, the same result bit for bit.

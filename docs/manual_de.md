@@ -303,6 +303,36 @@ beim Rendern korrigiert. Paare, die nicht zur gemeinsamen Lösung passen, werden
 sind. Die Statuszeile meldet, wie viele verworfen wurden, und den **typischen
 Paarfehler** (1–3 px ist gut).
 
+**Nachthimmel: Zuordnung über die Sterne.** Eckpunkte ordnen Bilder, die nur
+Himmel zeigen, selten zu: Jeder Stern sieht aus wie jeder andere. Scheitern die
+Punkte eines Paares, werden deshalb seine **Sterne** verglichen: Dreiecke
+benachbarter Sterne, nach den Winkeln zwischen ihnen. Diese bleiben gleich, wenn
+sich die Kamera dreht und wenn sich der Himmel dreht, daher passen auch Bilder
+zusammen, die Minuten nacheinander entstanden sind. Solche Paare tragen im Menü
+**Paar** den Zusatz *(Sterne)*, und die Statuszeile zählt sie. Angenommen
+werden nur Paare mit genug Sternen in der Überlappung, von denen ein guter Teil
+passt. Zeigen die Kameras weit auseinander (eine Reihe nach oben, eine nach
+unten), liegen die fernen Ecken eines Bildes hinter der anderen Kamera; dort
+wird nur der Teil beurteilt, den die Zuordnungen abdecken.
+
+**Ein Zoom, der sich verstellt hat.** Nach oben oder unten gerichtet, kann sich
+ein Zoomring zwischen den Aufnahmen durch sein eigenes Gewicht drehen. Bei
+RAW-Dateien ist die Brennweite jedes Bildes bekannt: Punkte werden in allen
+Bildern im gleichen Maßstab gesucht, und die Verfeinerung passt jede Brennweite
+einzeln an. Die Statuszeile meldet dann *Der Zoom hat sich zwischen den
+Aufnahmen verändert (15–17 mm)*.
+
+**Der sich drehende Himmel.** Der Himmel dreht sich um 15° pro Stunde; Reihen,
+die zehn Minuten auseinander liegen, sehen ihn um 2,5° versetzt. Bei
+RAW-Dateien (sie speichern den Aufnahmezeitpunkt) misst die Verfeinerung diese
+Drehung aus den Sternpaaren zusammen mit den Paaren am Boden, sodass die Kameras
+richtig platziert werden. Die Statuszeile meldet *der Himmel drehte sich
+zwischen den Aufnahmen um 14,9°/Stunde*: nahe 15 heißt, es hat geklappt. Beim
+Rendern erscheinen die Sterne aller Bilder so, wie sie in einem Moment standen
+(der Mitte der Aufnahmen), während Boden und Himmelsleuchten an ihrem Platz
+bleiben; an Bäumen und anderen Silhouetten bleibt jedes Bild, wie es
+aufgenommen wurde.
+
 **Schaltflächen:**
 
 - **Zuordnen**: ordnet die im Menü Pairs gewählten Paare zu (parallel),
@@ -660,6 +690,8 @@ Fehler, falls das Speichern scheiterte. × schließt ihn.
 | **Wenige gelbe Punkte** | **Eckenschwelle** senken; **Max. Merkmale** erhöhen; **Erkennungsgröße** erhöhen. |
 | **Punkte vor allem auf Gras, Himmel oder Rauschen** | **Entrauschen** auf 2–3 erhöhen. |
 | **Bilder mit UNLINKED markiert** | Ansehen: Überlappen sie wirklich mit einem anderen Bild? **Verhältnistest** (0,85–0,9) und **Max. Abstand** (0,4) erhöhen, **Min. Inlier** senken, **Entrauschen** erhöhen, dann erneut **Zuordnen**. Klappt es weiterhin nicht, **nicht verbundene Bilder zeigen** einschalten und die Bilder mit **Strg + Ziehen** platzieren. |
+| **Ein Loch im Zenit, oder Bilder nur mit Himmel UNLINKED** | Die RAW-Dateien verwenden (ihre Brennweite und Aufnahmezeit werden gebraucht), **alle Paare** beibehalten und erneut **Zuordnen**: Bilder nur mit Himmel werden dann über ihre Sterne zugeordnet. Jedes Himmelsbild braucht einige Dutzend Sterne und eine gute Überlappung mit seinen Nachbarn. |
+| **Reihen nach unten (oder der Nadir) UNLINKED** | Boden aus der Nähe verschiebt sich bei der kleinsten Bewegung der Kamera (Parallaxe), und Gras ist nachts vor allem Rauschen. Die Bodenreihen mit einem Panoramakopf aufnehmen, der sich um das Objektiv dreht, oder den Nadir später abdecken. |
 | **Wolken, Wasser oder andere bewegte Dinge** | Sie verändern sich zwischen den Aufnahmen und lassen sich daher nicht zuverlässig zuordnen (Bilder nur mit Wolken bleiben meist unverbunden). Solche Teile schnell nacheinander aufnehmen oder von Hand platzieren. |
 | **Ein falsches Paar wird verwendet** (Linien in alle Richtungen, Bilder am falschen Platz) | Im Menü **Paar** auswählen und **Paar verwerfen** klicken. Mit eingeschaltetem **verfeinern** werden die meisten solchen Paare automatisch verworfen. |
 | **Geisterbilder (doppelte Objekte)** | **verfeinern** eingeschaltet lassen und **Blend → smart** (Standard) verwenden. Verbleibende Probleme stammen von Dingen, die sich zwischen den Aufnahmen verändert haben (z. B. eine Taschenlampe, die nur auf einem Foto leuchtet), oder von **Parallaxe**: Nahe Objekte verschieben sich gegenüber dem Hintergrund, wenn die Kamera nicht um ihr Objektiv (den „Nodalpunkt“) gedreht wird. |
@@ -684,6 +716,9 @@ Fehler, falls das Speichern scheiterte. × schließt ihn.
   möglich, ein Stativ verwenden, am besten mit Panoramakopf.
 - **Belichtung, Weißabgleich und Fokus fixieren** (manueller Modus), damit alle
   Bilder zusammenpassen.
+- **Den Zoomring abkleben** bei Nachtpanoramen: Nach oben gerichtet kann ein
+  Zoom wandern. PanoStitch kommt damit zurecht, aber eine feste Brennweite passt
+  am besten zusammen.
 - Bewegte Objekte in den Überlappungsbereichen vermeiden oder nur in einer
   Aufnahme festhalten.
 - **Kamera waagerecht halten.** Eine geneigte Kamera biegt den Horizont

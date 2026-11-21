@@ -259,7 +259,9 @@ the matches that agree with a single geometric model (the *inliers*).
 **When a pair counts as a real overlap:** it needs at least *Min. inliers*
 inliers, a clear majority of its matches must agree, and the transform must be
 plausible (it must not fold or extremely stretch the image). This filters out
-false matches between images that do not actually overlap.
+false matches between images that do not actually overlap. For cameras pointing
+far apart (a row looking up and one looking down), the far corners of a photo
+lie behind the other camera; there only the part the matches cover is judged.
 
 **Models:**
 
@@ -280,6 +282,30 @@ rendering. Pairs that do not fit the common solution are **rejected
 automatically**, because they are usually false matches or something that
 moved. The status line reports how many were rejected and the **typical pair
 error** (1–3 px is good).
+
+**Night skies: matching by stars.** Corner features rarely match frames that
+show only sky: every star looks like every other star. So when the features of
+a pair fail, its **stars** are compared instead: triangles of neighbouring
+stars, by the angles between them. Those angles stay the same when the camera
+turns and when the sky turns, so frames shot minutes apart still match. Such
+pairs say *(stars)* in the Pair menu and the status line counts them. Only
+pairs with enough stars in their overlap, and a good share of them matching,
+are accepted.
+
+**A zoom lens that crept.** Pointed up or down, a zoom ring can turn by its own
+weight between shots. With RAW files the focal length of every photo is known:
+features are found at the same scale in all of them, and the refinement fits
+each focal length on its own. The status line then says *The zoom changed
+between the shots (15–17 mm)*.
+
+**The turning sky.** The sky turns 15° an hour, so rows shot ten minutes apart
+see it 2.5° apart. With RAW files (they record when each photo was taken), the
+refinement measures that turning from the star pairs together with the pairs
+on the ground, so the cameras are placed correctly. The status line says *the
+sky turned 14.9°/hour*: close to 15 means it worked. When rendering, the stars
+of every photo are shown as they were at one moment (the middle of the shoot),
+while the ground and the glow of the sky stay where they were; near trees and
+other silhouettes each photo is left as shot.
 
 **Buttons:**
 
@@ -616,6 +642,8 @@ size in pixels and the file with its size, or the error if saving failed.
 | **Few yellow keypoints** | Lower the **Corner threshold**; raise **Max keypoints**; raise **Detection size**. |
 | **Keypoints mostly on grass, sky or noise** | Raise **Denoise** to 2–3. |
 | **Images marked UNLINKED** | Look at them: do they really overlap another image? Raise **Ratio test** (0.85–0.9) and **Max distance** (0.4), lower **Min. inliers**, raise **Denoise**, then **Match** again. If it still fails, switch on **show unlinked images** and place them with **Ctrl+drag**. |
+| **A hole at the zenith, or sky-only frames UNLINKED** | Use the RAW files (their focal length and capture time are needed), keep **all pairs**, and **Match** again: sky-only frames are then matched by their stars. Each sky frame needs a few dozen stars and a good overlap with its neighbours. |
+| **Rows looking down (or the nadir) UNLINKED** | Ground shot from close by shifts with the smallest movement of the camera (parallax), and grass at night is mostly noise. Shoot the ground rows from a panoramic head that turns around the lens, or patch the nadir later. |
 | **Clouds, water, or other moving things** | They change between shots, so they cannot be matched reliably (frames showing only clouds usually stay unlinked). Shoot such parts quickly one after another, or place them by hand. |
 | **A wrong pair is used** (lines in all directions, images in the wrong place) | Select it in the **Pair** menu and click **Discard pair**. With **refine** on, most such pairs are rejected automatically. |
 | **Ghosting (doubled objects)** | Keep **refine** on and use **Blend → smart** (default). Remaining problems come from things that changed between shots (e.g. a torch switched on in only one photo), or from **parallax**: close objects shift against the background when the camera is not rotated around its lens (the "nodal point"). |
@@ -639,6 +667,8 @@ size in pixels and the file with its size, or the error if saving failed.
 - **Rotate the camera** around the lens, not around yourself. Use a tripod if
   you can, ideally with a panoramic head.
 - **Lock exposure, white balance and focus** (manual mode), so all frames match.
+- **Tape the zoom ring** for night panoramas: pointed up, a zoom lens can creep.
+  PanoStitch copes with it, but a fixed focal length matches best.
 - Avoid moving objects in the overlap areas, or shoot them in one frame only.
 - **Keep the camera level.** A tilted camera bends the horizon (fix with
   Pitch and Roll).

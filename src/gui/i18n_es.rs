@@ -890,4 +890,9 @@ pub const T: &[(&str, &str)] = &[
     (" NOT linked: images {} – hidden; switch on “show unlinked images” to place them by hand, or try other matching settings.", " SIN enlazar: imágenes {} – ocultas; active «mostrar imágenes no enlazadas» para colocarlas a mano, o pruebe otros ajustes de emparejado."),
     ("type", "tipo"),
     ("Preview ready. Drag to pan, wheel to zoom (detail sharpens). Click an image to select it; Ctrl+drag or arrow keys move it.", "Vista previa lista. Arrastre para desplazar, rueda para el zoom (el detalle se enfoca). Haga clic en una imagen para seleccionarla; Ctrl+arrastrar o las flechas la mueven."),
+    ("Matching the sky by its stars…", "Emparejando el cielo por sus estrellas…"),
+    ("Pair {}–{} (stars): {} of {} stars in the overlap match, mean error {} px", "Par {}–{} (estrellas): coinciden {} de {} estrellas del solapamiento, error medio {} px"),
+    ("{} of {} pairs accepted ({} of them by their stars).{}", "{} de {} pares aceptados ({} de ellos por sus estrellas).{}"),
+    (" The zoom changed between the shots ({}–{} mm): each focal length was fitted on its own.", " El zoom cambió entre las tomas ({}–{} mm): cada distancia focal se ajustó por separado."),
+    (" Star pairs used; the sky turned {}°/hour between the shots.", " Se usaron pares por estrellas; el cielo giró {}°/hora entre las tomas."),
 ];

@@ -250,6 +250,49 @@ fn decode_builtin(path: &str, opt: &LoadOptions) -> Result<Img, String> {
     }
 }
 
+/// What the camera recorded about a shot (from the RAW file's EXIF data).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShotInfo {
+    /// Focal length in mm: a zoom lens may creep between the frames of a panorama.
+    pub focal_mm: Option<f64>,
+    /// Capture time in seconds (from an arbitrary origin): the sky turns between frames.
+    pub time: Option<f64>,
+}
+
+/// Focal length and capture time of a RAW file; empty for other files or when missing.
+pub fn shot_info(path: &str) -> ShotInfo {
+    if !super::is_raw(path) {
+        return ShotInfo::default();
+    }
+    let read = || -> Option<ShotInfo> {
+        let src = rawler::rawsource::RawSource::new(Path::new(path)).ok()?;
+        let dec = rawler::get_decoder(&src).ok()?;
+        let m = dec.raw_metadata(&src, &rawler::decoders::RawDecodeParams { image_index: 0 }).ok()?;
+        let e = &m.exif;
+        let focal_mm = e.focal_length.filter(|r| r.d != 0 && r.n != 0).map(|r| r.n as f64 / r.d as f64);
+        let sub = e.sub_sec_time_original.as_deref().and_then(|s| format!("0.{}", s.trim()).parse::<f64>().ok()).unwrap_or(0.0);
+        let time = e.date_time_original.as_deref().and_then(exif_seconds).map(|t| t + sub);
+        Some(ShotInfo { focal_mm, time })
+    };
+    std::panic::catch_unwind(read).ok().flatten().unwrap_or_default()
+}
+
+/// "YYYY:MM:DD HH:MM:SS" → seconds since 1970 (time zone ignored: only differences matter).
+pub fn exif_seconds(s: &str) -> Option<f64> {
+    let v: Vec<i64> = s.trim().split([':', ' ', '-', 'T']).filter(|x| !x.is_empty()).map(|x| x.parse().ok()).collect::<Option<_>>()?;
+    if v.len() < 6 || v[0] < 1900 || !(1..=12).contains(&v[1]) || !(1..=31).contains(&v[2]) {
+        return None;
+    }
+    // days from the civil date (Howard Hinnant's algorithm)
+    let (y, m, d) = (if v[1] <= 2 { v[0] - 1 } else { v[0] }, v[1], v[2]);
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some((days * 86400 + v[3] * 3600 + v[4] * 60 + v[5]) as f64)
+}
+
 fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
     use rawler::decoders::Orientation;
 

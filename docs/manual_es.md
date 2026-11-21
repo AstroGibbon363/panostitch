@@ -299,6 +299,34 @@ solución común se **descartan automáticamente**, porque suelen ser
 coincidencias falsas o algo que se movió. La línea de estado indica cuántos se
 descartaron y el **error típico por par** (1–3 px es bueno).
 
+**Cielos nocturnos: emparejar por las estrellas.** Los puntos de esquina rara
+vez emparejan tomas que solo muestran cielo: cada estrella se parece a todas
+las demás. Por eso, cuando fallan los puntos de un par, se comparan sus
+**estrellas**: triángulos de estrellas vecinas, por los ángulos entre ellas.
+Esos ángulos no cambian al girar la cámara ni al girar el cielo, así que
+emparejan incluso tomas hechas con minutos de diferencia. Esos pares llevan
+*(estrellas)* en el menú **Par** y la línea de estado los cuenta. Solo se
+aceptan pares con suficientes estrellas en el solapamiento y una buena parte de
+ellas coincidiendo. Cuando las cámaras apuntan muy separadas (una fila hacia
+arriba y otra hacia abajo), las esquinas lejanas de una foto quedan detrás de
+la otra cámara; ahí solo se juzga la parte que cubren las coincidencias.
+
+**Un zoom que se movió.** Apuntando hacia arriba o hacia abajo, el anillo del
+zoom puede girar por su propio peso entre tomas. Con archivos RAW se conoce la
+distancia focal de cada foto: los puntos se buscan a la misma escala en todas,
+y el refinado ajusta cada distancia focal por separado. La línea de estado
+dice entonces *El zoom cambió entre las tomas (15–17 mm)*.
+
+**El cielo que gira.** El cielo gira 15° por hora, así que filas tomadas con
+diez minutos de diferencia lo ven desplazado 2,5°. Con archivos RAW (guardan la
+hora de cada toma), el refinado mide ese giro a partir de los pares por
+estrellas junto con los pares del suelo, y las cámaras quedan bien colocadas.
+La línea de estado dice *el cielo giró 14,9°/hora entre las tomas*: cerca de 15
+significa que funcionó. Al componer, las estrellas de todas las fotos se
+muestran como estaban en un mismo momento (la mitad de la sesión), mientras el
+suelo y el resplandor del cielo se quedan donde estaban; junto a árboles y
+otras siluetas cada foto queda tal como se tomó.
+
 **Botones:**
 
 - **Emparejar**: empareja los pares elegidos en el menú Pares (en paralelo),
@@ -655,6 +683,8 @@ error si el guardado falló. × lo cierra.
 | **Pocos puntos clave amarillos** | Baje el **Umbral de esquinas**; suba **Puntos clave máx.**; suba **Tamaño de detección (px)**. |
 | **Puntos clave sobre todo en hierba, cielo o ruido** | Suba **Reducir ruido (σ px)** a 2–3. |
 | **Imágenes marcadas UNLINKED** | Mírelas: ¿se solapan de verdad con otra imagen? Suba **Prueba de razón** (0,85–0,9) y **Distancia máx.** (0,4), baje **Inliers mín.**, suba **Reducir ruido (σ px)** y pulse **Emparejar** otra vez. Si sigue fallando, active **mostrar imágenes no enlazadas** y colóquelas con **Ctrl+arrastrar**. |
+| **Un agujero en el cenit, o tomas solo de cielo sin enlazar (UNLINKED)** | Use los archivos RAW (se necesitan su distancia focal y su hora), mantenga **todos los pares** y pulse **Emparejar** de nuevo: las tomas solo de cielo se emparejan entonces por sus estrellas. Cada toma de cielo necesita unas decenas de estrellas y un buen solapamiento con sus vecinas. |
+| **Filas hacia abajo (o el nadir) sin enlazar** | El suelo fotografiado de cerca se desplaza con el menor movimiento de la cámara (paralaje), y la hierba de noche es sobre todo ruido. Haga las filas del suelo con un cabezal panorámico que gire alrededor del objetivo, o tape el nadir después. |
 | **Nubes, agua u otras cosas que se mueven** | Cambian entre tomas, así que no se pueden emparejar de forma fiable (las tomas con solo nubes suelen quedar sin enlazar). Haga esas partes rápido, una tras otra, o colóquelas a mano. |
 | **Se usa un par erróneo** (líneas en todas direcciones, imágenes en el sitio equivocado) | Selecciónelo en el menú **Par** y haga clic en **Descartar par**. Con **refinar** activado, la mayoría de esos pares se descartan solos. |
 | **Fantasmas (objetos duplicados)** | Mantenga **refinar** activado y use **Fusión → inteligente** (por defecto). Los problemas restantes vienen de cosas que cambiaron entre tomas (p. ej. una linterna encendida en una sola foto), o del **paralaje**: los objetos cercanos se desplazan contra el fondo cuando la cámara no gira alrededor de su objetivo (el «punto nodal»). |
@@ -679,6 +709,9 @@ error si el guardado falló. × lo cierra.
   trípode si puede, idealmente con una rótula panorámica.
 - **Bloquee la exposición, el balance de blancos y el enfoque** (modo manual),
   para que todas las tomas coincidan.
+- **Sujete el anillo del zoom con cinta** en panorámicas nocturnas: apuntando
+  hacia arriba, un zoom puede desplazarse. PanoStitch lo resuelve, pero una
+  focal fija empareja mejor.
 - Evite objetos en movimiento en las zonas de solape, o captúrelos en una sola
   toma.
 - **Mantenga la cámara nivelada.** Una cámara inclinada curva el horizonte

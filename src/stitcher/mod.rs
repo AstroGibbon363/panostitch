@@ -7,6 +7,7 @@
 //! Assumes the images were shot by rotating the camera (standard panorama case).
 
 pub mod render;
+pub mod stars;
 
 use crate::image::{blur, luminance, median_f64, quantiles, resize, to_full, Gray, Img};
 use nalgebra::{DMatrix, DVector, Matrix3, Vector3};
@@ -200,7 +201,8 @@ pub struct Features {
 /// Parameters of `detect`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetectParams {
-    /// Detect on a copy resized by this factor (faster, less noise).
+    /// Detect on a copy resized by this factor (smaller: faster, less noise;
+    /// larger: to match frames shot zoomed in).
     pub scale: f64,
     /// At most this many keypoints, spread evenly over a grid of the image.
     pub nkeypoints: usize,
@@ -221,7 +223,7 @@ impl Default for DetectParams {
 /// Corner keypoints and descriptors (see `DetectParams`).
 pub fn detect(img: &Img, p: &DetectParams) -> Features {
     let mut g = img.luminance();
-    if p.scale < 1.0 {
+    if p.scale != 1.0 {
         g = resize(&g, p.scale);
     }
     let g = stretch(&blur(&g, p.denoise));
@@ -579,15 +581,16 @@ pub fn candidate_pairs(n: usize, mode: Layout, cols: usize, snake: bool) -> Vec<
     }
 }
 
-/// Is a RANSAC result a real overlap? Returns (accepted, reason).
-pub fn accept_pair(nmatches: usize, ninliers: usize, h: &M3, hgt: usize, wid: usize, min_inliers: usize) -> (bool, String) {
+/// Is a RANSAC result a real overlap? Returns (accepted, reason). `pts`: the
+/// inliers in image j (the one `h` maps).
+pub fn accept_pair(nmatches: usize, ninliers: usize, h: &M3, hgt: usize, wid: usize, min_inliers: usize, pts: &[Pt]) -> (bool, String) {
     if ninliers < min_inliers {
         return (false, format!("only {ninliers} inliers (need {min_inliers})"));
     }
     if (ninliers as f64) < 8.0 + 0.2 * nmatches as f64 {
         return (false, format!("{ninliers} inliers of {nmatches} matches is too few to be a real overlap"));
     }
-    if !plausible(h, hgt, wid) {
+    if !plausible(h, hgt, wid) && !plausible_overlap(h, pts, hgt, wid) {
         return (false, "the transform folds or strongly distorts the image".into());
     }
     (true, String::new())
@@ -597,8 +600,28 @@ pub fn accept_pair(nmatches: usize, ninliers: usize, h: &M3, hgt: usize, wid: us
 /// non-flipped quadrilateral whose area is between ¼ and 4× the original.
 pub fn plausible(h: &M3, hgt: usize, wid: usize) -> bool {
     let (w, hh) = (wid as f64, hgt as f64);
-    let q: Vec<Vector3<f64>> =
-        [(1.0, 1.0), (w, 1.0), (w, hh), (1.0, hh)].iter().map(|&(x, y)| h * Vector3::new(x, y, 1.0)).collect();
+    plausible_quad(h, [(1.0, 1.0), (w, 1.0), (w, hh), (1.0, hh)])
+}
+
+/// `plausible` for the part of the image the matches cover: when the cameras
+/// point far apart (a row looking up and one looking down), the far corners
+/// of a photo lie behind the other camera although the overlap is fine.
+pub fn plausible_overlap(h: &M3, pts: &[Pt], hgt: usize, wid: usize) -> bool {
+    if pts.len() < 4 {
+        return false;
+    }
+    let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p[0]), a.1.max(p[0])));
+    let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p[1]), a.1.max(p[1])));
+    // A sliver says nothing about the transform.
+    if x1 - x0 < 0.1 * wid as f64 || y1 - y0 < 0.1 * hgt as f64 {
+        return false;
+    }
+    plausible_quad(h, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+}
+
+fn plausible_quad(h: &M3, quad: [(f64, f64); 4]) -> bool {
+    let area_of = |c: &[(f64, f64)]| 0.5 * (0..4).map(|k| c[k].0 * c[(k + 1) % 4].1 - c[(k + 1) % 4].0 * c[k].1).sum::<f64>().abs();
+    let q: Vec<Vector3<f64>> = quad.iter().map(|&(x, y)| h * Vector3::new(x, y, 1.0)).collect();
     if !q.iter().all(|v| v[2] > 0.0) {
         return false;
     }
@@ -610,8 +633,7 @@ pub fn plausible(h: &M3, hgt: usize, wid: usize) -> bool {
     if !(0..4).all(|k| cross(k) > 0.0) {
         return false;
     }
-    let area = 0.5 * (0..4).map(|k| c[k].0 * c[(k + 1) % 4].1 - c[(k + 1) % 4].0 * c[k].1).sum::<f64>().abs();
-    let ratio = area / (w * hh);
+    let ratio = area_of(&c) / area_of(&quad);
     0.25 < ratio && ratio < 4.0
 }
 
@@ -815,16 +837,35 @@ pub type MatchSet = (usize, usize, Vec<Pt>, Vec<Pt>);
 
 pub struct BundleResult {
     pub g: Vec<M3>,
+    /// Focal length (px) of the reference image.
     pub f: f64,
     pub k1: f64,
     pub rms_before: f64,
     pub rms_after: f64,
     /// Median error (px) of each entry of `matches`, NaN for pairs that were not used.
     pub med: Vec<f64>,
+    /// Each image's focal length ÷ the reference image's (1 without zoom groups).
+    pub focal: Vec<f64>,
+    /// Turning of the sky (axis × rad/s, in the reference camera's frame), if star pairs were used.
+    pub sky: Option<[f64; 3]>,
 }
 
-/// Refine all images together, assuming the camera only rotated and kept its
-/// focal length: every accepted pair at once, the error spread evenly.
+/// What else the refinement knows about the shots (all optional).
+#[derive(Clone, Debug, Default)]
+pub struct BundleOpts {
+    /// Zoom group of each image (images shot at the same focal length; empty =
+    /// all alike). Each group other than the reference's gets its own focal length.
+    pub group: Vec<usize>,
+    /// Initial focal length of each image ÷ the reference image's (empty = all 1).
+    pub focal: Vec<f64>,
+    /// Capture time of each image in seconds (empty = unknown).
+    pub time: Vec<f64>,
+    /// Which entries of `matches` are star pairs: the sky turned between their shots.
+    pub sky: Vec<bool>,
+}
+
+/// Refine all images together, assuming the camera only rotated: every
+/// accepted pair at once, the error spread evenly.
 /// `g`: initial transforms (image → reference plane); `members`: images to
 /// refine; `huber`: residuals above this (px) count less. With `distortion`
 /// the lens's radial k1 is estimated too.
@@ -841,6 +882,25 @@ pub fn bundle_adjust(
     maxpts: usize,
     distortion: bool,
 ) -> BundleResult {
+    bundle_adjust_with(g, centers, ref_, f, members, matches, iters, huber, maxpts, distortion, &BundleOpts::default())
+}
+
+/// `bundle_adjust` with zoom groups (a focal length per group) and the turning
+/// sky (one rotation rate for all star pairs, from their capture times).
+#[allow(clippy::too_many_arguments)]
+pub fn bundle_adjust_with(
+    g: &[M3],
+    centers: &[Pt],
+    ref_: usize,
+    f: f64,
+    members: &[usize],
+    matches: &[MatchSet],
+    iters: usize,
+    huber: f64,
+    maxpts: usize,
+    distortion: bool,
+    opts: &BundleOpts,
+) -> BundleResult {
     let n = g.len();
     let mut inset = vec![false; n];
     for &m in members {
@@ -856,108 +916,144 @@ pub fn bundle_adjust(
     let used: Vec<usize> =
         (0..matches.len()).filter(|&k| inset[matches[k].0] && inset[matches[k].1] && !matches[k].2.is_empty()).collect();
     let e: Vec<MatchSet> = used.iter().map(|&k| (matches[k].0, matches[k].1, sub(&matches[k].2), sub(&matches[k].3))).collect();
+    let rho0: Vec<f64> = (0..n).map(|i| opts.focal.get(i).copied().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0)).collect();
     if e.is_empty() {
-        return BundleResult { g: g.to_vec(), f, k1: 0.0, rms_before: f64::NAN, rms_after: f64::NAN, med: vec![f64::NAN; matches.len()] };
+        return BundleResult { g: g.to_vec(), f, k1: 0.0, rms_before: f64::NAN, rms_after: f64::NAN, med: vec![f64::NAN; matches.len()], focal: rho0, sky: None };
     }
+    // Zoom groups: the reference's group is 0 (its focal length is f), the others are numbered 1…
+    let gid = |i: usize| opts.group.get(i).copied().unwrap_or(0);
+    let mut groups: Vec<usize> = vec![gid(ref_)];
+    for &m in members {
+        if !groups.contains(&gid(m)) {
+            groups.push(gid(m));
+        }
+    }
+    let grp: Vec<usize> = (0..n).map(|i| groups.iter().position(|&x| x == gid(i)).unwrap_or(0)).collect();
+    let time = |i: usize| opts.time.get(i).copied().filter(|t| t.is_finite()).unwrap_or(0.0);
+    let skyed: Vec<bool> = used.iter().map(|&k| opts.sky.get(k).copied().unwrap_or(false) && (time(matches[k].0) - time(matches[k].1)).abs() > 0.0).collect();
+    // The sky's turning shows only where star pairs and ground pairs meet (with
+    // star pairs alone the camera rotations take it up).
+    let use_sky = skyed.iter().any(|&b| b) && used.iter().any(|&k| !opts.sky.get(k).copied().unwrap_or(false));
     // Camera rotations from the initial transforms: G_i = K_ref R_iᵀ K_i⁻¹.
     let r0: Vec<M3> = (0..n)
-        .map(|i| if inset[i] { nearest_rotation(&(inv(&kmat(f, centers[ref_])) * g[i] * kmat(f, centers[i]))).transpose() } else { M3::identity() })
+        .map(|i| if inset[i] { nearest_rotation(&(inv(&kmat(f, centers[ref_])) * g[i] * kmat(f * rho0[i], centers[i]))).transpose() } else { M3::identity() })
         .collect();
     let free: Vec<usize> = members.iter().copied().filter(|&i| i != ref_).collect();
     let col: HashMap<usize, usize> = free.iter().enumerate().map(|(k, &i)| (i, 3 * k)).collect();
-    let np = 3 * free.len() + 2; // + log focal length, k1
-    let rot = |w: &[f64], i: usize| -> M3 {
+    // Parameters: rotations (3 per free image), log focal, log focal ratio per other group, k1, sky turning (3).
+    let c_lf = 3 * free.len();
+    let c_grp = c_lf + 1; // group q ≥ 1 at c_grp + q - 1
+    let c_k1 = c_grp + groups.len() - 1;
+    let c_sky = c_k1 + 1;
+    let np = c_sky + if use_sky { 3 } else { 0 };
+    let mut x = vec![0.0; np];
+    x[c_lf] = f.ln();
+    for (q, _) in groups.iter().enumerate().skip(1) {
+        // start from the mean EXIF ratio of the group
+        let v: Vec<f64> = members.iter().filter(|&&m| grp[m] == q).map(|&m| rho0[m].ln()).collect();
+        x[c_grp + q - 1] = v.iter().sum::<f64>() / v.len().max(1) as f64;
+    }
+    let rot = |x: &[f64], i: usize| -> M3 {
         match col.get(&i) {
-            Some(&c) => rodrigues(&Vector3::new(w[c], w[c + 1], w[c + 2])) * r0[i],
+            Some(&c) => rodrigues(&Vector3::new(x[c], x[c + 1], x[c + 2])) * r0[i],
             None => r0[i],
         }
     };
-    let resid = |ri: &M3, rj: &M3, fl: f64, k1: f64, e: &MatchSet| -> Vec<Pt> {
-        let (i, j, pi, pj) = e;
-        let h = kmat(fl, centers[*j]) * rj * ri.transpose() * inv(&kmat(fl, centers[*i]));
-        let lens = (k1, fl);
+    let focal = |x: &[f64], i: usize| -> f64 { (x[c_lf] + if grp[i] == 0 { 0.0 } else { x[c_grp + grp[i] - 1] }).exp() };
+    let resid = |x: &[f64], q: usize| -> Vec<Pt> {
+        let (i, j, pi, pj) = &e[q];
+        let (ri, rj) = (rot(x, *i), rot(x, *j));
+        let s = if use_sky && skyed[q] { rodrigues(&(Vector3::new(x[c_sky], x[c_sky + 1], x[c_sky + 2]) * (time(*j) - time(*i)))) } else { M3::identity() };
+        let h = kmat(focal(x, *j), centers[*j]) * rj * s * ri.transpose() * inv(&kmat(focal(x, *i), centers[*i]));
+        let lens = (x[c_k1], x[c_lf].exp());
         (0..pi.len())
             .map(|k| {
                 let (ux, uy) = undistort(pi[k][0], pi[k][1], centers[*i], lens);
-                let (x, y) = apply_h(&h, ux, uy);
+                let (px, py) = apply_h(&h, ux, uy);
                 let (u, v) = undistort(pj[k][0], pj[k][1], centers[*j], lens);
-                [x - u, y - v]
+                [px - u, py - v]
             })
             .collect()
     };
-    let rho = |d: f64| if d <= huber { d * d } else { 2.0 * huber * d - huber * huber };
-    let cost = |w: &[f64], lf: f64, k1: f64| -> f64 {
-        e.iter().map(|ed| resid(&rot(w, ed.0), &rot(w, ed.1), lf.exp(), k1, ed).iter().map(|r| rho(r[0].hypot(r[1]))).sum::<f64>()).sum()
+    // Columns that move the residuals of pair q.
+    let cols_of = |q: usize| -> Vec<usize> {
+        let (i, j) = (e[q].0, e[q].1);
+        let mut c: Vec<usize> = Vec::new();
+        for img in [i, j] {
+            if let Some(&k) = col.get(&img) {
+                c.extend([k, k + 1, k + 2]);
+            }
+        }
+        c.push(c_lf);
+        for img in [i, j] {
+            if grp[img] > 0 && !c.contains(&(c_grp + grp[img] - 1)) {
+                c.push(c_grp + grp[img] - 1);
+            }
+        }
+        if distortion {
+            c.push(c_k1);
+        }
+        if use_sky && skyed[q] {
+            c.extend([c_sky, c_sky + 1, c_sky + 2]);
+        }
+        c
     };
-    let rms = |w: &[f64], lf: f64, k1: f64| -> f64 {
+    let rhof = |d: f64| if d <= huber { d * d } else { 2.0 * huber * d - huber * huber };
+    let cost = |x: &[f64]| -> f64 { (0..e.len()).into_par_iter().map(|q| resid(x, q).iter().map(|r| rhof(r[0].hypot(r[1]))).sum::<f64>()).collect::<Vec<f64>>().iter().sum() };
+    let rms = |x: &[f64]| -> f64 {
         let (mut s, mut c) = (0.0, 0usize);
-        for ed in &e {
-            for r in resid(&rot(w, ed.0), &rot(w, ed.1), lf.exp(), k1, ed) {
+        for q in 0..e.len() {
+            for r in resid(x, q) {
                 s += r[0] * r[0] + r[1] * r[1];
                 c += 1;
             }
         }
         (s / c.max(1) as f64).sqrt()
     };
-    let mut w = vec![0.0; np - 2];
-    let mut lf = f.ln();
-    let mut k1 = 0.0;
-    let rms0 = rms(&w, lf, k1);
-    let mut c0 = cost(&w, lf, k1);
+    // The sky's turning is tiny per second: scale its step so the solver sees it like the others.
+    let step = |c: usize| if use_sky && c >= c_sky { 1e-10 } else { 1e-6 };
+    let rms0 = rms(&x);
+    let mut c0 = cost(&x);
     let mut lambda = 1e-3;
     for _ in 0..iters {
+        // Normal equations: each pair's small block in parallel, summed in order (reproducible).
+        let blocks: Vec<(Vec<usize>, Vec<f64>, Vec<f64>)> = (0..e.len())
+            .into_par_iter()
+            .map(|q| {
+                let r = resid(&x, q);
+                let wt: Vec<f64> = r.iter().map(|p| { let d = p[0].hypot(p[1]); if d <= huber { 1.0 } else { huber / d } }).collect();
+                let cols = cols_of(q);
+                let js: Vec<Vec<f64>> = cols
+                    .iter()
+                    .map(|&c| {
+                        let mut x2 = x.clone();
+                        x2[c] += step(c);
+                        let r2 = resid(&x2, q);
+                        (0..r.len()).flat_map(|k| [(r2[k][0] - r[k][0]) / step(c), (r2[k][1] - r[k][1]) / step(c)]).collect()
+                    })
+                    .collect();
+                let m2 = 2 * r.len();
+                let rv: Vec<f64> = r.iter().flat_map(|p| [p[0], p[1]]).collect();
+                let nc = cols.len();
+                let mut a = vec![0.0; nc * nc];
+                let mut b = vec![0.0; nc];
+                for u in 0..nc {
+                    b[u] = (0..m2).map(|k| js[u][k] * wt[k / 2] * rv[k]).sum();
+                    for v in 0..nc {
+                        a[u * nc + v] = (0..m2).map(|k| js[u][k] * wt[k / 2] * js[v][k]).sum();
+                    }
+                }
+                (cols, a, b)
+            })
+            .collect();
         let mut jtj = DMatrix::<f64>::zeros(np, np);
         let mut jtr = DVector::<f64>::zeros(np);
-        for ed in &e {
-            let (i, j) = (ed.0, ed.1);
-            let (ri, rj, fl) = (rot(&w, i), rot(&w, j), lf.exp());
-            let r = resid(&ri, &rj, fl, k1, ed);
-            // Robust (Huber) weight per point.
-            let wt: Vec<f64> = r.iter().map(|p| { let d = p[0].hypot(p[1]); if d <= huber { 1.0 } else { huber / d } }).collect();
-            let mut cols: Vec<usize> = Vec::new();
-            let mut js: Vec<Vec<f64>> = Vec::new(); // each column: 2m residual derivatives
-            let flat = |r2: &[Pt], r: &[Pt]| -> Vec<f64> {
-                let mut v = Vec::with_capacity(2 * r.len());
-                for k in 0..r.len() {
-                    v.push((r2[k][0] - r[k][0]) / 1e-6);
-                    v.push((r2[k][1] - r[k][1]) / 1e-6);
-                }
-                v
-            };
-            for img in [i, j] {
-                let Some(&c) = col.get(&img) else { continue };
-                for a in 0..3 {
-                    let mut w2 = w.clone();
-                    w2[c + a] += 1e-6;
-                    let r2m = rot(&w2, img);
-                    let r2 = if img == i { resid(&r2m, &rj, fl, k1, ed) } else { resid(&ri, &r2m, fl, k1, ed) };
-                    cols.push(c + a);
-                    js.push(flat(&r2, &r));
-                }
-            }
-            let r2 = resid(&ri, &rj, (lf + 1e-6).exp(), k1, ed);
-            cols.push(np - 2);
-            js.push(flat(&r2, &r));
-            if distortion {
-                let r2 = resid(&ri, &rj, fl, k1 + 1e-6, ed);
-                cols.push(np - 1);
-                js.push(flat(&r2, &r));
-            }
-            let m2 = 2 * r.len();
-            let wv: Vec<f64> = (0..m2).map(|k| wt[k / 2]).collect();
-            let rv: Vec<f64> = r.iter().flat_map(|p| [p[0], p[1]]).collect();
-            for (a, ca) in cols.iter().enumerate() {
-                let mut s = 0.0;
-                for k in 0..m2 {
-                    s += js[a][k] * wv[k] * rv[k];
-                }
-                jtr[*ca] += s;
-                for (b, cb) in cols.iter().enumerate() {
-                    let mut s = 0.0;
-                    for k in 0..m2 {
-                        s += js[a][k] * wv[k] * js[b][k];
-                    }
-                    jtj[(*ca, *cb)] += s;
+        for (cols, a, b) in &blocks {
+            let nc = cols.len();
+            for u in 0..nc {
+                jtr[cols[u]] += b[u];
+                for v in 0..nc {
+                    jtj[(cols[u], cols[v])] += a[u * nc + v];
                 }
             }
         }
@@ -968,15 +1064,12 @@ pub fn bundle_adjust(
                 a[(k, k)] += lambda * (jtj[(k, k)] + 1e-9);
             }
             let Some(delta) = a.lu().solve(&(-&jtr)) else { lambda *= 4.0; continue };
-            let wn: Vec<f64> = (0..np - 2).map(|k| w[k] + delta[k]).collect();
-            let lfn = lf + delta[np - 2];
-            let k1n = (k1 + delta[np - 1]).clamp(-0.5, 0.5);
-            let cn = cost(&wn, lfn, k1n);
+            let mut xn: Vec<f64> = (0..np).map(|k| x[k] + delta[k]).collect();
+            xn[c_k1] = if distortion { xn[c_k1].clamp(-0.5, 0.5) } else { 0.0 };
+            let cn = cost(&xn);
             if cn < c0 {
                 let rel = (c0 - cn) / c0;
-                w = wn;
-                lf = lfn;
-                k1 = k1n;
+                x = xn;
                 c0 = cn;
                 lambda = (lambda / 3.0).max(1e-9);
                 improved = rel >= 1e-7;
@@ -988,18 +1081,24 @@ pub fn bundle_adjust(
             break;
         }
     }
-    let fn_ = lf.exp();
+    let fn_ = x[c_lf].exp();
     let mut gn = g.to_vec();
+    let mut rho = rho0.clone();
     for &i in members {
-        let m = kmat(fn_, centers[ref_]) * rot(&w, i).transpose() * inv(&kmat(fn_, centers[i]));
+        rho[i] = focal(&x, i) / fn_;
+        let m = kmat(fn_, centers[ref_]) * rot(&x, i).transpose() * inv(&kmat(focal(&x, i), centers[i]));
         gn[i] = m / m.determinant().cbrt();
     }
     let mut med = vec![f64::NAN; matches.len()];
-    for (k, ed) in used.iter().zip(e.iter()) {
-        let r = resid(&rot(&w, ed.0), &rot(&w, ed.1), fn_, k1, ed);
-        med[*k] = median_f64(r.iter().map(|p| p[0].hypot(p[1])));
+    for (q, k) in used.iter().enumerate() {
+        med[*k] = median_f64(resid(&x, q).iter().map(|p| p[0].hypot(p[1])));
     }
-    BundleResult { g: gn, f: fn_, k1, rms_before: rms0, rms_after: rms(&w, lf, k1), med }
+    // The sky's axis in the reference camera's frame (the solver works in world = reference camera orientation).
+    let sky = use_sky.then(|| {
+        let w = r0[ref_] * Vector3::new(x[c_sky], x[c_sky + 1], x[c_sky + 2]);
+        [w[0], w[1], w[2]]
+    });
+    BundleResult { g: gn, f: fn_, k1: x[c_k1], rms_before: rms0, rms_after: rms(&x), med, focal: rho, sky }
 }
 
 /// Camera rotation (yaw right, pitch down, roll clockwise; radians) as a
@@ -1106,7 +1205,7 @@ pub fn stitch(imgs: &[Img], p: &StitchParams, log: &mut dyn FnMut(String)) -> Re
     for (i, j) in candidate_pairs(n, p.layout, cols, p.snake) {
         let (pi, pj) = match_pair(&feats[i], &feats[j], p.ratio, p.max_distance);
         let Ok((hij, inl)) = ransac(&pj, &pi, p.model, 2000, p.ransac_thresh) else { continue };
-        if !accept_pair(pi.len(), inl.len(), &hij, imgs[j].h, imgs[j].w, p.min_inliers).0 {
+        if !accept_pair(pi.len(), inl.len(), &hij, imgs[j].h, imgs[j].w, p.min_inliers, &inl.iter().map(|&k| pj[k]).collect::<Vec<_>>()).0 {
             continue;
         }
         log(format!("Pair {}-{}: {} matches, {} inliers", i + 1, j + 1, pi.len(), inl.len()));

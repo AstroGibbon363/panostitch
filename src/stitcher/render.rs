@@ -374,11 +374,33 @@ pub struct ComposeParams {
     /// Smart blending: pyramid levels (None = from the output size). Set when
     /// rendering in bands, so every band blends alike.
     pub levels: Option<usize>,
+    /// Night sky: the stars of each photo turned back to one moment (see `SkyAlign`).
+    pub sky: Option<std::sync::Arc<SkyAlign>>,
+}
+
+/// The sky turns while a panorama is shot, so the stars of frames taken
+/// minutes apart do not meet. For each photo (indexed like the images):
+/// `g`: its transform with the sky turned back to the common moment (None:
+/// leave it), `maps`: where it shows open sky and its smooth background.
+/// Where both the turned-back and the photo's own position show open sky,
+/// the detail (the stars) comes from the turned-back position and the
+/// background (glow, gradients: they stay with the ground) from its own.
+#[derive(Debug, Default)]
+pub struct SkyAlign {
+    pub g: Vec<Option<M3>>,
+    pub maps: Vec<Option<std::sync::Arc<SkyMap>>>,
+}
+
+/// A photo's open sky (true) and its background, both at reduced resolution.
+#[derive(Debug)]
+pub struct SkyMap {
+    pub open: Bits,
+    pub bg: Img,
 }
 
 impl Default for ComposeParams {
     fn default() -> Self {
-        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12, levels: None }
+        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12, levels: None, sky: None }
     }
 }
 
@@ -386,6 +408,8 @@ impl Default for ComposeParams {
 struct Sampler<'a, S: Sample> {
     imgs: &'a [&'a S],
     ms: Vec<M3>,
+    /// Direction → pixel with the sky turned back, and the sky map (see `SkyAlign`).
+    sky: Vec<Option<(M3, std::sync::Arc<SkyMap>)>>,
     sizes: &'a [(usize, usize)],
     scales: &'a [f64],
     gains: &'a [f64],
@@ -402,15 +426,42 @@ impl<S: Sample> Sampler<'_, S> {
     fn sample(&self, i: usize, x: f64, y: f64) -> Option<(Rgb, f32, f64)> {
         let p = self.p;
         let (xx, yy, zz) = proj_inverse(p.projection, ((x - 0.5) / p.scale + self.umin - 0.5) / p.f, ((y - 0.5) / p.scale + self.vmin - 0.5) / p.f)?;
-        let m = &self.ms[i];
-        let sw = m[(2, 0)] * xx + m[(2, 1)] * yy + m[(2, 2)] * zz;
-        if sw <= 0.0 {
-            return None; // behind this camera
-        }
         let (h, w) = self.sizes[i];
         let ci = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
-        let ix = (m[(0, 0)] * xx + m[(0, 1)] * yy + m[(0, 2)] * zz) / sw;
-        let iy = (m[(1, 0)] * xx + m[(1, 1)] * yy + m[(1, 2)] * zz) / sw;
+        let at = |m: &M3| -> Option<(f64, f64)> {
+            let sw = m[(2, 0)] * xx + m[(2, 1)] * yy + m[(2, 2)] * zz;
+            if sw <= 0.0 {
+                return None; // behind this camera
+            }
+            Some(((m[(0, 0)] * xx + m[(0, 1)] * yy + m[(0, 2)] * zz) / sw, (m[(1, 0)] * xx + m[(1, 1)] * yy + m[(1, 2)] * zz) / sw))
+        };
+        let ground = at(&self.ms[i]);
+        // The stars where they were at the common moment, if this photo shows open
+        // sky there and at its own position (else the ground decides).
+        let sky = self.sky[i].as_ref().and_then(|(ms, map)| {
+            let open = |(x, y): (f64, f64)| {
+                let (ox, oy) = distort(x, y, ci, p.lens);
+                let m = &map.open;
+                let (my, mx) = ((oy - 0.5) / h as f64 * m.h as f64, (ox - 0.5) / w as f64 * m.w as f64);
+                my >= 0.0 && mx >= 0.0 && (my as usize) < m.h && (mx as usize) < m.w && m.at(my as usize, mx as usize)
+            };
+            let q = at(ms)?;
+            let g0 = ground?;
+            if !(open(q) && open(g0)) {
+                return None;
+            }
+            // background at its own position minus that at the turned-back one
+            let bg = |(x, y): (f64, f64)| {
+                let (ox, oy) = distort(x, y, ci, p.lens);
+                bilinear(&map.bg, (oy - 0.5) / h as f64 * map.bg.h as f64 + 0.5, (ox - 0.5) / w as f64 * map.bg.w as f64 + 0.5)
+            };
+            let (b0, b1) = (bg(g0), bg(q));
+            Some((q, [b0[0] - b1[0], b0[1] - b1[1], b0[2] - b1[2]]))
+        });
+        let ((ix, iy), shift) = match sky {
+            Some((q, d)) => (q, Some(d)),
+            None => (ground?, None),
+        };
         if ((ix - ci[0]).powi(2) + (iy - ci[1]).powi(2)) / p.lens.1.powi(2) > self.rlim2[i] {
             return None;
         }
@@ -422,7 +473,11 @@ impl<S: Sample> Sampler<'_, S> {
         let dist = ox.min(w as f64 - ox + 1.0).min(oy).min(h as f64 - oy + 1.0);
         let wt = if p.blend == Blend::Average { 1.0f32 } else { (dist as f32 / 100.0).powf(p.sharpness as f32) };
         let s = self.scales[i];
-        let col = self.imgs[i].sample_at((oy - 0.5) * s + 0.5, (ox - 0.5) * s + 0.5).scale(self.gains[i] as f32);
+        let mut col = self.imgs[i].sample_at((oy - 0.5) * s + 0.5, (ox - 0.5) * s + 0.5);
+        if let Some(d) = shift {
+            col = [(col[0] + d[0]).max(0.0), (col[1] + d[1]).max(0.0), (col[2] + d[2]).max(0.0)];
+        }
+        let col = col.scale(self.gains[i] as f32);
         Some((col, wt, dist))
     }
 }
@@ -474,7 +529,13 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
                     .fold(f64::MIN, f64::max)
         })
         .collect();
-    let s = Sampler { imgs, ms, sizes, scales, gains, rlim2, p, umin, vmin };
+    let sky: Vec<Option<(M3, std::sync::Arc<SkyMap>)>> = (0..g.len())
+        .map(|i| {
+            let a = p.sky.as_ref()?;
+            Some((inv(a.g.get(i).copied().flatten().as_ref()?) * k, a.maps.get(i).cloned().flatten()?))
+        })
+        .collect();
+    let s = Sampler { imgs, ms, sky, sizes, scales, gains, rlim2, p, umin, vmin };
     let n = imgs.len();
     let smart = p.blend == Blend::Smart;
     let mut acc = Img::new(hc, wc);
