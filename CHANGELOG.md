@@ -1,5 +1,13 @@
 # Changes
 
+## v0.3.2
+
+Bug fixes for star stacking.
+
+- **RAW white balance in stacking:** *Average of image* and *Daylight* gave wrong colours with the built-in RAW decoder. The grey-world average could miss the blue pixels entirely, and Daylight applied no white balance at all, because the camera colour matrix was read from a field the RAW library no longer fills. Both now match LibRaw. *Camera* falls back to the daylight balance for files without one.
+- **Alignment:** a frame whose star match was degenerate (the same few stars matched over and over) could be accepted with a folded, mirrored transform and smeared across the whole stack, tinting it (for example red from car lights). Alignments that flip the frame or scale it beyond 0.6–1.6× are now refused, and the frame is reported as failed.
+- Sorting star distances and fit errors cannot crash on an invalid number (NaN) any more.
+
 ## v0.3.1
 
 Stability, ease of use, and testing on real data.

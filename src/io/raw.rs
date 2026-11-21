@@ -278,24 +278,39 @@ pub fn develop(mut raw: rawler::RawImage, orientation: rawler::decoders::Orienta
     match opt.wb {
         WhiteBalance::Camera => {
             if raw.wb_coeffs[0].is_nan() || raw.wb_coeffs[0] <= 0.0 {
-                raw.wb_coeffs = raw.neutralwb();
+                if let Some(wb) = daylight_wb(&raw) {
+                    raw.wb_coeffs = wb;
+                }
             }
         }
-        WhiteBalance::Daylight => raw.wb_coeffs = raw.neutralwb(),
+        WhiteBalance::Daylight => {
+            if let Some(wb) = daylight_wb(&raw) {
+                raw.wb_coeffs = wb;
+            }
+        }
         WhiteBalance::Auto => {
             // Grey world: the average of each colour of the mosaic becomes equal.
+            // Whole 2×2 blocks are sampled, so every colour of the pattern is counted
+            // (a plain stride through the data can land on even columns only and
+            // miss blue entirely); clipped pixels are left out.
             if let RawPhotometricInterpretation::Cfa(cfg) = &raw.photometric {
                 let data = raw.data.as_f32();
                 let (w, h) = (raw.width, raw.height);
                 let mut sum = [0f64; 4];
                 let mut cnt = [0f64; 4];
-                let step = ((w * h) / 2_000_000).max(1);
-                let mut i = 0;
-                while i < w * h {
-                    let c = cfg.cfa.color_at(i / w, i % w).min(3);
-                    sum[c] += data[i] as f64;
-                    cnt[c] += 1.0;
-                    i += step;
+                let blocks = ((w / 2) * (h / 2)).max(1);
+                let stride = ((blocks / 500_000).max(1) as f64).sqrt().ceil() as usize * 2;
+                for r in (0..h.saturating_sub(1)).step_by(stride) {
+                    for c in (0..w.saturating_sub(1)).step_by(stride) {
+                        for (dr, dc) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                            let v = data[(r + dr) * w + c + dc];
+                            if v > 0.0 && v < 0.98 {
+                                let k = cfg.cfa.color_at(r + dr, c + dc).min(3);
+                                sum[k] += v as f64;
+                                cnt[k] += 1.0;
+                            }
+                        }
+                    }
                 }
                 let m: Vec<f64> = (0..4).map(|c| if cnt[c] > 0.0 { sum[c] / cnt[c] } else { 0.0 }).collect();
                 if m[1] > 0.0 {
@@ -366,6 +381,34 @@ pub fn develop(mut raw: rawler::RawImage, orientation: rawler::decoders::Orienta
         img.map_inplace(|p| [srgb(p[0]), srgb(p[1]), srgb(p[2])]);
     }
     Ok(img)
+}
+
+/// Daylight (D65) white balance from the camera's colour matrix: the camera
+/// response to white, inverted (as dcraw's pre_mul). rawler's own `neutralwb`
+/// reads a matrix field that is no longer filled in, which gave no white
+/// balance at all (green images).
+fn daylight_wb(raw: &rawler::RawImage) -> Option<[f32; 4]> {
+    use rawler::imgop::xyz::Illuminant;
+    let (_, m) = raw.color_matrix_find_first([Illuminant::D65, Illuminant::D55, Illuminant::D50, Illuminant::Daylight, Illuminant::A])?;
+    if m.len() < 9 || m.len() % 3 != 0 {
+        return None;
+    }
+    const RGB_TO_XYZ: [[f32; 3]; 3] = [[0.412453, 0.357580, 0.180423], [0.212671, 0.715160, 0.072169], [0.019334, 0.119193, 0.950227]];
+    let rows = (m.len() / 3).min(4);
+    let mut wb = [f32::NAN; 4];
+    for (i, w) in wb.iter_mut().enumerate().take(rows) {
+        // Camera response of colour i to sRGB white (1, 1, 1).
+        let resp: f32 = (0..3).map(|j| (0..3).map(|k| m[i * 3 + k] * RGB_TO_XYZ[k][j]).sum::<f32>()).sum();
+        *w = 1.0 / resp;
+    }
+    if rows == 3 {
+        wb[3] = wb[1];
+    }
+    let g = wb[1];
+    if !(g.is_finite() && g > 0.0) || !wb.iter().take(3).all(|v| v.is_finite() && *v > 0.0) {
+        return None;
+    }
+    Some([wb[0] / g, 1.0, wb[2] / g, wb[3] / g])
 }
 
 #[inline]

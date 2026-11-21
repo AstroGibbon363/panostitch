@@ -391,3 +391,18 @@ fn background_work_does_not_block_the_window_thread() {
     assert_eq!(sum, (0..100_000u64).map(|x| x % 7).sum::<u64>());
     assert!(took < Duration::from_secs(1), "window-side work waited {took:?}");
 }
+
+#[test]
+fn implausible_alignments_are_refused() {
+    let m = |a: [f64; 9]| st::M3::from_row_slice(&a);
+    let w = 3000;
+    assert!(sk::plausible_warp(&m([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]), w).is_ok());
+    // A small turn and shift, and a 180° turn (meridian flip), are fine.
+    let (c, s) = (0.02f64.cos(), 0.02f64.sin());
+    assert!(sk::plausible_warp(&m([c, -s, 12.0, s, c, -7.0, 0.0, 0.0, 1.0]), w).is_ok());
+    assert!(sk::plausible_warp(&m([-1.0, 0.0, 3000.0, 0.0, -1.0, 2000.0, 0.0, 0.0, 1.0]), w).is_ok());
+    // A mirror image, a 3× scale and the folded transform seen in a real stack are not.
+    assert!(sk::plausible_warp(&m([-1.0, 0.0, 3000.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]), w).is_err());
+    assert!(sk::plausible_warp(&m([3.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0]), w).is_err());
+    assert!(sk::plausible_warp(&m([-1.0565, -0.7797, -0.00047, 2.9394, 2.1693, 0.0013, 2241.8, 100.0, 1.0]).transpose(), w).is_err());
+}

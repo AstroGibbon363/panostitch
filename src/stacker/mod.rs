@@ -1236,7 +1236,7 @@ fn triangles(stars: &[Star]) -> Vec<Tri> {
     let mut tris = std::collections::HashSet::<[usize; 3]>::new();
     for i in 0..n {
         let mut idx: Vec<usize> = (0..n).collect();
-        idx.sort_by(|&a, &b| dist(i, a).partial_cmp(&dist(i, b)).unwrap());
+        idx.sort_by(|&a, &b| dist(i, a).total_cmp(&dist(i, b)));
         let nb = &idx[1..(6).min(n)]; // 5 nearest neighbours
         for a in 0..nb.len() {
             for b in a + 1..nb.len() {
@@ -1250,7 +1250,7 @@ fn triangles(stars: &[Star]) -> Vec<Tri> {
     for [i, j, k] in tris {
         // vertices ordered by the length of the opposite side (shortest first)
         let mut sides = [(dist(j, k), i), (dist(i, k), j), (dist(i, j), k)];
-        sides.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        sides.sort_by(|a, b| a.0.total_cmp(&b.0));
         let ((l0, a), (l1, b), (l2, c)) = (sides[0], sides[1], sides[2]);
         if l0 <= 3.0 {
             continue;
@@ -1311,8 +1311,35 @@ pub fn align_stars(base: &[Star], frame: &[Star], w: usize, model: Model) -> Res
         t = fit_model(if n >= 15 { model } else { Model::Similarity }, &src, &dst)?;
         matched = n;
         err = (src.iter().zip(dst.iter()).map(|(s, d)| reproj_err(&t, *s, *d).powi(2)).sum::<f64>() / n as f64).sqrt();
+        // The same few stars matched over and over fit any transform exactly.
+        let mut uniq: Vec<(i64, i64)> = dst.iter().map(|p| ((p[0] * 4.0).round() as i64, (p[1] * 4.0).round() as i64)).collect();
+        uniq.sort_unstable();
+        uniq.dedup();
+        if uniq.len() < 6 {
+            return Err(format!("only {} distinct stars match", uniq.len()));
+        }
     }
+    plausible_warp(&t, w)?;
     Ok((t, matched, err))
+}
+
+/// Whether `t` can be the motion of the sky between two frames from a tripod or
+/// a mount: it may shift, turn and scale a little, but never flip or fold the
+/// frame. Checked over the frame (`w` wide; the height is at most `w`): the
+/// local scale stays between 0.6 and 1.6 and keeps its orientation.
+pub fn plausible_warp(t: &M3, w: usize) -> Result<(), String> {
+    let wf = w as f64;
+    for &(x, y) in &[(0.0, 0.0), (wf, 0.0), (0.0, wf * 0.75), (wf, wf * 0.75), (wf / 2.0, wf * 0.375)] {
+        let p = apply_h(t, x, y);
+        let px = apply_h(t, x + 1.0, y);
+        let py = apply_h(t, x, y + 1.0);
+        let (ax, ay, bx, by) = (px.0 - p.0, px.1 - p.1, py.0 - p.0, py.1 - p.1);
+        let det = ax * by - ay * bx;
+        if !det.is_finite() || !(0.36..=2.56).contains(&det) {
+            return Err(format!("implausible alignment (local scale {:.2})", det.abs().sqrt() * det.signum()));
+        }
+    }
+    Ok(())
 }
 
 pub fn starmatrix(stars: &[Star]) -> Vec<Pt> {
@@ -1356,7 +1383,7 @@ fn lens_fit(lens: &Warp, b: &[Pt], f: &[Pt]) -> Result<(M3, f64), String> {
     let uf: Vec<Pt> = f.iter().map(|p| { let (x, y) = lens.undistort(p[0], p[1]); [x, y] }).collect();
     let h = fit_model(Model::Homography, &ub, &uf)?;
     let mut e: Vec<f64> = (0..n).map(|i| reproj_err(&h, ub[i], uf[i]).powi(2)).collect();
-    e.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    e.sort_by(|a, b| a.total_cmp(b));
     let keep = ((0.8 * n as f64).round() as usize).max(1); // the worst 20 % may be wrong pairs
     Ok((h, (e[..keep].iter().sum::<f64>() / keep as f64).sqrt()))
 }

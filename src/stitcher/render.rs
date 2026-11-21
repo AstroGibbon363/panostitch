@@ -569,7 +569,7 @@ pub fn compose(imgs: &[&Img], g: &[M3], box_: (f64, f64, f64, f64), p: &ComposeP
             if votes.is_empty() {
                 continue;
             }
-            let kbest = votes.iter().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(k, _)| *k).unwrap();
+            let kbest = votes.iter().max_by(|a, b| a.1.total_cmp(b.1)).map(|(k, _)| *k).unwrap();
             let ki = (kbest - 1) as usize;
             // Not right up to the chosen photo's edge: the switch happens inside
             // the overlap, where the multi-band blend makes it gradual.
