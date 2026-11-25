@@ -432,6 +432,14 @@ widocznymi.
 - Zmiana rozciągania jest natychmiastowa: nic nie trzeba przeliczać.
 - **Ekspozycja** jest stosowana przed rozciąganiem.
 
+**Tryby wyświetlania (tylko widok).** **Wyświetlanie** nad widokiem pokazuje
+dane jak Siril: *Liniowy*, *Logarytm*, *Pierwiastek*, *Kwadrat*, *Asinh*,
+*AutoStretch* lub *Wyrównanie histogramu*, z suwakami **Low** i **High**:
+wartości poniżej Low są czarne, powyżej High białe (dla słabych danych
+liniowych spróbuj High około 0,01–0,1; ↺ je przywraca). *Jak przetworzono*
+pokazuje rozciągnięcie z tego panelu. Tryb wyświetlania nigdy nie zmienia tego,
+co się zapisuje. Wynik stackowania gwiazd i karta Obróbka mają ten sam element.
+
 ### 5.7 Cofanie, ponawianie i projekty
 
 **Cofanie / ponawianie:** **↶ Cofnij** i **↷ Ponów** na pasku narzędzi albo

@@ -437,6 +437,15 @@ lo hace visible.
 - Cambiar el estirado es instantáneo: no hay que recalcular nada.
 - La **Exposición** se aplica antes del estirado.
 
+**Modos de visualización (solo vista).** **Visualización** sobre la vista
+muestra los datos como Siril: *Lineal*, *Logaritmo*, *Raíz cuadrada*, *Al
+cuadrado*, *Asinh*, *AutoStretch* o *Ecualización del histograma*, con **Low**
+y **High**: los valores bajo Low son negros, sobre High blancos (para datos
+lineales débiles pruebe High en torno a 0,01–0,1; ↺ los restablece). *Como está
+procesada* muestra el estirado de este panel. El modo de visualización nunca
+cambia lo que se guarda. El resultado del apilado de estrellas y la pestaña
+Posprocesado tienen el mismo control.
+
 ### 5.7 Deshacer, rehacer y proyectos
 
 **Deshacer / rehacer:** **↶ Deshacer** y **↷ Rehacer** en la barra de

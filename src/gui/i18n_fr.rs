@@ -902,4 +902,11 @@ pub const T: &[(&str, &str)] = &[
     ("The frame is too small: the crop is unchanged.", "Le cadre est trop petit : le recadrage reste inchangé."),
     ("The frame covers the whole panorama: not cropped.", "Le cadre couvre tout le panorama : pas de recadrage."),
     ("Crop cancelled.", "Recadrage annulé."),
+    ("As processed", "Tel que traité"),
+    ("High", "High"),
+    ("Low", "Low"),
+    ("Low 0, High 1", "Low 0, High 1"),
+    ("How the preview is shown, as Siril's display modes: only the view changes, never the saved image. Low and High set the range of values shown.", "Comment l'aperçu est affiché, comme les modes d'affichage de Siril : seule la vue change, jamais l'image enregistrée. Low et High fixent la plage de valeurs affichée."),
+    ("Low: values below it are shown black. High: values above it are shown white. For faint linear data try High around 0.01–0.1.", "Low : les valeurs en dessous sont affichées en noir. High : les valeurs au-dessus en blanc. Pour des données linéaires faibles, essayez High vers 0,01–0,1."),
+    ("The preview with the stretch set in the panel", "L'aperçu avec l'étirement réglé dans le panneau"),
 ];

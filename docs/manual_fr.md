@@ -445,6 +445,15 @@ L'étirement de l'histogramme le rend visible.
 - Changer l'étirement est instantané : rien n'est à recalculer.
 - L'**Exposition** est appliquée avant l'étirement.
 
+**Modes d'affichage (vue seulement).** **Affichage** au-dessus de la vue
+montre les données comme Siril : *Linéaire*, *Logarithme*, *Racine carrée*,
+*Au carré*, *Asinh*, *AutoStretch* ou *Égalisation d'histogramme*, avec **Low** et
+**High** : les valeurs sous Low sont noires, au-dessus de High blanches (pour des
+données linéaires faibles, essayez High vers 0,01–0,1 ; ↺ les réinitialise).
+*Tel que traité* montre l'étirement de ce panneau. Le mode d'affichage ne change
+jamais ce qui est enregistré. Le résultat de l'empilement d'étoiles et l'onglet
+Post-traitement ont la même commande.
+
 ### 5.7 Annuler, rétablir et projets
 
 **Annuler / rétablir :** **↶ Annuler** et **↷ Rétablir** dans la barre

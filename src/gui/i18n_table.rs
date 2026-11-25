@@ -902,4 +902,11 @@ pub const T: &[(&str, &str, &str)] = &[
     ("The frame is too small: the crop is unchanged.", "Rámeček je příliš malý: ořez zůstává beze změny.", "Der Rahmen ist zu klein: der Zuschnitt bleibt unverändert."),
     ("The frame covers the whole panorama: not cropped.", "Rámeček pokrývá celé panorama: neořezáno.", "Der Rahmen deckt das ganze Panorama ab: nicht beschnitten."),
     ("Crop cancelled.", "Ořez zrušen.", "Zuschneiden abgebrochen."),
+    ("As processed", "Jak je zpracováno", "Wie bearbeitet"),
+    ("High", "High", "High"),
+    ("Low", "Low", "Low"),
+    ("Low 0, High 1", "Low 0, High 1", "Low 0, High 1"),
+    ("How the preview is shown, as Siril's display modes: only the view changes, never the saved image. Low and High set the range of values shown.", "Jak se náhled zobrazí, jako zobrazovací režimy v Sirilu: mění se jen pohled, nikdy uložený obrázek. Low a High určují rozsah zobrazených hodnot.", "Wie die Vorschau gezeigt wird, wie die Anzeigemodi in Siril: nur die Ansicht ändert sich, nie das gespeicherte Bild. Low und High legen den gezeigten Wertebereich fest."),
+    ("Low: values below it are shown black. High: values above it are shown white. For faint linear data try High around 0.01–0.1.", "Low: hodnoty pod ním jsou černé. High: hodnoty nad ním jsou bílé. Pro slabá lineární data zkuste High kolem 0,01–0,1.", "Low: Werte darunter werden schwarz gezeigt. High: Werte darüber werden weiß gezeigt. Für schwache lineare Daten High um 0,01–0,1 versuchen."),
+    ("The preview with the stretch set in the panel", "Náhled s roztažením nastaveným v panelu", "Die Vorschau mit der im Bereich eingestellten Streckung"),
 ];

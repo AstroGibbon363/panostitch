@@ -418,6 +418,14 @@ skoro černě. Roztažení histogramu je zviditelní.
 - Změna roztažení je okamžitá, nic se nepřepočítává.
 - **Expozice** se uplatní před roztažením.
 
+**Zobrazovací režimy (jen pohled).** **Zobrazení** nad náhledem ukáže data jako
+Siril: *Lineární*, *Logaritmus*, *Odmocnina*, *Druhá mocnina*, *Asinh*,
+*AutoStretch* nebo *Vyrovnání histogramu*, s posuvníky **Low** a **High**:
+hodnoty pod Low jsou černé, nad High bílé (pro slabá lineární data zkuste High
+kolem 0,01–0,1; ↺ je vrátí). *Jak je zpracováno* ukazuje roztažení z tohoto
+panelu. Zobrazovací režim nikdy nemění, co se uloží. Výsledek skládání hvězd
+a záložka Dodatečné úpravy mají stejný ovládací prvek.
+
 ### 5.7 Zpět, znovu a projekty
 
 **Zpět / znovu:** tlačítka **Zpět** a **Znovu** v liště, nebo **Ctrl+Z** a

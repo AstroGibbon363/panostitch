@@ -292,6 +292,9 @@ struct CropEdit {
 pub struct StitchTab {
     /// Saved panoramas handed to the Post-processing tab.
     pub to_finish: Vec<String>,
+    /// The display mode of the views (Siril-like), or as processed (the stretch panel).
+    disp_view: crate::finish::ViewStretch,
+    disp_processed: bool,
     /// Hand the panorama being saved to the Post-processing tab when it is done.
     post_after: bool,
     /// The crop frame being drawn on the panorama view.
@@ -354,7 +357,7 @@ pub struct StitchTab {
 struct Detail {
     key: u64,
     tex: egui::TextureHandle,
-    tex_key: (u64, u64, u64),
+    tex_key: (u64, u64, u64, u64),
     img: Img,
     box_: (f64, f64, f64, f64),
     scale: f64,
@@ -471,7 +474,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: tr("Add images to begin (any order).").into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], post_after: false, crop_edit: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], disp_view: Default::default(), disp_processed: true, post_after: false, crop_edit: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -1618,8 +1621,8 @@ impl StitchTab {
                 Msg::Detail(key, img, box_, scale) => {
                     self.detail_busy = false;
                     if self.pano.is_some() {
-                        let tex = texture(ctx, "detail", &look(&img, 1.0, &self.p));
-                        let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits());
+                        let tex = texture(ctx, "detail", &self.shown_img(&img, 1.0, self.pano.as_ref().map(|p| &p.img)));
+                        let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), self.disp_key());
                         self.detail = Some(Detail { key, tex, tex_key: tk, img, box_, scale });
                     }
                 }
@@ -1749,14 +1752,14 @@ impl StitchTab {
     }
 
     fn tex_for(&mut self, ctx: &egui::Context, i: usize) -> egui::TextureHandle {
-        let key = (self.items[i].path.clone(), self.p.ev.to_bits() ^ self.p.black.to_bits().rotate_left(7) ^ self.p.mid.to_bits().rotate_left(13) ^ self.p.white.to_bits().rotate_left(19));
+        let key = (self.items[i].path.clone(), self.p.ev.to_bits() ^ self.p.black.to_bits().rotate_left(7) ^ self.p.mid.to_bits().rotate_left(13) ^ self.p.white.to_bits().rotate_left(19) ^ self.disp_key().rotate_left(29));
         if let Some(t) = self.tex_cache.get(&key) {
             return t.clone();
         }
         if self.tex_cache.len() > 64 {
             self.tex_cache.clear();
         }
-        let t = texture(ctx, &key.0, &look(&self.items[i].disp, 2f64.powf(self.p.ev), &self.p));
+        let t = texture(ctx, &key.0, &self.shown_img(&self.items[i].disp, 2f64.powf(self.p.ev), None));
         self.tex_cache.insert(key, t.clone());
         t
     }
@@ -2290,6 +2293,21 @@ impl StitchTab {
         self.request_preview();
     }
 
+    /// An image as the views show it: with the stretch panel, or with the
+    /// display mode (measured on `reference`, the whole preview, when given).
+    fn shown_img(&self, a: &Img, gain: f64, reference: Option<&Img>) -> Img {
+        if self.disp_processed {
+            return look(a, gain, &self.p);
+        }
+        let g = gain as f32;
+        let b = if g == 1.0 { a.clone() } else { a.map(move |c| [c[0] * g, c[1] * g, c[2] * g]) };
+        crate::finish::display_view(&b, self.disp_view, reference.unwrap_or(&b))
+    }
+
+    fn disp_key(&self) -> u64 {
+        if self.disp_processed { 0 } else { self.disp_view.key().rotate_left(5) | 2 }
+    }
+
     /// Start drawing the crop frame on the panorama, or apply it.
     fn toggle_crop(&mut self) {
         let full = self.pano.as_ref().map(|p| bounds(&p.outlines)).filter(|b| b.1 > b.0 && b.3 > b.2);
@@ -2443,6 +2461,9 @@ impl StitchTab {
                 self.vstate.fit = true;
             }
             ui.checkbox(&mut self.overlays, tr("overlays"));
+            ui.separator();
+            super::view_stretch_ui(ui, "pano_disp", &mut self.disp_view, Some(&mut self.disp_processed));
+            ui.separator();
             let editing = self.crop_edit.is_some();
             if ui.selectable_label(editing, if editing { tr("✂ Crop: done") } else { tr("✂ Crop") }).on_hover_text(tr("Draw the part of the panorama to keep: drag a frame, drag its edges or corners to adjust it, drag inside it to move it. Click again when done (Esc cancels). Only that part is rendered and saved, so a big panorama needs less memory.")).clicked() {
                 self.toggle_crop();
@@ -2576,13 +2597,15 @@ impl StitchTab {
     }
 
     fn show_pano(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let dk = self.disp_key();
         let Some(pv) = &mut self.pano else {
             ui.centered_and_justified(|ui| ui.weak(tr("Panorama: press “Preview panorama”.")));
             return;
         };
-        let key = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), 1);
+        let key = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), dk | 1);
         if pv.tex.is_none() || pv.tex_key != key {
-            pv.tex = Some(texture(ctx, "pano", &look(&pv.img, 1.0, &self.p)));
+            let shown = if self.disp_processed { look(&pv.img, 1.0, &self.p) } else { crate::finish::display_view(&pv.img, self.disp_view, &pv.img) };
+            pv.tex = Some(texture(ctx, "pano", &shown));
             pv.tex_key = key;
         }
         let tex = pv.tex.clone().unwrap();
@@ -2631,9 +2654,10 @@ impl StitchTab {
             self.detail = None;
         }
         if let Some(d) = &mut self.detail {
-            let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits());
+            let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), dk);
             if d.tex_key != tk {
-                d.tex = texture(ctx, "detail", &look(&d.img, 1.0, &self.p));
+                let shown = if self.disp_processed { look(&d.img, 1.0, &self.p) } else { crate::finish::display_view(&d.img, self.disp_view, self.pano.as_ref().map(|p| &p.img).unwrap_or(&d.img)) };
+                d.tex = texture(ctx, "detail", &shown);
                 d.tex_key = tk;
             }
             let (du0, du1) = (d.box_.0 - 0.5, d.img.w as f64 / d.scale + d.box_.0 - 0.5);

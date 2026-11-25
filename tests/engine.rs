@@ -624,3 +624,21 @@ fn capture_times_and_zoom_groups() {
     assert_eq!(g, vec![0, 0, 2, 0, 1]);
     assert!((r[2] - 15.0 / 17.0).abs() < 1e-9 && r[3] == 1.0 && (r[4] - 11.5 / 17.0).abs() < 1e-9, "{r:?}");
 }
+
+#[test]
+fn display_range_low_and_high() {
+    use panostitch::finish::{display_view, Display, ViewStretch};
+    let img = Img::from_fn(1, 5, |_, x| { let v = [0.0, 0.005, 0.01, 0.05, 0.5][x]; [v, v, v] });
+    // Linear with Low 0.005, High 0.01: below black, between linear, above white.
+    let v = ViewStretch { mode: Display::Linear, low: 0.005, high: 0.01 };
+    let out = display_view(&img, v, &img);
+    let l: Vec<f32> = out.px.iter().map(|c| c[0]).collect();
+    assert!(l[0] == 0.0 && l[1].abs() < 1e-6 && (l[2] - 1.0).abs() < 1e-6 && l[3] == 1.0 && l[4] == 1.0, "{l:?}");
+    // The full range shows the image as it is.
+    assert_eq!(display_view(&img, ViewStretch::default(), &img).px, img.px);
+    // A narrow range of faint values keeps its steps (applied before the curve's table).
+    let ramp = Img::from_fn(1, 100, |_, x| { let v = x as f32 * 1e-5; [v, v, v] });
+    let a = display_view(&ramp, ViewStretch { mode: Display::Asinh, low: 0.0, high: 0.001 }, &ramp);
+    let distinct: std::collections::HashSet<u32> = a.px.iter().map(|c| c[0].to_bits()).collect();
+    assert!(distinct.len() > 95, "posterised: {} levels", distinct.len());
+}

@@ -1,5 +1,16 @@
 # Changes
 
+## v0.4.0-beta2
+
+Second test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release. New since beta1:
+
+- **Crop in the Panorama tab:** **✂ Crop** above the view draws a frame on the panorama (drag, adjust edges and corners, move). Only that part is rendered and saved, so a big panorama needs less memory and no trip to Post-processing just to crop.
+- **⬇ Save & post-process…** above the view saves the panorama and opens it in the Post-processing tab.
+- **Post-processing memory check:** the memory needed to save was worked out for the whole image even when it was cropped, so a crop never got past "not enough memory". It now counts the cropped size, and the message says it means RAM (free disk space does not help).
+- **Display modes as in Siril** (view only): Linear, Logarithm, Square root, Squared, Asinh, AutoStretch, Histogram equalisation, with **Low** and **High** cut-offs (applied exactly, so a narrow range of faint linear data is not posterised). In the Panorama tab and the Star stacking result (also *As processed*, the tab's own stretch) and in Post-processing.
+
+Everything else new in v0.4 is listed under v0.4.0-beta1 below (and in the v0.4.0-beta1 release notes).
+
 ## v0.4.0-beta1
 
 Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release.
@@ -44,8 +55,6 @@ Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 
 - **Help** (F1 or **? Help**): the manual inside the program, in the window's language, with contents, search, links between chapters and Back; F1 opens the chapter of the tab on show.
 
 ### Comfort
-- **Crop in the Panorama tab:** **✂ Crop** above the view draws a frame on the panorama (drag, adjust edges and corners, move). Only that part is rendered and saved, so a big panorama needs less memory and no trip to Post-processing just to crop.
-- **⬇ Save & post-process…** above the view saves the panorama and opens it in the Post-processing tab.
 - **Drag and drop** images or folders onto the window (to the tab on show); dropped project files open in their tab.
 - **Recent projects** in the top bar, for all three kinds of project.
 - The tab, the stacking settings, the timelapse's video settings and the stitcher's RAW settings are remembered for the next session (not files, masks or looks). File dialogs start in the folder used last.
@@ -57,7 +66,6 @@ Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 
 - **Alignment:** a frame whose star match was degenerate (the same few stars matched over and over) could be accepted with a folded, mirrored transform and smeared across the whole stack, tinting it (e.g. red from car lights). Alignments that flip the frame or scale it beyond 0.6–1.6× are now refused, and the frame is reported as failed.
 - **Post-processing white balance on stacks:** with the automatic stretch measuring each colour on its own (the default for linear data), temperature, tint and a sampled grey were measured away and had almost no effect. They now act on top of the stretch.
 - Sorting star distances and fit errors cannot crash on an invalid number (NaN) any more.
-- **Post-processing memory check:** the memory needed to save was worked out for the whole image even when it was cropped, so a crop never got past "not enough memory". It now counts the cropped size, and the message says it means RAM (free disk space does not help).
 
 ### Reports and times
 - After stacking and after saving a panorama, a short report: photos / frames used, time taken, result size, file and its size, or what went wrong.

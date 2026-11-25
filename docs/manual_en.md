@@ -409,6 +409,14 @@ the image looks almost black. The histogram stretch makes it visible.
 - Changing the stretch is instant: nothing has to be recomputed.
 - **Exposure** is applied before the stretch.
 
+**Display modes (view only).** **Display** above the view shows the data as
+Siril does: *Linear*, *Logarithm*, *Square root*, *Squared*, *Asinh*,
+*AutoStretch* or *Histogram equalisation*, with **Low** and **High**: values
+below Low are black, above High white (for faint linear data try High around
+0.01–0.1; ↺ resets them). *As processed* shows the stretch of this panel. The
+display mode never changes what is saved. The Star stacking result and the
+Post-processing tab have the same control.
+
 ### 5.7 Undo, redo and projects
 
 **Undo / redo:** **Undo** and **Redo** in the toolbar, or **Ctrl+Z** and

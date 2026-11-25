@@ -445,6 +445,14 @@ macht sie sichtbar.
 - Änderungen der Streckung wirken sofort; nichts muss neu berechnet werden.
 - **Belichtung** wird vor der Streckung angewendet.
 
+**Anzeigemodi (nur Ansicht).** **Anzeige** über der Ansicht zeigt die Daten wie
+Siril: *Linear*, *Logarithmus*, *Quadratwurzel*, *Quadriert*, *Asinh*,
+*AutoStretch* oder *Histogrammausgleich*, mit **Low** und **High**: Werte unter
+Low sind schwarz, über High weiß (für schwache lineare Daten High um 0,01–0,1
+versuchen; ↺ setzt sie zurück). *Wie bearbeitet* zeigt die Streckung dieses
+Bereichs. Der Anzeigemodus ändert nie, was gespeichert wird. Das Ergebnis des
+Sternstackings und der Tab Nachbearbeitung haben dasselbe Bedienelement.
+
 ### 5.7 Rückgängig, Wiederherstellen und Projekte
 
 **Rückgängig / Wiederherstellen:** **Rückgängig** und **Wiederholen** in der Werkzeugleiste

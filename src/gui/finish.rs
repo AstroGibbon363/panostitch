@@ -7,7 +7,7 @@ use crate::gui::i18n::tr;
 use super::dialogs::{self, Picked};
 use super::mask::MaskEditor;
 use super::{image_view, texture, View};
-use crate::finish::{self, identity_curve, Display, FinishParams, Local, Measured, StretchMode};
+use crate::finish::{self, identity_curve, FinishParams, Local, Measured, StretchMode, ViewStretch};
 use crate::image::Img;
 use crate::io::{self, basename};
 use crate::sys::gb;
@@ -85,11 +85,11 @@ pub struct FinishTab {
     pub p: FinishParams,
     /// Keep the settings when another image is opened (same look for several panels).
     keep: bool,
-    display: Display,
+    display: ViewStretch,
     shown: Option<Preview>,
     tex: Option<egui::TextureHandle>,
     before_tex: Option<egui::TextureHandle>,
-    tex_display: Display,
+    tex_display: ViewStretch,
     gen: u64,
     loading: bool,
     previewing: bool,
@@ -139,11 +139,11 @@ impl Default for FinishTab {
             linear: false,
             p: FinishParams::default(),
             keep: false,
-            display: Display::Linear,
+            display: ViewStretch::default(),
             shown: None,
             tex: None,
             before_tex: None,
-            tex_display: Display::Linear,
+            tex_display: ViewStretch::default(),
             gen: 0,
             loading: false,
             previewing: false,
@@ -287,7 +287,7 @@ impl FinishTab {
                             if resized {
                                 self.view.fit = true;
                             }
-                            self.tex = Some(texture(ctx, "finish", &finish::display(&pv.result, self.display)));
+                            self.tex = Some(texture(ctx, "finish", &finish::display_view(&pv.result, self.display, &pv.result)));
                             self.tex_display = self.display;
                             self.before_tex = None;
                             self.shown = Some(*pv);
@@ -334,7 +334,7 @@ impl FinishTab {
         // The display mode changed: show the same result differently.
         if self.tex_display != self.display {
             if let Some(s) = &self.shown {
-                self.tex = Some(texture(ctx, "finish", &finish::display(&s.result, self.display)));
+                self.tex = Some(texture(ctx, "finish", &finish::display_view(&s.result, self.display, &s.result)));
                 self.before_tex = None;
             }
             self.tex_display = self.display;
@@ -1029,15 +1029,7 @@ impl FinishTab {
             let c = ui.button(tr("◐ Compare")).on_hover_text(tr("Hold to see the image before white balance, light, curves, colour and detail (or hold B)"));
             compare = c.is_pointer_button_down_on() || (!ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_down(egui::Key::B)));
             ui.separator();
-            ui.label(tr("Display"));
-            egui::ComboBox::from_id_salt("fin_disp").selected_text(tr(self.display.name())).show_ui(ui, |ui| {
-                for m in Display::ALL {
-                    ui.selectable_value(&mut self.display, m, tr(m.name()));
-                }
-            }).response.on_hover_text(tr("How the preview is shown. Only the view changes, never the saved image (as Siril's display modes)"));
-            if self.display != Display::Linear {
-                ui.colored_label(Color32::from_rgb(230, 150, 30), tr("view only"));
-            }
+            super::view_stretch_ui(ui, "fin_disp", &mut self.display, None);
             if self.mask.painting {
                 self.cropping = false;
                 ui.colored_label(Color32::from_rgb(120, 170, 255), tr("Painting the mask: left = sky, right = foreground, wheel = brush size"));
@@ -1063,7 +1055,7 @@ impl FinishTab {
         };
         let (w, h) = (s.result.w as f64, s.result.h as f64);
         if compare && self.before_tex.is_none() {
-            self.before_tex = Some(texture(ctx, "finish_before", &finish::display(&s.before, self.display)));
+            self.before_tex = Some(texture(ctx, "finish_before", &finish::display_view(&s.before, self.display, &s.before)));
         }
         let tex = if compare { self.before_tex.as_ref() } else { self.tex.as_ref() };
         let Some(tex) = tex.cloned() else { return };

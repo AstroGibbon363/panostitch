@@ -946,23 +946,70 @@ pub fn output_size(w: usize, h: usize, p: &FinishParams) -> (usize, usize) {
     }
 }
 
+/// A display mode with Low / High cut-offs (0…1) as in Siril: values from Low
+/// to High fill the view, before the mode's curve. Only the view changes.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ViewStretch {
+    pub mode: Display,
+    pub low: f64,
+    pub high: f64,
+}
+
+impl Default for ViewStretch {
+    fn default() -> Self {
+        ViewStretch { mode: Display::Linear, low: 0.0, high: 1.0 }
+    }
+}
+
+impl ViewStretch {
+    /// Shown as it is (linear, full range).
+    pub fn plain(self) -> bool {
+        self.mode == Display::Linear && self.low == 0.0 && self.high == 1.0
+    }
+    /// Whether Low / High apply (AutoStretch finds its own range).
+    pub fn has_range(self) -> bool {
+        self.mode != Display::AutoStretch
+    }
+    pub fn key(self) -> u64 {
+        (self.mode as u64) ^ self.low.to_bits().rotate_left(17) ^ self.high.to_bits().rotate_left(41)
+    }
+}
+
 /// How the preview is shown: a view of the (already finished) image `img`.
 pub fn display(img: &Img, mode: Display) -> Img {
-    let f: Box<dyn Fn(f64) -> f64> = match mode {
-        Display::Linear => return img.clone(),
+    display_view(img, ViewStretch { mode, ..ViewStretch::default() }, img)
+}
+
+/// `img` shown with display mode and cut-offs `v`. AutoStretch and histogram
+/// equalisation are measured on `reference` (the whole preview, so a detail of
+/// it is shown the same way).
+pub fn display_view(img: &Img, v: ViewStretch, reference: &Img) -> Img {
+    let ranged = v.has_range() && !(v.low == 0.0 && v.high == 1.0);
+    let (lo, hi) = (v.low.clamp(0.0, 1.0) as f32, v.high.clamp(0.0, 1.0) as f32);
+    let (lo, span) = (lo.min(hi - 1e-6), (hi - lo.min(hi - 1e-6)).max(1e-6));
+    // The cut-offs are applied exactly, before the curve's table, so a narrow
+    // range of faint linear data is not posterised.
+    let win = move |x: f32| if ranged { ((x - lo) / span).clamp(0.0, 1.0) } else { x };
+    let f: Box<dyn Fn(f64) -> f64> = match v.mode {
+        Display::Linear => {
+            if !ranged {
+                return img.clone();
+            }
+            return img.map(move |c| c.map(win));
+        }
         Display::Log => Box::new(|v| (1.0 + 1000.0 * v).ln() / 1001f64.ln()),
         Display::Sqrt => Box::new(|v: f64| v.sqrt()),
         Display::Squared => Box::new(|v| v * v),
         Display::Asinh => Box::new(|v| (100.0 * v).asinh() / 100f64.asinh()),
         Display::AutoStretch => {
-            let bm = measure_stretch(img, 0.25, false)[0];
+            let bm = measure_stretch(reference, 0.25, false)[0];
             Box::new(move |v| mtf(bm.1 as f32, (((v - bm.0) / (1.0 - bm.0)).clamp(0.0, 1.0)) as f32) as f64)
         }
         Display::HistEq => {
             // Brightness histogram turned into its cumulative distribution.
             let mut hist = vec![0f64; LUT_N];
-            for c in img.subsample(img.step_for(500_000)) {
-                hist[((luminance(c).clamp(0.0, 1.0)) * (LUT_N - 1) as f32) as usize] += 1.0;
+            for c in reference.subsample(reference.step_for(500_000)) {
+                hist[((win(luminance(c)).clamp(0.0, 1.0)) * (LUT_N - 1) as f32) as usize] += 1.0;
             }
             let total: f64 = hist.iter().sum::<f64>().max(1.0);
             let mut acc = 0.0;
@@ -974,7 +1021,7 @@ pub fn display(img: &Img, mode: Display) -> Img {
         }
     };
     let lut = Lut::new(f);
-    img.map(move |c| c.map(|v| lut.at(v)))
+    img.map(move |c| c.map(|x| lut.at(win(x))))
 }
 
 /// A short description of the settings in use (for the status line).
