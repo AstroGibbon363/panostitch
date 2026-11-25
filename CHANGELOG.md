@@ -1,19 +1,32 @@
 # Changes
 
-## v0.4.0-beta2
+## v0.4.0
 
-Second test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release. New since beta1:
+Released 2026-11-25. New since v0.3.2: the Post-processing and Timelapse tabs, night panoramas up to the zenith, star stacking with RBF background extraction and new stretches, wavelet noise reduction, six languages and in-app help.
 
+### Star stacking
+- **RBF background extraction** for frames that are all sky (deep sky): a flexible surface through a grid of sky samples that follows several glows or a bright corner where a polynomial cannot. Stars, galaxies, nebulae, the Milky Way and their surroundings are left out of the samples automatically, so a galaxy keeps its faint halo. **Samples per line**, **Grid tolerance** and **Smoothing** as in Siril; **Show the samples** marks the used and left-out ones on the result. Landscapes keep the polynomial.
+- **Stretches:** the stretch is now called **MTF stretch** (automatic stretch kept), joined by **Arcsinh** (keeps star colours) and **GHS**, with their black point (and symmetry point) measured on the sky background.
+- **Colour calibration** has two modes: **Auto** (as before) and **Manual**: drag a background area and a white reference on the result, then temperature and tint.
+- **Save linear or stretched:** *Linear (for processing)* / *Stretched (for viewing)*, whatever the format (until chosen: FITS / XISF linear, others stretched). The old button that switched all processing off is gone.
+
+### Noise reduction
+- **Wavelet noise reduction** in place of the old smoothing: the image is split into layers of detail and the small wiggles of noise are shrunk in each, keeping stars and edges. The noise is measured area by area, so it works on linear and stretched images alike. **Colour noise** uses it on the colour layers only (the brightness stays exactly), in the Post-processing tab and in star stacking.
+
+### All tabs
+- **Linear or stretched** when saving the panorama and in Post-processing too (Post-processing saves only the linear steps then: turn and crop, background, colour calibration, white balance), each explained where it is chosen.
+
+### Panorama tab
 - **Crop in the Panorama tab:** **✂ Crop** above the view draws a frame on the panorama (drag, adjust edges and corners, move). Only that part is rendered and saved, so a big panorama needs less memory and no trip to Post-processing just to crop.
 - **⬇ Save & post-process…** above the view saves the panorama and opens it in the Post-processing tab.
 - **Post-processing memory check:** the memory needed to save was worked out for the whole image even when it was cropped, so a crop never got past "not enough memory". It now counts the cropped size, and the message says it means RAM (free disk space does not help).
 - **Display modes as in Siril** (view only): Linear, Logarithm, Square root, Squared, Asinh, AutoStretch, Histogram equalisation, with **Low** and **High** cut-offs (applied exactly, so a narrow range of faint linear data is not posterised). In the Panorama tab and the Star stacking result (also *As processed*, the tab's own stretch) and in Post-processing.
+- Memory: the undo history shares the matched points of the pairs instead of copying them at every step.
 
-Everything else new in v0.4 is listed under v0.4.0-beta1 below (and in the v0.4.0-beta1 release notes).
-
-## v0.4.0-beta1
-
-Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release.
+### Stability (star stacking)
+- The frame report and *Save result…* no longer copy the whole stacking result (about 1.2 GB for 24 MP) at every redraw or save.
+- *Save result…* reports correctly whether it saved linear or stretched data, and a crash while saving is reported instead of hanging.
+- Histograms are counted once per image instead of at every redraw.
 
 ### Post-processing tab (new)
 - The last steps on a stacked or stitched image in one place: turn and crop (any angle, empty corners cut away, crop to 3:2 / 16:9 / 1:1 …), stretch, white balance, light, curves, colour, noise, star reduction, sharpening, and saving at a chosen size (e.g. 2048 px for forums) with JPEG quality.

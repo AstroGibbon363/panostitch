@@ -683,6 +683,13 @@ Zusammenfügen (Laden, Zuordnen und Vorschauen seit dem ersten Foto), die Zeit
 zum Speichern, die Größe in Pixeln und die Datei mit ihrer Größe, oder den
 Fehler, falls das Speichern scheiterte. × schließt ihn.
 
+**Linear oder gestreckt.** Über **Panorama speichern…** speichert **Linear
+(zur Bearbeitung)** das Panorama ohne Streckung (mit Belichtung und
+Helligkeitsfaktoren), für Astronomie-Software, und **Gestreckt (zum Ansehen)**
+so, wie es gezeigt wird. Solange Sie nicht wählen, sind FITS und XISF linear
+und TIFF, PNG und JPEG gestreckt. Lineare Daten brauchen viele Stufen:
+speichern Sie sie als FITS, XISF oder TIFF, nicht als JPEG oder PNG.
+
 ---
 
 ## 11. Fehlerbehebung
@@ -888,16 +895,16 @@ Einstellungen, **Ergebnis speichern…** speichert erneut.
 
 | Einstellung | Wirkung |
 |---|---|
-| **Hintergrundextraktion** | Zieht ein glattes Modell des Himmelshintergrunds ab (Verläufe durch Lichtverschmutzung oder Mondlicht). |
-| **Farbkalibrierung** | Macht den Himmelshintergrund neutral grau und den durchschnittlichen Stern weiß. |
-| **Farbrauschen mindern** | Glättet nur die Farben und entfernt die bunten Pünktchen von Aufnahmen mit hoher ISO. |
+| **Hintergrundextraktion** | Zieht ein glattes Modell des Himmelshintergrunds ab (Verläufe durch Lichtverschmutzung, Mond, Vignettierung); der Himmel behält seine mittlere Helligkeit. Für **Ganzer Himmel** (Deep Sky) kann das **Modell** **RBF** sein: eine biegsame Fläche durch Musterfelder des Himmels, die mehreren Lichtglocken oder einer hellen Ecke folgt, was ein Polynom nicht kann; **Muster pro Zeile** (Felder entlang der langen Seite) und **Glättung** bestimmen, wie eng sie folgt; **Rastertoleranz** bestimmt, wie weit ein Feld herausragen darf, bevor es als Objekt gilt (höher behält mehr), und **Muster zeigen** markiert sie auf dem Ergebnis (grün verwendet, rot weggelassen). Sterne, Galaxien, Nebel und die Milchstraße samt ihrer Umgebung bleiben automatisch außen vor. Landschaften (andere Himmelsbereiche) verwenden das **Polynom** des gewählten **Grads**. |
+| **Farbkalibrierung** | **Auto**: macht den Himmelshintergrund neutral grau und den mittleren Stern weiß. **Manuell**: ziehen Sie auf dem Ergebnis **▭ Hintergrundbereich** über leeren Himmel und **▭ Weißreferenz** über etwas, das im Mittel weiß sein soll (ein Sternfeld, eine Galaxie, einen sonnenähnlichen Stern); **Temperatur** und **Tönung** passen zusätzlich an. Ohne Bereiche gelten nur Temperatur und Tönung. |
+| **Farbrauschen mindern** | Entfernt farbige Pünktchen und Flecken: Wavelet-Rauschminderung nur auf den Farbebenen, die Helligkeit bleibt genau wie sie war. |
 | **Lichtverschmutzung** | **Deep Sky**: entfernt ein glattes Glühen. **Ungleichmäßig**: folgt dem Glühen Kachel für Kachel (Lichtglocken von Städten im Weitwinkel). **Stärke** bestimmt, wie viel entfernt wird. Zuerst die Vignettierung korrigieren (Vignettierungsbilder), sonst wird es schlimmer. |
 | **Sternlicht verstärken** | Hebt die Sterne über den Himmelshintergrund, ohne dessen Rauschen zu verstärken. |
 | **Automatische Helligkeit** | Bringt den Himmel auf eine angenehme Helligkeit, ohne die hellsten Sterne zu beschneiden. |
 | **Hoher Dynamikumfang** | Komprimiert helle Sterne und Lichter, statt sie zu beschneiden. |
-| **Ton** | **sRGB-Kurve** (wie eine Kamera), **Strecken** (Schwarzpunkt, Mitteltöne, Weißpunkt; automatisch oder von Hand) oder **Linear** (keine Kurve). |
+| **Ton** | **sRGB-Kurve** (wie eine Kamera), **MTF-Streckung** (Schwarzpunkt, Mitteltöne, Weißpunkt; automatisch oder von Hand), **Arcsinh-Streckung** (Streckfaktor; erhält die Sternfarben), **GHS-Streckung** (generalisiert hyperbolisch: Stärke, lokale Intensität, Symmetriepunkt) oder **Linear** (keine Kurve). Bei Arcsinh und GHS werden der Schwarzpunkt (und bei GHS der Symmetriepunkt) am Himmelshintergrund gemessen, außer Sie wählen **Schwarzpunkt aus dem Hintergrund** ab. |
 | **Farbraum** | sRGB oder Adobe RGB für TIFF- und JPEG-Ausgabe. |
-| **Linear (zur Bearbeitung)** | Schaltet alles ab und speichert ein lineares 32-Bit-FITS: das, was Siril oder PixInsight erwarten. |
+| **Speichern: Linear / Gestreckt** | **Linear (zur Bearbeitung)**: die Datei erhält das Licht wie gemessen (nach Hintergrundextraktion, Farbkalibrierung und Helligkeit), für den Tab Nachbearbeitung, Siril oder PixInsight; in gewöhnlichen Betrachtern wirkt es dunkel, daher FITS, XISF oder TIFF. **Gestreckt (zum Ansehen)**: die Datei erhält das Bild wie gezeigt, bereit zum Ansehen und Teilen. Solange Sie nicht wählen, erhalten FITS / XISF lineare Daten und TIFF / PNG / JPEG das gestreckte Bild. |
 | **Im Stitcher verwenden** | Fügt das gespeicherte Ergebnis als ein Teilbild eines Panoramas in den Reiter Panorama stitcher ein (siehe 13.7). |
 
 ### 13.6 Projekte
@@ -1149,6 +1156,19 @@ und Exportgröße (die gehören zu einem Bild). **Vorgabe** wendet einen
 gespeicherten Look auf das offene Bild an (Strg+Z macht es rückgängig);
 **Löschen** löscht die Vorgabe mit dem eingegebenen Namen. Vorgaben liegen im
 Einstellungsordner (`presets`).
+
+**Rauschminderung** arbeitet mit Wavelets: das Bild wird in Ebenen feiner bis
+grober Details zerlegt, und in jeder werden die kleinen Schwankungen des
+Rauschens verkleinert, während Sterne, Kanten und Strukturen bleiben. Das
+Rauschen wird Bereich für Bereich gemessen, daher wirkt es auf linearen wie auf
+gestreckten Bildern. **Rauschminderung** behandelt die Helligkeit,
+**Farbrauschen** nur die Farbe (die Helligkeit bleibt genau wie sie war).
+
+**Linear speichern.** Ist das Bild linear (eine Streckung ist gewählt),
+speichert **Linear (zur Bearbeitung)** unter dem Dateinamen nur die linearen
+Schritte: Drehen und Zuschneiden, Hintergrundextraktion, Farbkalibrierung und
+Weißabgleich, zur Weiterverarbeitung anderswo. **Gestreckt (zum Ansehen)**
+speichert alles wie gezeigt.
 
 ## 17. Zeitraffer
 

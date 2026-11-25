@@ -164,6 +164,35 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
     (*v, processed.as_deref().copied()) != before
 }
 
+/// What saving linear or stretched means (the same words in every tab).
+pub fn save_kind_tip(linear: bool) -> &'static str {
+    if linear {
+        tr("Linear: the light as measured, for further processing (Post-processing tab, Siril, PixInsight). It looks dark in ordinary viewers. Use FITS, XISF or TIFF.")
+    } else {
+        tr("Stretched: the image as shown, brightened and ready to view and share. Further processing works less well on it.")
+    }
+}
+
+/// The choice between saving the linear data and the stretched image, with
+/// its explanation. Returns the new choice when it was changed.
+pub fn save_kind_ui(ui: &mut egui::Ui, linear: bool, ext: &str) -> Option<bool> {
+    let mut pick = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(tr("Save"));
+        if ui.selectable_label(linear, tr("Linear (for processing)")).on_hover_text(save_kind_tip(true)).clicked() {
+            pick = Some(true);
+        }
+        if ui.selectable_label(!linear, tr("Stretched (for viewing)")).on_hover_text(save_kind_tip(false)).clicked() {
+            pick = Some(false);
+        }
+    });
+    ui.label(egui::RichText::new(save_kind_tip(linear)).weak().size(12.0));
+    if linear && matches!(ext, "jpg" | "jpeg" | "png") {
+        ui.colored_label(Color32::from_rgb(230, 150, 30), tr("JPEG and PNG have too few levels for linear data: the faint detail is lost. Save linear data as FITS, XISF or TIFF."));
+    }
+    pick
+}
+
 /// A slider with a label (row of a grid).
 pub fn slider<N: egui::emath::Numeric>(ui: &mut egui::Ui, label: &str, v: &mut N, r: std::ops::RangeInclusive<N>, step: f64) -> bool {
     ui.label(label);

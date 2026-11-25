@@ -686,6 +686,14 @@ appariées), le temps d'assemblage (chargement, appariement et aperçus depuis
 l'ajout de la première photo), le temps d'enregistrement, la taille en pixels
 et le fichier avec sa taille, ou l'erreur en cas d'échec. × le ferme.
 
+**Linéaire ou étirée.** Au-dessus de **Enregistrer le panorama…**,
+**Linéaire (pour traitement)** enregistre le panorama sans étirement (avec
+l'exposition et les facteurs de luminosité), pour les logiciels d'astronomie,
+et **Étirée (pour la visualisation)** tel qu'affiché. Tant que vous ne
+choisissez pas, FITS et XISF sont linéaires et TIFF, PNG et JPEG étirés. Les
+données linéaires demandent beaucoup de niveaux : enregistrez-les en FITS, XISF
+ou TIFF, pas en JPEG ou PNG.
+
 ---
 
 ## 11. Dépannage
@@ -888,16 +896,16 @@ réglages, **⬇ Enregistrer le résultat…** enregistre à nouveau.
 
 | Réglage | Effet |
 |---|---|
-| **Extraction du fond** | Soustrait un modèle lisse du fond du ciel (dégradés de pollution lumineuse ou de clair de lune). |
-| **Calibration des couleurs** | Rend le fond du ciel gris neutre et l'étoile moyenne blanche. |
-| **Réduire le bruit chromatique** | Lisse seulement les couleurs, en enlevant les taches colorées des images à ISO élevé. |
+| **Extraction du fond** | Soustrait un modèle lisse du fond du ciel (dégradés dus à la pollution lumineuse, à la Lune, au vignetage) ; le ciel garde son niveau moyen. Pour **Tout le ciel** (ciel profond), le **Modèle** peut être **RBF** : une surface souple passant par des cases d'échantillons du ciel, qui suit plusieurs halos ou un coin lumineux, ce qu'un polynôme ne peut pas ; **Échantillons par ligne** (cases le long du grand côté) et **Lissage** règlent la fidélité ; **Tolérance de la grille** règle jusqu'où une case peut dépasser avant de compter comme un objet (plus haut en garde plus), et **Afficher les échantillons** les marque sur le résultat (vert utilisé, rouge écarté). Les étoiles, galaxies, nébuleuses et la Voie lactée, ainsi que leurs abords, sont écartés des échantillons d'eux-mêmes. Les paysages (autres régions du ciel) utilisent le **Polynôme** du **Degré** choisi. |
+| **Calibration des couleurs** | **Auto** : rend le fond du ciel gris neutre et l'étoile moyenne blanche. **Manuel** : sur le résultat, tracez **▭ Zone de fond** sur du ciel vide et **▭ Référence blanche** sur ce qui doit être blanc en moyenne (un champ d'étoiles, une galaxie, une étoile semblable au Soleil) ; **Température** et **Teinte** ajustent en plus. Sans zones, seules température et teinte s'appliquent. |
+| **Réduire le bruit chromatique** | Supprime les points et taches de couleur : réduction du bruit par ondelettes sur les couches de couleur seulement, la luminosité reste exactement la même. |
 | **Pollution lumineuse** | **Ciel profond** : enlève une lueur lisse. **Irrégulière** : suit la lueur tuile par tuile (dômes de lumière des villes en grand-angle). **Intensité** règle la quantité retirée. Corrigez d'abord le vignetage (flats), sinon c'est pire. |
 | **Renforcer la lumière des étoiles** | Fait ressortir les étoiles du fond du ciel sans en amplifier le bruit. |
 | **Luminosité automatique** | Place le ciel à un niveau agréable sans écrêter les étoiles les plus brillantes. |
 | **Grande plage dynamique** | Comprime les étoiles brillantes et les lumières au lieu de les écrêter. |
-| **Tonalité** | **courbe sRGB** (comme un appareil photo), **Étirement** (point noir, tons moyens, point blanc ; automatique ou à la main) ou **Linéaire** (sans courbe). |
+| **Tonalité** | **courbe sRGB** (comme un appareil photo), **Étirement MTF** (point noir, tons moyens, point blanc ; automatique ou à la main), **Étirement arcsinh** (facteur d'étirement ; garde les couleurs des étoiles), **Étirement GHS** (hyperbolique généralisé : force, intensité locale, point de symétrie) ou **Linéaire** (sans courbe). Pour arcsinh et GHS, le point noir (et le point de symétrie de GHS) sont mesurés sur le fond du ciel, sauf si vous décochez **Point noir depuis le fond**. |
 | **Espace colorimétrique** | sRGB ou Adobe RGB pour la sortie TIFF et JPEG. |
-| **Linéaire (pour traitement)** | Désactive tout et enregistre un FITS linéaire 32 bits : ce qu'attendent Siril ou PixInsight. |
+| **Enregistrer : Linéaire / Étirée** | **Linéaire (pour traitement)** : le fichier reçoit la lumière telle que mesurée (après extraction du fond, calibration des couleurs et luminosité), pour l'onglet Post-traitement, Siril ou PixInsight ; elle paraît sombre dans les visionneuses ordinaires, d'où FITS, XISF ou TIFF. **Étirée (pour la visualisation)** : le fichier reçoit l'image telle qu'affichée, prête à être vue et partagée. Tant que vous ne choisissez pas, FITS / XISF reçoivent des données linéaires et TIFF / PNG / JPEG l'image étirée. |
 | **⇄ Utiliser dans l'Assemblage (panneau de panorama)** | Ajoute le résultat enregistré à l'onglet Assemblage de panoramas, comme un panneau d'un panorama (voir 13.7). |
 
 ### 13.6 Projets
@@ -1152,6 +1160,20 @@ rotation, le recadrage ni la taille d'export (ils appartiennent à une image).
 **Préréglage** applique un rendu enregistré à l'image ouverte (Ctrl+Z
 l'annule) ; **Supprimer** retire le préréglage dont le nom est tapé. Les
 préréglages sont gardés dans le dossier de réglages (`presets`).
+
+La **réduction du bruit** travaille par ondelettes : l'image est séparée en
+couches de détails fins à grossiers, et dans chacune les petites oscillations
+du bruit sont réduites tandis que les étoiles, les bords et les structures
+restent. Le bruit est mesuré zone par zone, donc cela fonctionne aussi bien sur
+des images linéaires qu'étirées. **Réduction du bruit** traite la luminosité,
+**Bruit chromatique** seulement la couleur (la luminosité reste exactement la
+même).
+
+**Enregistrer en linéaire.** Quand l'image est linéaire (un étirement est
+choisi), **Linéaire (pour traitement)** sous le nom du fichier n'enregistre que
+les étapes linéaires : rotation et recadrage, extraction du fond, calibration
+des couleurs et balance des blancs, pour la suite du traitement ailleurs.
+**Étirée (pour la visualisation)** enregistre tout tel qu'affiché.
 
 ## 17. Timelapse
 

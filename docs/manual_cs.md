@@ -642,6 +642,13 @@ nespárovalo), čas spojování (načtení, párování a náhledy od přidání
 fotky), čas ukládání, velikost v pixelech a soubor s jeho velikostí, nebo
 chyba, pokud se uložení nepovedlo. × ho zavře.
 
+**Lineární, nebo roztažené.** Nad **Uložit panorama…** volba **Lineární (ke
+zpracování)** uloží panorama bez roztažení (s expozicí a faktory jasu), pro
+astronomický software, a **Roztažené (k prohlížení)** tak, jak je zobrazeno.
+Dokud nevyberete, FITS a XISF jsou lineární a TIFF, PNG a JPEG roztažené.
+Lineární data potřebují hodně úrovní: ukládejte je jako FITS, XISF nebo TIFF,
+ne JPEG nebo PNG.
+
 ---
 
 ## 11. Řešení problémů
@@ -833,16 +840,16 @@ result…** uloží znovu.
 
 | Nastavení | Co dělá |
 |---|---|
-| **Extrakce pozadí** | Odečte hladký model pozadí oblohy (přechody od světelného znečištění nebo Měsíce). |
-| **Kalibrace barev** | Pozadí oblohy bude neutrálně šedé a průměrná hvězda bílá. |
-| **Snížit barevný šum** | Vyhladí jen barvy a odstraní barevné tečky ze snímků s vysokým ISO. |
+| **Extrakce pozadí** | Odečte hladký model pozadí oblohy (přechody od světelného znečištění, Měsíce, vinětace); obloha si ponechá průměrnou úroveň. Pro **Celou oblohu** (deep sky) může být **Model** **RBF**: pružná plocha proložená vzorkovacími čtverci oblohy, která zvládne několik září nebo jasný roh, na což polynom nestačí; **Vzorků na řádek** (čtverce podél delší strany) a **Vyhlazení** určují, jak těsně plocha sleduje pozadí; **Tolerance mřížky** určuje, jak moc smí čtverec vyčnívat, než se počítá za objekt (vyšší ponechá víc), a **Zobrazit vzorky** je vyznačí na výsledku (zelená použito, červená vynecháno). Hvězdy, galaxie, mlhoviny a Mléčná dráha i okolí kolem nich se ze vzorků vynechají samy. Krajinky (ostatní oblasti oblohy) používají **Polynom** zvoleného **Stupně**. |
+| **Kalibrace barev** | **Auto**: pozadí oblohy bude neutrálně šedé a průměrná hvězda bílá. **Ruční**: na výsledku natáhněte **▭ Oblast pozadí** přes prázdnou oblohu a **▭ Bílá reference** přes něco, co má být v průměru bílé (pole hvězd, galaxie, hvězda podobná Slunci); **Teplota** a **Odstín** doladí navíc. Bez oblastí platí jen teplota a odstín. |
+| **Snížit barevný šum** | Odstraní barevné tečky a skvrny: vlnková redukce šumu jen na barevných složkách, jas zůstane přesně jako byl. |
 | **Světelné znečištění** | **Deep sky**: odstraní hladkou záři. **Nerovnoměrné**: sleduje záři po dlaždicích (kopule světla měst na širokoúhlých snímcích). **Síla** určuje, kolik se odstraní. Nejdřív opravte vinětaci (vinětační snímky), jinak se zhorší. |
 | **Zesílit světlo hvězd** | Zvýrazní hvězdy nad pozadím oblohy, aniž by zesílilo jeho šum. |
 | **Automatický jas** | Nastaví oblohu na příjemný jas, aniž by se přepálily nejjasnější hvězdy. |
 | **Vysoký dynamický rozsah** | Jasné hvězdy a světla stlačí místo přepálení. |
-| **Tón** | **křivka sRGB** (jako fotoaparát), **Roztažení** (černý bod, střední tóny, bílý bod; automaticky nebo ručně) nebo **Lineární** (bez křivky). |
+| **Tón** | **křivka sRGB** (jako fotoaparát), **MTF roztažení** (černý bod, střední tóny, bílý bod; automaticky nebo ručně), **Arcsinh roztažení** (faktor roztažení; zachová barvy hvězd), **GHS roztažení** (generalizované hyperbolické: síla, lokální intenzita, bod symetrie) nebo **Lineární** (bez křivky). U Arcsinh a GHS se černý bod (a u GHS bod symetrie) měří na pozadí oblohy, pokud neodškrtnete **Černý bod z pozadí**. |
 | **Barevný prostor** | sRGB nebo Adobe RGB pro výstup TIFF a JPEG. |
-| **Lineární (ke zpracování)** | Vše vypne a uloží lineární 32bitový FITS: to, co očekává Siril nebo PixInsight. |
+| **Uložit: Lineární / Roztažené** | **Lineární (ke zpracování)**: do souboru jde světlo tak, jak bylo naměřeno (po extrakci pozadí, kalibraci barev a jasu), pro záložku Dodatečné úpravy, Siril nebo PixInsight; v běžných prohlížečích vypadá tmavě, proto FITS, XISF nebo TIFF. **Roztažené (k prohlížení)**: do souboru jde obrázek tak, jak je zobrazen, připravený k prohlížení a sdílení. Dokud nevyberete, FITS / XISF dostanou lineární data a TIFF / PNG / JPEG roztažený obrázek. |
 | **Použít ve skládání panoramat** | Přidá uložený výsledek do karty Panorama stitcher jako jeden díl panoramatu (viz 13.7). |
 
 ### 13.6 Projekty
@@ -1079,6 +1086,17 @@ a popředí, ale ne otočení, ořez a velikost exportu (ty patří k jednomu
 snímku). **Předvolba** použije uložený vzhled na otevřený snímek (Ctrl+Z ho
 vrátí); **Smazat** smaže předvolbu s napsaným názvem. Předvolby jsou ve složce
 nastavení (`presets`).
+
+**Redukce šumu** pracuje s vlnkami: obrázek se rozloží na vrstvy jemných až
+hrubých detailů a v každé se zmenší drobné kmitání, které tvoří šum, zatímco
+hvězdy, hrany a struktura zůstanou. Šum se měří oblast po oblasti, takže to
+funguje na lineárních i roztažených obrázcích. **Redukce šumu** upravuje jas,
+**Barevný šum** jen barvu (jas zůstane přesně jako byl).
+
+**Lineární uložení.** Když je obrázek lineární (je zvolené roztažení), volba
+**Lineární (ke zpracování)** pod názvem souboru uloží jen lineární kroky:
+otočení a ořez, extrakci pozadí, kalibraci barev a vyvážení bílé, pro další
+zpracování jinde. **Roztažené (k prohlížení)** uloží vše, jak je zobrazeno.
 
 ## 17. Timelapse
 

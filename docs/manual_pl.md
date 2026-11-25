@@ -666,6 +666,13 @@ ile się nie dopasowało), czas łączenia (wczytywanie, dopasowanie i podglądy
 dodania pierwszego zdjęcia), czas zapisu, rozmiar w pikselach i plik z jego
 rozmiarem albo błąd, jeśli zapis się nie udał. × go zamyka.
 
+**Liniowy czy rozciągnięty.** Nad **Zapisz panoramę…** opcja **Liniowy (do
+obróbki)** zapisuje panoramę bez rozciągnięcia (z ekspozycją i współczynnikami
+jasności), dla oprogramowania astronomicznego, a **Rozciągnięty (do
+oglądania)** tak, jak jest pokazana. Dopóki nie wybierzesz, FITS i XISF są
+liniowe, a TIFF, PNG i JPEG rozciągnięte. Dane liniowe potrzebują wielu
+poziomów: zapisuj je jako FITS, XISF lub TIFF, nie JPEG ani PNG.
+
 ---
 
 ## 11. Rozwiązywanie problemów
@@ -860,16 +867,16 @@ ustawieniami, **⬇ Zapisz wynik…** zapisuje ponownie.
 
 | Ustawienie | Co robi |
 |---|---|
-| **Ekstrakcja tła** | Odejmuje gładki model tła nieba (gradienty od zanieczyszczenia światłem lub księżyca). |
-| **Kalibracja kolorów** | Czyni tło nieba neutralnie szarym, a przeciętną gwiazdę białą. |
-| **Redukuj szum kolorowy** | Wygładza tylko kolory, usuwając kolorowe plamki ze zdjęć z wysokim ISO. |
+| **Ekstrakcja tła** | Odejmuje gładki model tła nieba (gradienty od zanieczyszczenia światłem, Księżyca, winietowania); niebo zachowuje swój średni poziom. Dla **Całego nieba** (głębokie niebo) **Model** może być **RBF**: elastyczna powierzchnia przez pola próbek nieba, która nadąża za kilkoma łunami albo jasnym rogiem, czego wielomian nie potrafi; **Próbek na linię** (pola wzdłuż dłuższego boku) i **Wygładzanie** ustalają, jak ściśle powierzchnia nadąża; **Tolerancja siatki** ustala, jak bardzo pole może wystawać, zanim liczy się jako obiekt (wyżej zachowuje więcej), a **Pokaż próbki** zaznacza je na wyniku (zielony użyta, czerwony pominięta). Gwiazdy, galaktyki, mgławice i Droga Mleczna wraz z otoczeniem są pomijane w próbkach same. Krajobrazy (inne obszary nieba) używają **Wielomianu** wybranego **Stopnia**. |
+| **Kalibracja kolorów** | **Auto**: czyni tło nieba neutralnie szarym, a przeciętną gwiazdę białą. **Ręczny**: na wyniku przeciągnij **▭ Obszar tła** na pustym niebie i **▭ Wzorzec bieli** na czymś, co średnio powinno być białe (pole gwiazd, galaktyka, gwiazda podobna do Słońca); **Temperatura** i **Odcień** dostrajają dodatkowo. Bez obszarów działają tylko temperatura i odcień. |
+| **Redukuj szum kolorowy** | Usuwa kolorowe kropki i plamy: redukcja szumu falkami tylko na warstwach koloru, jasność zostaje dokładnie taka, jaka była. |
 | **Zanieczyszczenie światłem** | **Deep sky**: usuwa gładką łunę. **Nierównomierne**: śledzi łunę kafelek po kafelku (łuny miast na ujęciach szerokokątnych). **Siła** ustala, ile jest usuwane. Najpierw skoryguj winietowanie (flaty), inaczej będzie gorzej. |
 | **Wzmocnij światło gwiazd** | Wyciąga gwiazdy ponad tło nieba, nie wzmacniając jego szumu. |
 | **Automatyczna jasność** | Ustawia niebo na przyjemnym poziomie bez przepalania najjaśniejszych gwiazd. |
 | **Wysoki zakres dynamiki** | Kompresuje jasne gwiazdy i światła zamiast je obcinać. |
-| **Ton** | **krzywa sRGB** (jak w aparacie), **Rozciąganie** (punkt czerni, półtony, punkt bieli; automatycznie lub ręcznie) lub **Liniowy** (bez krzywej). |
+| **Ton** | **krzywa sRGB** (jak w aparacie), **Rozciągnięcie MTF** (punkt czerni, półtony, punkt bieli; automatycznie lub ręcznie), **Rozciągnięcie arcsinh** (współczynnik rozciągania; zachowuje kolory gwiazd), **Rozciągnięcie GHS** (uogólnione hiperboliczne: siła, intensywność lokalna, punkt symetrii) lub **Liniowy** (bez krzywej). Dla arcsinh i GHS punkt czerni (a dla GHS punkt symetrii) mierzy się na tle nieba, chyba że odznaczysz **Punkt czerni z tła**. |
 | **Przestrzeń barw** | sRGB lub Adobe RGB dla wyniku TIFF i JPEG. |
-| **Liniowy (do obróbki)** | Wyłącza wszystko i zapisuje liniowy 32-bitowy FITS: czego oczekują Siril lub PixInsight. |
+| **Zapisz: Liniowy / Rozciągnięty** | **Liniowy (do obróbki)**: plik dostaje światło tak, jak zostało zmierzone (po ekstrakcji tła, kalibracji kolorów i jasności), dla karty Obróbka, Siril lub PixInsight; w zwykłych przeglądarkach wygląda ciemno, więc FITS, XISF lub TIFF. **Rozciągnięty (do oglądania)**: plik dostaje obraz tak, jak jest pokazany, gotowy do oglądania i udostępniania. Dopóki nie wybierzesz, FITS / XISF dostają dane liniowe, a TIFF / PNG / JPEG obraz rozciągnięty. |
 | **⇄ Użyj w Łączeniu panoram (fragment panoramy)** | Dodaje zapisany wynik do karty Łączenie panoram jako jeden fragment panoramy (zob. 13.7). |
 
 ### 13.6 Projekty
@@ -1115,6 +1122,19 @@ wygląd nieba i pierwszego planu, ale nie obrót, kadrowanie ani rozmiar
 eksportu (należą do jednego obrazu). **Ustawienie** stosuje zapisany wygląd do
 otwartego obrazu (Ctrl+Z cofa); **Usuń** usuwa ustawienie o wpisanej nazwie.
 Ustawienia są trzymane w folderze ustawień (`presets`).
+
+**Redukcja szumu** działa na falkach: obraz dzieli się na warstwy od drobnych
+do grubych detali, a w każdej drobne drgania szumu są zmniejszane, podczas gdy
+gwiazdy, krawędzie i struktura zostają. Szum mierzony jest obszar po obszarze,
+więc działa to na obrazach liniowych i rozciągniętych. **Redukcja szumu**
+obrabia jasność, **Szum kolorowy** tylko kolor (jasność zostaje dokładnie taka,
+jaka była).
+
+**Zapis liniowy.** Gdy obraz jest liniowy (wybrano rozciągnięcie), opcja
+**Liniowy (do obróbki)** pod nazwą pliku zapisuje tylko kroki liniowe: obrót
+i kadrowanie, ekstrakcję tła, kalibrację kolorów i balans bieli, do dalszej
+obróbki gdzie indziej. **Rozciągnięty (do oglądania)** zapisuje wszystko tak,
+jak jest pokazane.
 
 ## 17. Timelapse
 

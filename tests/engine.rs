@@ -642,3 +642,126 @@ fn display_range_low_and_high() {
     let distinct: std::collections::HashSet<u32> = a.px.iter().map(|c| c[0].to_bits()).collect();
     assert!(distinct.len() > 95, "posterised: {} levels", distinct.len());
 }
+
+#[test]
+fn rbf_background_follows_complex_gradients() {
+    // Sky with two broad glows (a town at the left edge, another lower right) on a
+    // slope, stars, and a band of Milky Way: RBF leaves a much flatter sky than
+    // the best polynomial, and keeps the band.
+    let (h, w) = (300usize, 450usize);
+    let sky = |y: usize, x: usize| {
+        let (u, v) = (x as f64 / w as f64, y as f64 / h as f64);
+        0.05 + 0.02 * u + 0.12 * (-((u - 0.0).powi(2) + (v - 0.9).powi(2)) / 0.08).exp() + 0.08 * (-((u - 0.8).powi(2) + (v - 0.75).powi(2)) / 0.05).exp()
+    };
+    let band = |y: usize, x: usize| 0.04 * (-((x as f64 - 0.6 * y as f64 - 150.0) / 18.0).powi(2)).exp();
+    let mut img = Img::from_fn(h, w, |y, x| { let v = (sky(y, x) + band(y, x)) as f32; [v, v * 0.95, v * 1.05] });
+    for k in 0..300 {
+        let (y, x) = ((k * 97) % h, (k * 61) % w);
+        img.px[y * w + x] = [0.9; 3];
+    }
+    let wt = Gray::from_fn(h, w, |_, _| 1.0);
+    let mut cfg = sk::StackConfig { bg_extraction: (true, 4), ..Default::default() };
+    cfg.sky.mode = sk::SkyMode::All; // RBF is for frames that are all sky
+    // Flatness: spread of the corrected sky away from the band and the stars.
+    let spread = |out: &Img| {
+        let mut v: Vec<f32> = (0..h).step_by(3).flat_map(|y| (0..w).step_by(3).map(move |x| (y, x))).filter(|&(y, x)| band(y, x) < 0.002).map(|(y, x)| out.at(y, x)[1]).filter(|v| *v < 0.5).collect();
+        let q = panostitch::image::quantiles(&mut v, &[0.02, 0.98]);
+        q[1] - q[0]
+    };
+    cfg.bg_model = sk::BgModel::Polynomial;
+    let poly = sk::post::extract_background_cfg(&img, &wt, &cfg);
+    cfg.bg_model = sk::BgModel::Rbf;
+    let rbf = sk::post::extract_background_cfg(&img, &wt, &cfg);
+    let (sp, sr) = (spread(&poly), spread(&rbf));
+    assert!(sr < 0.5 * sp && sr < 0.03, "RBF spread {sr}, polynomial {sp}");
+    // The grid: a higher tolerance keeps more samples; the band's are left out at the default.
+    let kept = |tol: f64| sk::post::rbf_grid(&img, &wt, 20, tol).unwrap().keep.iter().filter(|k| **k).count();
+    let (strict, loose) = (kept(0.5), kept(4.0));
+    assert!(strict < kept(1.0) && kept(1.0) <= loose, "kept: {strict}, {}, {loose}", kept(1.0));
+    let g = sk::post::rbf_grid(&img, &wt, 20, 1.0).unwrap();
+    let on_band = g.p.iter().zip(&g.keep).filter(|(q, _)| { let (x, y) = (q.0 * w as f64, q.1 * w as f64); (x - 0.6 * y - 150.0).abs() < 8.0 }).collect::<Vec<_>>();
+    assert!(!on_band.is_empty() && on_band.iter().all(|(_, k)| !**k), "samples on the band used");
+    // The Milky Way band stays (it is not taken for background).
+    let on = rbf.at(150, (0.6 * 150.0 + 150.0) as usize)[1];
+    let off = rbf.at(150, 60)[1];
+    assert!(on - off > 0.025, "band lost: {on} vs {off}");
+}
+
+#[test]
+fn manual_colour_calibration_and_stretches() {
+    // A reddish background and a bluish "white" object: the areas picked by hand make both neutral.
+    let (h, w) = (100usize, 100usize);
+    let img = Img::from_fn(h, w, |y, x| if (40..60).contains(&y) && (40..60).contains(&x) { [0.30, 0.40, 0.55] } else { [0.12, 0.10, 0.10] });
+    let wt = Gray::from_fn(h, w, |_, _| 1.0);
+    let m = sk::ManualCal { background: Some([0.0, 0.0, 0.3, 0.3]), white: Some([0.42, 0.42, 0.58, 0.58]), temperature: 0.0, tint: 0.0 };
+    let out = sk::post::calibrate_manual(&img, &wt, &m);
+    let (b, c) = (out.at(10, 10), out.at(50, 50));
+    assert!((b[0] - b[1]).abs() < 1e-4 && (b[2] - b[1]).abs() < 1e-4, "background {b:?}");
+    assert!((c[0] - c[1]).abs() < 1e-4 && (c[2] - c[1]).abs() < 1e-4, "white {c:?}");
+    // Warmer: more red than blue.
+    let warm = sk::post::calibrate_manual(&img, &wt, &sk::ManualCal { temperature: 0.5, ..m.clone() }).at(50, 50);
+    assert!(warm[0] > warm[2], "{warm:?}");
+    // The new stretches brighten a faint linear image; the linear data stays as it was.
+    let faint = Img::from_fn(h, w, |y, x| { let v = 0.01 + 0.002 * ((x + y) % 7) as f32; [v, v, v] });
+    for tone in [sk::Tone::Stretch, sk::Tone::Asinh, sk::Tone::Ghs] {
+        let cfg = sk::StackConfig { tone, auto_brightness: false, ..Default::default() };
+        let f = sk::post::finish(&faint, &wt, &cfg, None);
+        let (lin, img_) = (f.linear.at(50, 50)[1], f.image.at(50, 50)[1]);
+        assert!(img_ > 5.0 * lin && img_ <= 1.0, "{tone:?}: {lin} → {img_}");
+        assert!((lin - faint.at(50, 50)[1]).abs() < 1e-6);
+    }
+    // What the file holds: by format, or as chosen.
+    let mut cfg = sk::StackConfig::default();
+    assert!(cfg.saves_linear("a.fits") && !cfg.saves_linear("a.tif"));
+    cfg.save_linear = Some(false);
+    assert!(!cfg.saves_linear("a.fits"));
+    cfg.save_linear = Some(true);
+    assert!(cfg.saves_linear("a.jpg"));
+}
+
+#[test]
+fn wavelet_noise_reduction_keeps_stars_and_brightness() {
+    // A gradient with stars and noise that is 3× stronger in the dark half (as
+    // after a stretch), plus colour speckles.
+    let (h, w) = (200usize, 300usize);
+    let mut rng = ChaCha8Rng::seed_from_u64(7);
+    let mut n = || -> f32 { (0..6).map(|_| rng.gen::<f32>()).sum::<f32>() - 3.0 };
+    let clean = |y: usize, x: usize| -> f32 {
+        let mut v = 0.2 + 0.4 * x as f32 / w as f32;
+        for k in 0..30 {
+            let (sy, sx) = (10.0 + ((k * 53) % 180) as f32, 10.0 + ((k * 89) % 280) as f32);
+            v += 0.5 * (-((y as f32 - sy).powi(2) + (x as f32 - sx).powi(2)) / 2.0).exp();
+        }
+        v
+    };
+    let mut img = Img::new(h, w);
+    for y in 0..h {
+        for x in 0..w {
+            let s = if x < w / 2 { 0.03 } else { 0.01 };
+            let (l, cr, cb) = (clean(y, x) + s * n(), 0.03 * n(), 0.03 * n());
+            img.px[y * w + x] = [l + cr, l - 0.5 * (cr + cb), l + cb];
+        }
+    }
+    let flat = |im: &Img, x0: usize| {
+        // spread of the luminance minus the clean value, away from stars
+        let v: Vec<f32> = (0..h).flat_map(|y| (x0..x0 + 60).map(move |x| (y, x))).filter(|&(y, x)| (clean(y, x) - (0.2 + 0.4 * x as f32 / w as f32)) < 0.01).map(|(y, x)| luminance(im.at(y, x)) - clean(y, x)).collect();
+        let m = v.iter().sum::<f32>() / v.len() as f32;
+        (v.iter().map(|a| (a - m).powi(2)).sum::<f32>() / v.len() as f32).sqrt()
+    };
+    let out = panostitch::denoise::reduce_noise(&img, 0.7);
+    for x0 in [20, 200] {
+        let (a, b) = (flat(&img, x0), flat(&out, x0));
+        assert!(b < 0.5 * a, "noise at x {x0}: {a} → {b}");
+    }
+    // Stars keep most of their peak.
+    let (sy, sx) = (10usize, 10usize);
+    let peak = |im: &Img| luminance(im.at(sy, sx)) - (0.2 + 0.4 * sx as f32 / w as f32);
+    assert!(peak(&out) > 0.75 * (clean(sy, sx) - (0.2 + 0.4 * sx as f32 / w as f32)), "star {} → {}", peak(&img), peak(&out));
+    // Colour noise: the colour speckles shrink, the luminance stays exactly.
+    let cn = panostitch::denoise::reduce_color_noise(&img, 0.7);
+    let chroma = |im: &Img| { let v: Vec<f32> = im.px.iter().map(|c| c[0] - luminance(*c)).collect(); let m = v.iter().sum::<f32>() / v.len() as f32; (v.iter().map(|a| (a - m).powi(2)).sum::<f32>() / v.len() as f32).sqrt() };
+    assert!(chroma(&cn) < 0.4 * chroma(&img), "colour noise {} → {}", chroma(&img), chroma(&cn));
+    assert!(img.px.iter().zip(&cn.px).all(|(a, b)| (luminance(*a) - luminance(*b)).abs() < 1e-4), "luminance changed");
+    // Nothing at strength 0.
+    assert_eq!(panostitch::denoise::reduce_noise(&img, 0.0).px, img.px);
+}
