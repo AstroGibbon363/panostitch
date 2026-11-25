@@ -67,7 +67,7 @@ struct Preset {
 
 /// Which part of the crop frame a drag moves.
 #[derive(Clone, Copy, PartialEq)]
-enum CropGrip {
+pub(crate) enum CropGrip {
     New,
     Move,
     /// Left, top, right, bottom edges.
@@ -537,7 +537,7 @@ impl FinishTab {
         let (mem, _) = crate::sys::free_cached(&dir);
         let avail = mem - crate::sys::memory_reserve();
         if need > avail {
-            self.status = crate::trf!("Not enough free memory to finish the full image: needs ≈ {}, {} free. Close other programs, or crop the image first.", gb(need), gb(mem.max(0.0)));
+            self.status = crate::trf!("Not enough free RAM to finish the full image: needs ≈ {}, {} available (free disk space does not help). Close other programs, or crop the image more.", gb(need), gb(avail.max(0.0)));
             return;
         }
         self.saving = true;
@@ -563,8 +563,11 @@ impl FinishTab {
     }
 
     /// Working memory for saving the full image.
+    /// Memory the save needs on top of the open image. Turning and cropping come
+    /// first, so every later step works on the cropped size.
     fn save_memory(&self, full: &Img) -> f64 {
-        (full.w * full.h) as f64 * SAVE_BYTES_PER_PX * if self.mask.local.used() { 1.5 } else { 1.0 }
+        let (w, h) = finish::cropped_size(full.w, full.h, &self.p);
+        (w * h) as f64 * SAVE_BYTES_PER_PX * if self.mask.local.used() { 1.5 } else { 1.0 }
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -982,8 +985,9 @@ impl FinishTab {
         let need = self.save_memory(&full);
         let dir = std::path::Path::new(&self.out).parent().map(|d| d.to_path_buf()).unwrap_or_default();
         let (mem, _) = crate::sys::free_cached(&dir);
-        let txt = crate::trf!("Saving needs ≈ {} memory ({} free).", gb(need), gb(mem.max(0.0)));
-        if need > mem - crate::sys::memory_reserve() {
+        let avail = mem - crate::sys::memory_reserve();
+        let txt = crate::trf!("Saving needs ≈ {} of RAM ({} available).", gb(need), gb(avail.max(0.0)));
+        if need > avail {
             ui.colored_label(Color32::from_rgb(230, 150, 30), crate::trf!("⚠ {} Close other programs or crop first.", txt));
         } else {
             ui.label(egui::RichText::new(txt).weak().size(12.0));

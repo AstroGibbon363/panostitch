@@ -396,6 +396,8 @@ existiert).
 | **Verschiebungen zurücksetzen** | Macht alle manuellen Verschiebungen rückgängig. |
 | **Automatisch beschneiden** | Beschneidet das Panorama auf das größte Rechteck, das vollständig von Bildern bedeckt ist, sodass die schwarzen, ausgefransten Ränder verschwinden. Die Vorschau zeigt dann das beschnittene Ergebnis, und **Panorama speichern…** speichert es. Die Statuszeile nennt, wie viel vom Panorama erhalten bleibt. Richten Sie zuerst den Horizont aus (Pitch, Roll); von einem gebogenen Panorama bleibt nur ein schmaler Streifen. |
 | **Zuschnitt aufheben** | Hebt den Beschnitt auf. Der Beschnitt wird auch automatisch aufgehoben, wenn Sie etwas ändern, das die Bilder verschiebt (Projektion, Brennweite, Yaw, Pitch, Roll, Verschiebungen, Zuordnung). |
+| **✂ Zuschnitt** (über der Ansicht) | Den Teil des Panoramas markieren, der bleibt: einen Rahmen aufziehen, an Kanten oder Ecken anpassen, innen ziehen zum Verschieben, dann **✂ Zuschnitt: fertig** (Esc bricht ab). Nur dieser Teil wird berechnet und gespeichert: ein großes Panorama braucht weniger Speicher, und zum bloßen Zuschneiden ist der Tab Nachbearbeitung nicht nötig. Aufheben wie beim automatischen Zuschnitt; er entfällt, wenn sich die Geometrie ändert. |
+| **⬇ Speichern und nachbearbeiten…** (über der Ansicht) | Speichert das Panorama und öffnet es dann im Tab Nachbearbeitung. |
 | **Nudge ← ↑ ↓ →** | Verschiebt das aktuelle Bild um ein Vorschau-Pixel (siehe unten). |
 
 In der Ansicht **Panorama** wird der Umriss jedes Bildes gezeichnet und

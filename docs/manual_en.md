@@ -366,6 +366,8 @@ These controls update the preview immediately (once a preview exists).
 | **Reset moves** | Undoes all manual moves. |
 | **Auto crop** | Cuts the panorama to the largest rectangle that is completely covered by images, so the black, ragged edges disappear. The preview then shows the cropped result, and **Save panorama…** saves it. The status line says how much of the panorama is kept. Straighten the horizon (Pitch, Roll) first; a bent panorama leaves only a thin rectangle. |
 | **Uncrop** | Removes the crop. The crop is also removed automatically when you change anything that moves the images (projection, focal, yaw, pitch, roll, moves, matching). |
+| **✂ Crop** (above the view) | Draw the part to keep on the panorama: drag a frame, drag its edges or corners to adjust it, drag inside it to move it, and click **✂ Crop: done** (Esc cancels). Only that part is rendered and saved, so a big panorama needs less memory and you don't need the Post-processing tab just to crop. **Uncrop** removes it; like Auto crop, it is removed when the geometry changes. |
+| **⬇ Save & post-process…** (above the view) | Saves the panorama and then opens it in the Post-processing tab. |
 | **Nudge ← ↑ ↓ →** | Moves the current image by one preview pixel (see below). |
 
 In the **Panorama** view, every image's outline is drawn and numbered:

@@ -385,6 +385,8 @@ Te elementy od razu aktualizują podgląd (gdy podgląd już istnieje).
 | **Resetuj przesunięcia** | Cofa wszystkie ręczne przesunięcia. |
 | **Automatyczne kadrowanie** | Przycina panoramę do największego prostokąta całkowicie pokrytego zdjęciami, więc znikają czarne, postrzępione brzegi. Podgląd pokazuje wtedy przycięty wynik, a **⬇ Zapisz panoramę…** go zapisuje. Pasek stanu podaje, ile panoramy zostaje. Najpierw wyprostuj horyzont (pochylenie, przechył); wygięta panorama zostawia tylko wąski prostokąt. |
 | **Usuń kadrowanie** | Usuwa kadrowanie. Kadrowanie znika też samo, gdy zmienisz coś, co przesuwa zdjęcia (projekcja, ogniskowa, odchylenie, pochylenie, przechył, przesunięcia, dopasowanie). |
+| **✂ Kadruj** (nad widokiem) | Zaznacz część panoramy, która zostaje: przeciągnij ramkę, dopasuj ją krawędziami lub rogami, przeciągnij wewnątrz, by ją przesunąć, i kliknij **✂ Kadrowanie: gotowe** (Esc anuluje). Liczona i zapisywana jest tylko ta część: duża panorama potrzebuje mniej pamięci, a do samego kadrowania nie trzeba karty Obróbka. Usuwa się je jak automatyczne kadrowanie; znika przy zmianie geometrii. |
+| **⬇ Zapisz i obrób…** (nad widokiem) | Zapisuje panoramę, a potem otwiera ją w karcie Obróbka. |
 | **Przesuń zaznaczone ← ↑ ↓ →** | Przesuwa bieżące zdjęcie o jeden piksel podglądu (zob. niżej). |
 
 W widoku **Panorama** rysowany i numerowany jest obrys każdego zdjęcia:

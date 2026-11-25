@@ -389,6 +389,8 @@ Estos controles actualizan la vista previa al instante (una vez que existe).
 | **Restablecer desplazamientos** | Deshace todos los desplazamientos manuales. |
 | **Recorte automático** | Recorta la panorámica al mayor rectángulo cubierto por completo por imágenes, así desaparecen los bordes negros e irregulares. La vista previa muestra entonces el resultado recortado, y **⬇ Guardar panorámica…** lo guarda. La línea de estado dice cuánto se conserva. Enderece antes el horizonte (cabeceo, alabeo); una panorámica curvada deja solo un rectángulo estrecho. |
 | **Quitar recorte** | Quita el recorte. El recorte también se quita solo cuando cambia algo que mueve las imágenes (proyección, focal, guiñada, cabeceo, alabeo, desplazamientos, emparejado). |
+| **✂ Recortar** (sobre la vista) | Marque la parte de la panorámica que se queda: arrastre un marco, ajústelo por sus bordes o esquinas, arrastre dentro para moverlo y pulse **✂ Recorte: hecho** (Esc cancela). Solo esa parte se calcula y se guarda: una panorámica grande necesita menos memoria y no hace falta la pestaña Posprocesado solo para recortar. Se quita como el recorte automático y desaparece al cambiar la geometría. |
+| **⬇ Guardar y posprocesar…** (sobre la vista) | Guarda la panorámica y la abre después en la pestaña Posprocesado. |
 | **Mover la seleccionada ← ↑ ↓ →** | Mueve la imagen actual un píxel de vista previa (ver abajo). |
 
 En la vista **Panorámica** se dibuja y numera el contorno de cada imagen:

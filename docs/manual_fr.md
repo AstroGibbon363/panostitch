@@ -397,6 +397,8 @@ Ces commandes mettent l'aperçu à jour aussitôt (dès qu'un aperçu existe).
 | **Réinitialiser les décalages** | Annule tous les déplacements manuels. |
 | **Recadrage automatique** | Coupe le panorama au plus grand rectangle entièrement couvert d'images, les bords noirs et irréguliers disparaissent. L'aperçu montre alors le résultat recadré, et **⬇ Enregistrer le panorama…** l'enregistre. La ligne d'état indique quelle part est gardée. Redressez d'abord l'horizon (tangage, roulis) ; un panorama courbé ne laisse qu'un rectangle étroit. |
 | **Annuler le recadrage** | Retire le recadrage. Il est aussi retiré automatiquement quand vous changez quoi que ce soit qui déplace les images (projection, focale, lacet, tangage, roulis, déplacements, appariement). |
+| **✂ Recadrer** (au-dessus de la vue) | Délimitez la partie du panorama à garder : tracez un cadre, ajustez-le par ses bords ou ses coins, faites-le glisser de l'intérieur pour le déplacer, puis **✂ Recadrage : terminé** (Échap annule). Seule cette partie est calculée et enregistrée : un grand panorama demande moins de mémoire, et l'onglet Post-traitement n'est pas nécessaire pour un simple recadrage. Il s'annule comme le recadrage automatique et disparaît quand la géométrie change. |
+| **⬇ Enregistrer et post-traiter…** (au-dessus de la vue) | Enregistre le panorama, puis l'ouvre dans l'onglet Post-traitement. |
 | **Décaler la sélection ← ↑ ↓ →** | Déplace l'image courante d'un pixel d'aperçu (voir plus bas). |
 
 Dans la vue **Panorama**, le contour de chaque image est dessiné et numéroté :

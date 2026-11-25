@@ -279,9 +279,23 @@ impl SaveNeeds {
     }
 }
 
+/// The crop frame being drawn on the panorama view, in output coordinates
+/// (u0, u1, v0, v1), with the crop before and the drag going on (grip, frame at
+/// its start, start point).
+#[derive(Clone)]
+struct CropEdit {
+    frame: (f64, f64, f64, f64),
+    before: Option<(f64, f64, f64, f64)>,
+    drag: Option<(super::finish::CropGrip, (f64, f64, f64, f64), (f64, f64))>,
+}
+
 pub struct StitchTab {
     /// Saved panoramas handed to the Post-processing tab.
     pub to_finish: Vec<String>,
+    /// Hand the panorama being saved to the Post-processing tab when it is done.
+    post_after: bool,
+    /// The crop frame being drawn on the panorama view.
+    crop_edit: Option<CropEdit>,
     /// The panorama being saved, and the last one saved.
     saving_to: Option<String>,
     last_pano: Option<String>,
@@ -442,7 +456,7 @@ fn describe(a: &Snap, b: &Snap) -> String {
         }
     }
     if a.crop != b.crop {
-        return if b.crop.is_none() { tr("uncrop") } else { tr("auto crop") }.into();
+        return if b.crop.is_none() { tr("uncrop") } else { tr("crop") }.into();
     }
     if a.ref_choice != b.ref_choice {
         return tr("reference image").into();
@@ -457,7 +471,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: tr("Add images to begin (any order).").into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], post_after: false, crop_edit: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -1007,12 +1021,14 @@ impl StitchTab {
         let p = self.p.clone();
         let outlines: Vec<Vec<Pt>> = (0..self.items.len()).map(|i| if vis.contains(&i) { outline(&g[i], self.items[i].img.h, self.items[i].img.w, p.proj, f, c, lens, 24) } else { vec![] }).collect();
         let full = bounds(&vis.iter().map(|&i| outlines[i].clone()).collect::<Vec<_>>());
-        let box_ = self.crop.unwrap_or(full);
+        // While the crop frame is drawn, the whole panorama is shown.
+        let crop = if self.crop_edit.is_some() { None } else { self.crop };
+        let box_ = crop.unwrap_or(full);
         let side = (box_.1 - box_.0).max(box_.3 - box_.2) + 1.0;
         let scale = (p.prev_px as f64 / side).min(1.0);
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let sky = self.sky_job(&vis, &g);
-        let uncropped = self.crop.is_none();
+        let uncropped = crop.is_none();
         self.spawn(tr("Rendering preview…"), move |tx| {
             let sky = sky.map(|j| j.finish(tx));
             let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
@@ -1148,6 +1164,7 @@ impl StitchTab {
         if self.busy {
             return;
         }
+        self.crop_edit = None;
         // A change still settling counts first.
         let fp = self.fingerprint();
         if self.committed.as_ref().is_some_and(|c| c.0 != fp) {
@@ -1575,6 +1592,7 @@ impl StitchTab {
                     if self.job_is_save {
                         self.report = Some(self.save_report(Err(&e)));
                         self.saving_to = None;
+                        self.post_after = false;
                     }
                     self.status = crate::trf!("Error: {}", e);
                     self.busy = false;
@@ -1586,6 +1604,9 @@ impl StitchTab {
                         if let Some(p) = self.saving_to.clone() {
                             if s.starts_with(&format!("Saved {p} ")) {
                                 self.report = Some(self.save_report(Ok(&s)));
+                                if std::mem::take(&mut self.post_after) {
+                                    self.to_finish.push(p.clone());
+                                }
                                 self.last_pano = Some(p);
                             }
                         }
@@ -2212,6 +2233,10 @@ impl StitchTab {
     }
 
     fn ask_save_pano(&mut self) {
+        self.post_after = false;
+        if self.crop_edit.is_some() {
+            self.toggle_crop();
+        }
         if self.layout.is_none() {
             self.status = tr("Match the images first (Run all steps).").into();
             return;
@@ -2265,6 +2290,138 @@ impl StitchTab {
         self.request_preview();
     }
 
+    /// Start drawing the crop frame on the panorama, or apply it.
+    fn toggle_crop(&mut self) {
+        let full = self.pano.as_ref().map(|p| bounds(&p.outlines)).filter(|b| b.1 > b.0 && b.3 > b.2);
+        let Some(full) = full else {
+            self.crop_edit = None;
+            self.status = tr("Preview the panorama first.").into();
+            return;
+        };
+        if let Some(e) = self.crop_edit.take() {
+            let f = e.frame;
+            let f = (f.0.max(full.0).round(), f.1.min(full.1).round(), f.2.max(full.2).round(), f.3.min(full.3).round());
+            if f.1 - f.0 < 2.0 || f.3 - f.2 < 2.0 {
+                self.crop = e.before;
+                self.status = tr("The frame is too small: the crop is unchanged.").into();
+            } else if f.0 <= full.0 + 0.5 && f.1 >= full.1 - 0.5 && f.2 <= full.2 + 0.5 && f.3 >= full.3 - 0.5 {
+                self.crop = None;
+                self.status = tr("The frame covers the whole panorama: not cropped.").into();
+            } else {
+                let area = (f.1 - f.0 + 1.0) * (f.3 - f.2 + 1.0) / ((full.1 - full.0 + 1.0) * (full.3 - full.2 + 1.0));
+                self.crop = Some(f);
+                self.note_after = Some(crate::trf!("Cropped to {}×{} px ({} % of the panorama). The crop is used when saving; it is removed when you change the geometry.", f.1 - f.0 + 1.0, f.3 - f.2 + 1.0, (100.0 * area).round()));
+            }
+            if self.crop.is_some() || e.before.is_some() {
+                self.request_preview();
+            }
+        } else {
+            self.crop_edit = Some(CropEdit { frame: self.crop.unwrap_or(full), before: self.crop, drag: None });
+            self.view = ViewKind::Pano;
+            self.drag = None;
+            if self.crop.is_some() {
+                self.request_preview();
+            }
+        }
+        self.vstate.fit = true;
+    }
+
+    /// Drawing the crop frame on the shown panorama (`full`: its whole extent):
+    /// draw, resize or move the frame; Esc cancels.
+    fn crop_input(&mut self, ui: &egui::Ui, s: &super::Shown, full: (f64, f64, f64, f64)) {
+        use super::finish::CropGrip;
+        if !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if let Some(e) = self.crop_edit.take() {
+                self.crop = e.before;
+                if e.before.is_some() {
+                    self.request_preview();
+                }
+                self.vstate.fit = true;
+                self.status = tr("Crop cancelled.").into();
+            }
+            return;
+        }
+        let Some(e) = self.crop_edit.as_mut() else { return };
+        let to_uv = |p: Pos2| {
+            let (x, y) = s.to_image(p);
+            (x.clamp(full.0, full.1), y.clamp(full.2, full.3))
+        };
+        let screen = |f: &(f64, f64, f64, f64)| egui::Rect::from_min_max(s.to_screen(f.0, f.2), s.to_screen(f.1, f.3));
+        let r = screen(&e.frame);
+        let whole = e.frame == full;
+        let grip_at = |p: Pos2| -> CropGrip {
+            let near = 8.0;
+            let inside_y = p.y > r.top() - near && p.y < r.bottom() + near;
+            let inside_x = p.x > r.left() - near && p.x < r.right() + near;
+            let g = [(p.x - r.left()).abs() < near && inside_y, (p.y - r.top()).abs() < near && inside_x, (p.x - r.right()).abs() < near && inside_y, (p.y - r.bottom()).abs() < near && inside_x];
+            if g.iter().any(|v| *v) {
+                CropGrip::Edges(g)
+            } else if r.contains(p) && !whole {
+                CropGrip::Move
+            } else {
+                CropGrip::New
+            }
+        };
+        if let Some(p) = s.resp.hover_pos() {
+            let icon = match e.drag.map(|d| d.0).unwrap_or_else(|| grip_at(p)) {
+                CropGrip::Edges([l, t, rr, b]) if (l && t) || (rr && b) => egui::CursorIcon::ResizeNwSe,
+                CropGrip::Edges([l, t, rr, b]) if (rr && t) || (l && b) => egui::CursorIcon::ResizeNeSw,
+                CropGrip::Edges([l, _, rr, _]) if l || rr => egui::CursorIcon::ResizeHorizontal,
+                CropGrip::Edges(_) => egui::CursorIcon::ResizeVertical,
+                CropGrip::Move => egui::CursorIcon::Grab,
+                CropGrip::New => egui::CursorIcon::Crosshair,
+            };
+            ui.ctx().set_cursor_icon(icon);
+        }
+        if s.resp.drag_started_by(egui::PointerButton::Primary) {
+            if let Some(p) = s.resp.interact_pointer_pos() {
+                e.drag = Some((grip_at(p), e.frame, to_uv(p)));
+            }
+        }
+        if let (Some((grip, f0, a)), Some(p)) = (e.drag, s.resp.interact_pointer_pos()) {
+            let b = to_uv(p);
+            let min = (0.01 * (full.1 - full.0).max(full.3 - full.2)).max(4.0);
+            let f = match grip {
+                CropGrip::New => (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1)),
+                CropGrip::Move => {
+                    let dx = (b.0 - a.0).clamp(full.0 - f0.0, full.1 - f0.1);
+                    let dy = (b.1 - a.1).clamp(full.2 - f0.2, full.3 - f0.3);
+                    (f0.0 + dx, f0.1 + dx, f0.2 + dy, f0.3 + dy)
+                }
+                CropGrip::Edges(g) => (
+                    if g[0] { b.0.min(f0.1 - min) } else { f0.0 },
+                    if g[2] { b.0.max(f0.0 + min) } else { f0.1 },
+                    if g[1] { b.1.min(f0.3 - min) } else { f0.2 },
+                    if g[3] { b.1.max(f0.2 + min) } else { f0.3 },
+                ),
+            };
+            if f.1 - f.0 >= min && f.3 - f.2 >= min {
+                e.frame = (f.0.max(full.0), f.1.min(full.1), f.2.max(full.2), f.3.min(full.3));
+            }
+        }
+        if s.resp.drag_stopped() {
+            e.drag = None;
+        }
+        // The frame, its size, and everything outside it dimmed.
+        let f = e.frame;
+        let r = screen(&f);
+        let all = screen(&full);
+        let p = ui.painter().with_clip_rect(s.rect);
+        let dim = Color32::from_black_alpha(140);
+        for part in [
+            egui::Rect::from_min_max(all.min, Pos2::new(all.max.x, r.top())),
+            egui::Rect::from_min_max(Pos2::new(all.min.x, r.bottom()), all.max),
+            egui::Rect::from_min_max(Pos2::new(all.min.x, r.top()), Pos2::new(r.left(), r.bottom())),
+            egui::Rect::from_min_max(Pos2::new(r.right(), r.top()), Pos2::new(all.max.x, r.bottom())),
+        ] {
+            if part.is_positive() {
+                p.rect_filled(part, 0.0, dim);
+            }
+        }
+        p.rect_stroke(r, 0.0, Stroke::new(2.0, Color32::from_rgb(255, 210, 0)), egui::StrokeKind::Middle);
+        p.text(r.left_top() + egui::vec2(6.0, 6.0), egui::Align2::LEFT_TOP, format!("{:.0} × {:.0} px", f.1 - f.0 + 1.0, f.3 - f.2 + 1.0), egui::FontId::proportional(16.0), Color32::from_rgb(255, 210, 0));
+    }
+
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal_wrapped(|ui| {
             for (k, l) in [(ViewKind::Image, tr("Image + keypoints")), (ViewKind::Pair, tr("Pair matches")), (ViewKind::Pano, tr("Panorama"))] {
@@ -2286,6 +2443,14 @@ impl StitchTab {
                 self.vstate.fit = true;
             }
             ui.checkbox(&mut self.overlays, tr("overlays"));
+            let editing = self.crop_edit.is_some();
+            if ui.selectable_label(editing, if editing { tr("✂ Crop: done") } else { tr("✂ Crop") }).on_hover_text(tr("Draw the part of the panorama to keep: drag a frame, drag its edges or corners to adjust it, drag inside it to move it. Click again when done (Esc cancels). Only that part is rendered and saved, so a big panorama needs less memory.")).clicked() {
+                self.toggle_crop();
+            }
+            if ui.button(tr("⬇ Save & post-process…")).on_hover_text(tr("Save the panorama, then open it in the Post-processing tab")).clicked() {
+                self.ask_save_pano();
+                self.post_after = self.dialog.as_ref().is_some_and(|d| d.1 == "save");
+            }
             if ui.add_enabled(!self.undo.is_empty(), egui::Button::new(tr("↶ Undo"))).on_hover_text(format!("{} (Ctrl+Z)", self.undo.last().map(|u| u.1.clone()).unwrap_or_default())).clicked() {
                 self.step(false);
             }
@@ -2431,7 +2596,7 @@ impl StitchTab {
         }
         // Image coordinates of this view = output (u, v) coordinates.
         let mut vs = self.vstate;
-        let s = image_view(ui, &mut vs, (u1 - u0, v1 - v0), &[], !ui.input(|i| i.modifiers.ctrl));
+        let s = image_view(ui, &mut vs, (u1 - u0, v1 - v0), &[], !ui.input(|i| i.modifiers.ctrl) && self.crop_edit.is_none());
         // image_view assumes the box starts at 0.5: shift the view so (u, v) are used directly.
         if vs.fit != self.vstate.fit || self.vstate.fit {
             vs.center = egui::vec2(((u0 + u1) / 2.0) as f32, ((v0 + v1) / 2.0) as f32);
@@ -2504,6 +2669,10 @@ impl StitchTab {
                     p.text(s.to_screen(m[0], m[1]), egui::Align2::CENTER_CENTER, if i == refi { crate::trf!("{} (ref)", i + 1) } else { (i + 1).to_string() }, egui::FontId::proportional(22.0), col);
                 }
             }
+        }
+        if self.crop_edit.is_some() {
+            self.crop_input(ui, &s, bounds(&outlines));
+            return;
         }
         // Click selects; Ctrl + drag moves an image (with the images attached beyond it).
         let pick = |x: f64, y: f64| -> Option<usize> {

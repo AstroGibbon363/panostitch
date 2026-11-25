@@ -375,6 +375,8 @@ Tyto prvky mění náhled okamžitě (jakmile náhled existuje).
 | **Vynulovat posuny** | Zruší všechna ruční posunutí. |
 | **Automatický ořez** | Ořízne panoramu na největší obdélník, který je celý pokrytý snímky, takže zmizí černé zubaté okraje. Náhled pak ukazuje oříznutý výsledek a **Uložit panorama…** ho uloží. Stavový řádek uvede, kolik panoramy zůstalo. Nejdřív narovnejte horizont (Pitch, Roll); z prohnuté panoramy zbude jen úzký pruh. |
 | **Zrušit ořez** | Zruší ořez. Ořez se zruší i automaticky, když změníte cokoli, co snímky posune (projekci, ohnisko, yaw, pitch, roll, ruční posuny, párování). |
+| **✂ Ořez** (nad náhledem) | Vyznačte na panoramatu část, která zůstane: natáhněte rámeček, jeho hrany a rohy ho upraví, tažením uvnitř ho posunete. Potvrďte **✂ Ořez: hotovo** (Esc zruší). Vykreslí a uloží se jen tato část, takže velké panorama potřebuje méně paměti a kvůli samotnému ořezu nemusíte do záložky Dodatečné úpravy. **Zrušit ořez** ho odstraní; stejně jako automatický ořez zmizí při změně geometrie. |
+| **⬇ Uložit a upravit…** (nad náhledem) | Uloží panorama a pak ho otevře v záložce Dodatečné úpravy. |
 | **Nudge ← ↑ ↓ →** | Posune aktuální snímek o jeden pixel náhledu (viz níže). |
 
 V pohledu **Panorama** je obrys každého snímku vykreslen a očíslován:
