@@ -6,12 +6,33 @@
 - **Control points by hand**, as in PTGui: **✚ Control points…** opens two images side by side, each with its own zoom; click the same point in both (clicks can snap to the centre of the nearest star). Two points are enough; lines show how well each point fits, and a cross where the partner of a new point should be. The pair replaces any other result for the two images, is kept by a new matching run, is never rejected by the refinement, and is saved in the project. For pairs the matching missed or got wrong (low-contrast sky, the grass under the tripod).
 - **Source masks:** **✐ Source masks** paints, on the panorama, where a chosen image must be used (a tree or a person that moved, a car, a ghost). Shift+click picks the image under the cursor (again: the next one there); left drag paints, right drag erases. Any number of images can have a mask; the masks are shown tinted and numbered, have a soft edge, belong to their image (they stay put when the projection or crop changes), are undoable and saved in the project. All blend modes respect them.
 
+## v0.4.0
+
+Released 2026-11-25. New since v0.3.2: the Post-processing and Timelapse tabs, night panoramas up to the zenith, star stacking with RBF background extraction and new stretches, wavelet noise reduction, six languages and in-app help.
+
+### Star stacking
+- **RBF background extraction** for frames that are all sky (deep sky): a flexible surface through a grid of sky samples that follows several glows or a bright corner where a polynomial cannot. Stars, galaxies, nebulae, the Milky Way and their surroundings are left out of the samples automatically, so a galaxy keeps its faint halo. **Samples per line**, **Grid tolerance** and **Smoothing** as in Siril; **Show the samples** marks the used and left-out ones on the result. Landscapes keep the polynomial.
+- **Stretches:** the stretch is now called **MTF stretch** (automatic stretch kept), joined by **Arcsinh** (keeps star colours) and **GHS**, with their black point (and symmetry point) measured on the sky background.
+- **Colour calibration** has two modes: **Auto** (as before) and **Manual**: drag a background area and a white reference on the result, then temperature and tint.
+- **Save linear or stretched:** *Linear (for processing)* / *Stretched (for viewing)*, whatever the format (until chosen: FITS / XISF linear, others stretched). The old button that switched all processing off is gone.
+
+### Noise reduction
+- **Wavelet noise reduction** in place of the old smoothing: the image is split into layers of detail and the small wiggles of noise are shrunk in each, keeping stars and edges. The noise is measured area by area, so it works on linear and stretched images alike. **Colour noise** uses it on the colour layers only (the brightness stays exactly), in the Post-processing tab and in star stacking.
+
 ### All tabs
-- **Display modes as in Siril**, view only: Linear, Logarithm, Square root, Squared, Asinh, AutoStretch, Histogram equalisation, with **Low** and **High** cut-offs (applied exactly, so a narrow range of faint linear data is not posterised). In the Panorama tab and the Star stacking result (also *As processed*, the tab's own stretch) and in Post-processing.
+- **Linear or stretched** when saving the panorama and in Post-processing too (Post-processing saves only the linear steps then: turn and crop, background, colour calibration, white balance), each explained where it is chosen.
 
-## v0.4.0-beta1
+### Panorama tab
+- **Crop in the Panorama tab:** **✂ Crop** above the view draws a frame on the panorama (drag, adjust edges and corners, move). Only that part is rendered and saved, so a big panorama needs less memory and no trip to Post-processing just to crop.
+- **⬇ Save & post-process…** above the view saves the panorama and opens it in the Post-processing tab.
+- **Post-processing memory check:** the memory needed to save was worked out for the whole image even when it was cropped, so a crop never got past "not enough memory". It now counts the cropped size, and the message says it means RAM (free disk space does not help).
+- **Display modes as in Siril** (view only): Linear, Logarithm, Square root, Squared, Asinh, AutoStretch, Histogram equalisation, with **Low** and **High** cut-offs (applied exactly, so a narrow range of faint linear data is not posterised). In the Panorama tab and the Star stacking result (also *As processed*, the tab's own stretch) and in Post-processing.
+- Memory: the undo history shares the matched points of the pairs instead of copying them at every step.
 
-Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release.
+### Stability (star stacking)
+- The frame report and *Save result…* no longer copy the whole stacking result (about 1.2 GB for 24 MP) at every redraw or save.
+- *Save result…* reports correctly whether it saved linear or stretched data, and a crash while saving is reported instead of hanging.
+- Histograms are counted once per image instead of at every redraw.
 
 ### Post-processing tab (new)
 - The last steps on a stacked or stitched image in one place: turn and crop (any angle, empty corners cut away, crop to 3:2 / 16:9 / 1:1 …), stretch, white balance, light, curves, colour, noise, star reduction, sharpening, and saving at a chosen size (e.g. 2048 px for forums) with JPEG quality.
@@ -53,8 +74,6 @@ Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 
 - **Help** (F1 or **? Help**): the manual inside the program, in the window's language, with contents, search, links between chapters and Back; F1 opens the chapter of the tab on show.
 
 ### Comfort
-- **Crop in the Panorama tab:** **✂ Crop** above the view draws a frame on the panorama (drag, adjust edges and corners, move). Only that part is rendered and saved, so a big panorama needs less memory and no trip to Post-processing just to crop.
-- **⬇ Save & post-process…** above the view saves the panorama and opens it in the Post-processing tab.
 - **Drag and drop** images or folders onto the window (to the tab on show); dropped project files open in their tab.
 - **Recent projects** in the top bar, for all three kinds of project.
 - The tab, the stacking settings, the timelapse's video settings and the stitcher's RAW settings are remembered for the next session (not files, masks or looks). File dialogs start in the folder used last.
@@ -66,7 +85,6 @@ Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 
 - **Alignment:** a frame whose star match was degenerate (the same few stars matched over and over) could be accepted with a folded, mirrored transform and smeared across the whole stack, tinting it (e.g. red from car lights). Alignments that flip the frame or scale it beyond 0.6–1.6× are now refused, and the frame is reported as failed.
 - **Post-processing white balance on stacks:** with the automatic stretch measuring each colour on its own (the default for linear data), temperature, tint and a sampled grey were measured away and had almost no effect. They now act on top of the stretch.
 - Sorting star distances and fit errors cannot crash on an invalid number (NaN) any more.
-- **Post-processing memory check:** the memory needed to save was worked out for the whole image even when it was cropped, so a crop never got past "not enough memory". It now counts the cropped size, and the message says it means RAM (free disk space does not help).
 
 ### Reports and times
 - After stacking and after saving a panorama, a short report: photos / frames used, time taken, result size, file and its size, or what went wrong.

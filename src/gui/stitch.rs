@@ -52,10 +52,11 @@ pub type FeatKey = (usize, usize, u64, u64);
 pub struct PairRes {
     pub i: usize,
     pub j: usize,
-    pub p1: Vec<Pt>,
-    pub p2: Vec<Pt>,
+    /// Matched points (shared: the undo history keeps many copies of the pairs).
+    pub p1: Arc<Vec<Pt>>,
+    pub p2: Arc<Vec<Pt>>,
     pub h: M3,
-    pub inl: Vec<usize>,
+    pub inl: Arc<Vec<usize>>,
     pub ok: bool,
     /// Shown in the Pair menu (accepted, or matched on purpose).
     pub listed: bool,
@@ -325,6 +326,8 @@ pub struct StitchTab {
     /// The display mode of the views (Siril-like), or as processed (the stretch panel).
     disp_view: crate::finish::ViewStretch,
     disp_processed: bool,
+    /// What the saved panorama holds: linear data or the stretched image (None: by the format).
+    save_linear: Option<bool>,
     /// Hand the panorama being saved to the Post-processing tab when it is done.
     post_after: bool,
     /// The crop frame being drawn on the panorama view.
@@ -513,7 +516,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: tr("Add images to begin (any order).").into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], disp_view: Default::default(), disp_processed: true, post_after: false, crop_edit: None, cp: None, mask_edit: None, mask_tex: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], disp_view: Default::default(), disp_processed: true, save_linear: None, post_after: false, crop_edit: None, cp: None, mask_edit: None, mask_tex: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -941,9 +944,9 @@ impl StitchTab {
                             let (ok, why) = accept_pair(p1.len(), inl.len(), &h, sizes[j].0, sizes[j].1, p.mininl, &inl.iter().map(|&k| p2[k]).collect::<Vec<_>>());
                             let err = inl.iter().map(|&k| reproj_err(&h, p2[k], p1[k])).sum::<f64>() / inl.len().max(1) as f64;
                             let msg = crate::trf!("{}: {} matches, {} inliers ({}%), mean error {} px{}", name, p1.len(), inl.len(), 100 * inl.len() / p1.len().max(1), format!("{err:.2}"), if ok { String::new() } else { format!("\nREJECTED: {why}.") });
-                            PairRes { i, j, p1, p2, h, inl, ok, listed: listed || ok, msg, stars: false, manual: false }
+                            PairRes { i, j, p1: Arc::new(p1), p2: Arc::new(p2), h, inl: Arc::new(inl), ok, listed: listed || ok, msg, stars: false, manual: false }
                         }
-                        Err(e) => PairRes { i, j, p1, p2, h: M3::zeros(), inl: vec![], ok: false, listed, msg: format!("{name} FAILED: {e}"), stars: false, manual: false },
+                        Err(e) => PairRes { i, j, p1: Arc::new(p1), p2: Arc::new(p2), h: M3::zeros(), inl: Arc::new(vec![]), ok: false, listed, msg: format!("{name} FAILED: {e}"), stars: false, manual: false },
                     }
                 })
                 .collect();
@@ -978,7 +981,7 @@ impl StitchTab {
                         let m = stars::match_stars(a, b, p.tol).ok()?;
                         let nm = m.p1.len();
                         let msg = crate::trf!("Pair {}–{} (stars): {} of {} stars in the overlap match, mean error {} px", i + 1, j + 1, nm, m.expected, format!("{:.2}", m.err));
-                        Some((k, PairRes { i, j, p1: m.p1, p2: m.p2, h: m.h, inl: (0..nm).collect(), ok: true, listed: true, msg, stars: true, manual: false }))
+                        Some((k, PairRes { i, j, p1: Arc::new(m.p1), p2: Arc::new(m.p2), h: m.h, inl: Arc::new((0..nm).collect()), ok: true, listed: true, msg, stars: true, manual: false }))
                     })
                     .collect();
                 for (k, pr) in found {
@@ -1423,10 +1426,10 @@ impl StitchTab {
             pairs.push(PairRes {
                 i: a as usize - 1,
                 j: b as usize - 1,
-                p1,
-                p2,
+                p1: Arc::new(p1),
+                p2: Arc::new(p2),
                 h,
-                inl,
+                inl: Arc::new(inl),
                 ok: r.get("accepted").and_then(|v| v.as_bool()).unwrap_or(false),
                 listed: r.get("listed").and_then(|v| v.as_bool()).unwrap_or(true),
                 msg: r.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
@@ -1530,6 +1533,7 @@ impl StitchTab {
         let (imgs, mut scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let sky = self.sky_job(&vis, &g);
         let force = self.force_job(&vis);
+        let linear = self.save_linear.unwrap_or_else(|| io::is_astro(&out));
         // Above the loaded resolution, read RAWs loaded at half size again at full size.
         let reread: Vec<(usize, String)> = vis.iter().enumerate().filter(|(_, &i)| self.items[i].native > 1.0 && scale > 1.0).map(|(k, &i)| (k, self.items[i].path.clone())).collect();
         if let Err(e) = crate::sys::check_writable(&out) {
@@ -1581,7 +1585,7 @@ impl StitchTab {
             let bands = hu.div_ceil(band_rows.min(hu).max(1));
             let mut done_rows = 0usize;
             let (wc, hc) = compose_bands(&refs, &gv, box_, &cp, &gains, &scales, &sizes, band_rows, &mut |y0, img| {
-                let img = if astro { img } else { look(&img, 1.0, &p) };
+                let img = if linear { img } else { look(&img, 1.0, &p) };
                 if img.w != wu || y0 + img.h > hu {
                     return Err(crate::trf!("internal error: band {}×{} at row {} of {}×{}", img.w, img.h, y0, wu, hu));
                 }
@@ -1606,7 +1610,7 @@ impl StitchTab {
                 OutBuf::U16(v) => io::save_rgb16(&out, wu, hu, v)?,
                 OutBuf::F32(img) => io::save_panorama(&out, &img)?,
             }
-            Ok(Msg::Done(crate::trf!("Saved {} ({}×{} px, {} images{}{}).", out, wu, hu, refs.len(), if cropped { tr(", cropped") } else { "" }, if astro { tr(", linear 32-bit") } else if p.stretched() { ", stretched as shown" } else { "" })))
+            Ok(Msg::Done(crate::trf!("Saved {} ({}×{} px, {} images{}{}).", out, wu, hu, refs.len(), if cropped { tr(", cropped") } else { "" }, if linear { if astro { tr(", linear 32-bit") } else { tr(", linear") } } else if p.stretched() { ", stretched as shown" } else { "" })))
         });
         if started {
             self.job_is_save = true;
@@ -2184,8 +2188,12 @@ impl StitchTab {
         });
         ui.separator();
         ui.heading(tr("5 · Stretch"));
-        if let Some(src) = self.hist_source() {
-            histogram(ui, &src, Some((self.p.black, self.p.mid, self.p.white)));
+        // The histogram of what is shown, without copying it (the Auto stretch button copies once).
+        let stretch = Some((self.p.black, self.p.mid, self.p.white));
+        if self.view == ViewKind::Pano && self.pano.is_some() {
+            histogram_of(ui, &self.pano.as_ref().unwrap().img, 1.0, stretch);
+        } else if let Some(it) = self.items.get(self.sel) {
+            histogram_of(ui, &it.disp, 2f32.powf(self.p.ev as f32), stretch);
         }
         egui::Grid::new("str").num_columns(2).show(ui, |ui| {
             slider(ui, tr("Black point"), &mut self.p.black, 0.0..=0.5, 0.0005);
@@ -2252,6 +2260,14 @@ impl StitchTab {
                 }
             }
         });
+        {
+            let auto = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
+            let ext = self.save_format.unwrap_or(auto);
+            let linear = self.save_linear.unwrap_or_else(|| matches!(ext, "fits" | "fit" | "xisf"));
+            if let Some(v) = super::save_kind_ui(ui, linear, ext) {
+                self.save_linear = Some(v);
+            }
+        }
         if ui.add(big(tr("⬇ Save panorama…"))).on_hover_text(tr("Ctrl+Shift+S")).clicked() {
             self.ask_save_pano();
         }
@@ -2376,7 +2392,7 @@ impl StitchTab {
     /// The editor on images `i` (left) and `j` (right), with the points placed by hand on them before.
     fn cp_for(&self, i: usize, j: usize, snap: bool) -> CpEdit {
         let q = self.pairs.iter().find(|q| q.manual && ((q.i, q.j) == (i, j) || (q.i, q.j) == (j, i)));
-        let pts = q.map(|q| q.p1.iter().zip(&q.p2).map(|(a, b)| if q.i == i { (*a, *b) } else { (*b, *a) }).collect()).unwrap_or_default();
+        let pts = q.map(|q| q.p1.iter().zip(q.p2.iter()).map(|(a, b)| if q.i == i { (*a, *b) } else { (*b, *a) }).collect()).unwrap_or_default();
         let stars = self.pairs.iter().find(|q| (q.i, q.j) == (i.min(j), i.max(j))).is_some_and(|q| q.stars);
         CpEdit { i, j, pts, pending: None, stars, snap, va: View::default(), vb: View::default() }
     }
@@ -2429,7 +2445,7 @@ impl StitchTab {
         let (i, j, pts, h) = if cp.i < cp.j { (cp.i, cp.j, cp.pts.clone(), h) } else { (cp.j, cp.i, cp.pts.iter().map(|p| (p.1, p.0)).collect(), inv(&h)) };
         let n = pts.len();
         let msg = crate::trf!("Pair {}–{} (control points): {} points placed by hand, mean error {} px", i + 1, j + 1, n, format!("{err:.2}"));
-        let pr = PairRes { i, j, p1: pts.iter().map(|p| p.0).collect(), p2: pts.iter().map(|p| p.1).collect(), h, inl: (0..n).collect(), ok: true, listed: true, msg, stars: cp.stars, manual: true };
+        let pr = PairRes { i, j, p1: Arc::new(pts.iter().map(|p| p.0).collect()), p2: Arc::new(pts.iter().map(|p| p.1).collect()), h, inl: Arc::new((0..n).collect()), ok: true, listed: true, msg, stars: cp.stars, manual: true };
         match self.pairs.iter().position(|q| (q.i, q.j) == (i, j)) {
             Some(k) => self.pairs[k] = pr,
             None => {
@@ -3275,7 +3291,27 @@ pub(crate) fn angle(ui: &mut egui::Ui, label: &str, v: &mut f64, max: f64, fine_
 
 /// Histogram (log scale) with black / white point markers and the transfer curve.
 pub fn histogram(ui: &mut egui::Ui, img: &Img, stretch: Option<(f64, f64, f64)>) {
-    let hc = lum_histogram(img, 256);
+    histogram_of(ui, img, 1.0, stretch);
+}
+
+/// The histogram of `img` × `gain`, counted once per image and kept (the
+/// window redraws often; the image stays the same between changes).
+pub fn histogram_of(ui: &mut egui::Ui, img: &Img, gain: f32, stretch: Option<(f64, f64, f64)>) {
+    // Identity of the image: where its pixels are, their number, a few of them, and the gain.
+    let probe: Vec<u32> = (0..8).filter_map(|k| img.px.get(k * img.px.len() / 8)).map(|c| c[0].to_bits() ^ c[1].to_bits().rotate_left(11) ^ c[2].to_bits().rotate_left(22)).collect();
+    let id = egui::Id::NULL.with(("histogram", img.px.as_ptr() as usize, img.px.len(), img.w, gain.to_bits(), probe));
+    let hc: Vec<usize> = ui.ctx().memory_mut(|m| {
+        m.data
+            .get_temp_mut_or_insert_with(id, || {
+                if gain == 1.0 {
+                    lum_histogram(img, 256)
+                } else {
+                    let px: Vec<[f32; 3]> = img.subsample(img.step_for(500_000)).map(|c| [c[0] * gain, c[1] * gain, c[2] * gain]).collect();
+                    lum_histogram(&Img::from_vec(1, px.len(), px), 256)
+                }
+            })
+            .clone()
+    });
     let ys: Vec<f32> = hc.iter().map(|&c| ((c + 1) as f32).log10()).collect();
     let mx = ys.iter().cloned().fold(1.0, f32::max);
     let (resp, p) = ui.allocate_painter(egui::vec2(ui.available_width(), 60.0), egui::Sense::hover());

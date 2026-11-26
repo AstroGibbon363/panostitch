@@ -9,6 +9,7 @@ pub mod stacker;
 pub mod gui;
 pub mod sys;
 pub mod finish;
+pub mod denoise;
 pub mod timelapse;
 
 pub use image::{Gray, Img, Rgb};

@@ -86,6 +86,8 @@ pub struct FinishTab {
     /// Keep the settings when another image is opened (same look for several panels).
     keep: bool,
     display: ViewStretch,
+    /// Save the linear data (geometry, background, colour and white balance only) instead of the finished image.
+    save_linear: bool,
     shown: Option<Preview>,
     tex: Option<egui::TextureHandle>,
     before_tex: Option<egui::TextureHandle>,
@@ -140,6 +142,7 @@ impl Default for FinishTab {
             p: FinishParams::default(),
             keep: false,
             display: ViewStretch::default(),
+            save_linear: false,
             shown: None,
             tex: None,
             before_tex: None,
@@ -543,18 +546,25 @@ impl FinishTab {
         self.saving = true;
         self.status = crate::trf!("Saving {} …", basename(&out));
         let (p, scale, tx) = (self.p.clone(), self.scale, self.tx.clone());
+        // Linear only makes sense for linear input (a stretch is chosen).
+        let linear = self.save_linear && p.stretch != StretchMode::Off;
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| -> Result<(String, Box<Settings>), String> {
                 // Measure on the preview copy, as shown, so the saved file looks the same.
                 let mut m = Measured::default();
                 let _ = finish::process(&proxy, &p, scale, &mut m);
-                let mut img = finish::process(&full, &p, 1.0, &mut m);
-                if let Some(l) = &local {
+                let mut img = if linear {
+                    // The linear steps only: turn and crop, background, colour, white balance.
+                    finish::balance(&finish::prepare(&full, &p), &p, &mut m)
+                } else {
+                    finish::process(&full, &p, 1.0, &mut m)
+                };
+                if let (Some(l), false) = (&local, linear) {
                     img = finish::with_local(img, full.w, full.h, &p, l, 1.0);
                 }
                 let img = finish::export_size(&img, &p);
                 io::save_image(&out, &img, p.jpeg_quality)?;
-                let extra = if local.is_some() { tr(", sky and foreground looks") } else { "" };
+                let extra = if linear { tr(", linear: stretch, light, curves, colour, detail and the sky / foreground looks left out") } else if local.is_some() { tr(", sky and foreground looks") } else { "" };
                 Ok((crate::trf!("Saved {} ({}×{} px; {}{}).", out, img.w, img.h, finish::summary(&p), extra), Box::new((p, local))))
             })
             .unwrap_or_else(|_| Err(panic_text()));
@@ -967,6 +977,14 @@ impl FinishTab {
         }
         if std::path::Path::new(&self.out).exists() {
             ui.colored_label(Color32::from_rgb(230, 150, 30), tr("This file exists and will be replaced."));
+        }
+        if self.p.stretch != StretchMode::Off {
+            if let Some(v) = super::save_kind_ui(ui, self.save_linear, &crate::io::ext_of(&self.out)) {
+                self.save_linear = v;
+            }
+            if self.save_linear {
+                ui.weak(tr("Saved linear: only turn and crop, background, colour calibration and white balance are applied."));
+            }
         }
         ui.horizontal_wrapped(|ui| {
             let save = ui.add_enabled(!self.saving, egui::Button::new(egui::RichText::new(tr("⬇ Save")).strong())).on_hover_text(tr("Process the full image and save it (Ctrl+S)"));

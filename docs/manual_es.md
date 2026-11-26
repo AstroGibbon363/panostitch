@@ -707,6 +707,13 @@ unión (carga, emparejado y vistas previas desde que se añadió la primera foto
 el tiempo de guardado, el tamaño en píxeles y el archivo con su tamaño, o el
 error si el guardado falló. × lo cierra.
 
+**Lineal o estirada.** Sobre **Guardar panorámica…**, **Lineal (para
+procesar)** guarda la panorámica sin estirado (con exposición y factores de
+brillo), para software de astronomía, y **Estirada (para ver)** tal como se
+muestra. Mientras no elija, FITS y XISF son lineales y TIFF, PNG y JPEG
+estirados. Los datos lineales necesitan muchos niveles: guárdelos como FITS,
+XISF o TIFF, no como JPEG o PNG.
+
 ---
 
 ## 11. Solución de problemas
@@ -906,16 +913,16 @@ ajustes, **⬇ Guardar resultado…** guarda de nuevo.
 
 | Ajuste | Qué hace |
 |---|---|
-| **Extracción de fondo** | Resta un modelo suave del fondo del cielo (degradados de contaminación lumínica o luz de luna). |
-| **Calibración de color** | Deja el fondo del cielo gris neutro y la estrella media blanca. |
-| **Reducir ruido de color** | Suaviza solo los colores, quitando las motas de color de las tomas a ISO alto. |
+| **Extracción de fondo** | Resta un modelo suave del fondo del cielo (gradientes por contaminación lumínica, Luna, viñeteo); el cielo conserva su nivel medio. Para **Todo cielo** (cielo profundo) el **Modelo** puede ser **RBF**: una superficie flexible que pasa por cuadros de muestra del cielo y sigue varios resplandores o una esquina brillante, lo que un polinomio no puede; **Muestras por línea** (cuadros a lo largo del lado largo) y **Suavizado** fijan lo ajustada que va; **Tolerancia de la cuadrícula** fija cuánto puede destacar un cuadro antes de contar como objeto (más alto conserva más), y **Mostrar las muestras** las marca sobre el resultado (verde usada, rojo excluida). Las estrellas, galaxias, nebulosas y la Vía Láctea, y la zona de su alrededor, se excluyen de las muestras solas. Los paisajes (otras regiones de cielo) usan el **Polinomio** del **Grado** elegido. |
+| **Calibración de color** | **Auto**: deja el fondo del cielo gris neutro y la estrella media blanca. **Manual**: arrastre sobre el resultado **▭ Zona de fondo** en cielo vacío y **▭ Referencia blanca** sobre algo que deba ser blanco en promedio (un campo de estrellas, una galaxia, una estrella como el Sol); **Temperatura** y **Matiz** ajustan además. Sin zonas solo cuentan temperatura y matiz. |
+| **Reducir ruido de color** | Quita los puntos y manchas de color: reducción de ruido por ondículas solo en las capas de color, el brillo queda exactamente igual. |
 | **Contaminación lumínica** | **Cielo profundo**: quita un resplandor suave. **Irregular**: sigue el resplandor celda a celda (cúpulas de luz de ciudades en tomas gran angulares). **Fuerza** fija cuánto se quita. Corrija antes el viñeteo (flats), o empeorará. |
 | **Realzar la luz de las estrellas** | Eleva las estrellas sobre el fondo del cielo sin aumentar su ruido. |
 | **Brillo automático** | Pone el cielo en un nivel agradable sin quemar las estrellas más brillantes. |
 | **Alto rango dinámico** | Comprime las estrellas brillantes y las luces en vez de recortarlas. |
-| **Tono** | **curva sRGB** (como hace una cámara), **Estirado** (punto negro, medios tonos, punto blanco; automático o a mano) o **Lineal** (sin curva). |
+| **Tono** | **curva sRGB** (como hace una cámara), **Estirado MTF** (punto negro, medios tonos, punto blanco; automático o a mano), **Estirado arcsinh** (factor de estirado; conserva los colores de las estrellas), **Estirado GHS** (hiperbólico generalizado: intensidad, intensidad local, punto de simetría) o **Lineal** (sin curva). En arcsinh y GHS el punto negro (y en GHS el punto de simetría) se miden en el fondo del cielo salvo que desmarque **Punto negro desde el fondo**. |
 | **Espacio de color** | sRGB o Adobe RGB para la salida TIFF y JPEG. |
-| **Lineal (para procesar)** | Lo desactiva todo y guarda un FITS lineal de 32 bits: lo que esperan Siril o PixInsight. |
+| **Guardar: Lineal / Estirada** | **Lineal (para procesar)**: el archivo recibe la luz tal como se midió (tras extracción de fondo, calibración de color y brillo), para la pestaña Posprocesado, Siril o PixInsight; en visores normales se ve oscura, así que use FITS, XISF o TIFF. **Estirada (para ver)**: el archivo recibe la imagen tal como se muestra, lista para ver y compartir. Mientras no elija, FITS / XISF reciben datos lineales y TIFF / PNG / JPEG la imagen estirada. |
 | **⇄ Usar en la unión de panorámicas (panel)** | Añade el resultado guardado a la pestaña Unión de panorámicas, como un panel de una panorámica (ver 13.7). |
 
 ### 13.6 Proyectos
@@ -1166,6 +1173,19 @@ ni el tamaño de exportación (pertenecen a una imagen). **Preajuste** aplica un
 aspecto guardado a la imagen abierta (Ctrl+Z lo deshace); **Borrar** quita el
 preajuste cuyo nombre está escrito. Los preajustes se guardan en la carpeta de
 ajustes (`presets`).
+
+La **reducción de ruido** trabaja con ondículas: la imagen se separa en capas
+de detalle fino a grueso, y en cada una se reducen las pequeñas oscilaciones
+del ruido mientras las estrellas, bordes y estructuras se quedan. El ruido se
+mide zona por zona, así que funciona igual en imágenes lineales y estiradas.
+**Reducción de ruido** trata el brillo, **Ruido de color** solo el color (el
+brillo queda exactamente igual).
+
+**Guardar lineal.** Cuando la imagen es lineal (hay un estirado elegido),
+**Lineal (para procesar)** bajo el nombre de archivo guarda solo los pasos
+lineales: girar y recortar, extracción de fondo, calibración de color y balance
+de blancos, para seguir procesando en otro programa. **Estirada (para ver)**
+guarda todo tal como se muestra.
 
 ## 17. Timelapse
 

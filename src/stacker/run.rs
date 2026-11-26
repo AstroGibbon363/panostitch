@@ -474,7 +474,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
             }
             if !preview {
                 let p = outdir.join(format!("{:04}{ext}", t + 1)).to_string_lossy().to_string();
-                save_panorama(&p, if is_astro(&p) { &pp.linear } else { &pp.image })?;
+                save_panorama(&p, if cfg.saves_linear(&p) { &pp.linear } else { &pp.image })?;
                 saved.push(p);
             }
         }
@@ -526,7 +526,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
             return Err("No output file.".into());
         }
         progress(&format!("Saving {}…", basename(&cfg.output)))?;
-        save_panorama(&cfg.output, if is_astro(&cfg.output) { &pp.linear } else { &pp.image })?;
+        save_panorama(&cfg.output, if cfg.saves_linear(&cfg.output) { &pp.linear } else { &pp.image })?;
         saved.push(cfg.output.clone());
     }
     if !saved.is_empty() {

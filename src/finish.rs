@@ -808,22 +808,12 @@ fn min_filter(img: &Img, r: usize) -> Img {
 
 fn detail(img: Img, p: &FinishParams, scale: f64) -> Img {
     let mut img = img;
+    // Noise: wavelets, with the noise measured area by area (see `denoise`).
     if p.noise > 0.0 {
-        // Smooth where the image is flat, keep edges and stars.
-        let b = blur(&img, (1.2 * scale).max(0.4));
-        let s = p.noise as f32;
-        let t = 0.03f32 + 0.05 * s;
-        img = img.zip_map(&b, move |c, bl| {
-            let d = (luminance(c) - luminance(bl)).abs() / t;
-            let wgt = s * (-d * d).exp();
-            [0, 1, 2].map(|k| c[k] + (bl[k] - c[k]) * wgt)
-        });
+        img = crate::denoise::reduce_noise(&img, p.noise);
     }
     if p.color_noise > 0.0 {
-        let sigma = ((0.5 + 3.0 * p.color_noise) * scale).max(0.3);
-        let l = img.luminance();
-        let ch = blur(&img.zip_map(&l, |c, l| [c[0] - l, c[1] - l, c[2] - l]), sigma);
-        img = ch.zip_map(&l, |c, l| [c[0] + l, c[1] + l, c[2] + l].map(|v| v.clamp(0.0, 1.0)));
+        img = crate::denoise::reduce_color_noise(&img, p.color_noise).map(|c| c.map(|v| v.clamp(0.0, 1.0)));
     }
     if p.star_reduce > 0.0 {
         // Stars: small bright spots above their surroundings. Pull them towards the local minimum.

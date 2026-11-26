@@ -60,7 +60,9 @@ named_enum!(SkyMode { None => "None", All => "All sky", BoundaryLine => "Boundar
 named_enum!(Distortion { Off => "Off", Auto => "Auto", Lens => "Lens", Complex => "Complex" });
 named_enum!(Pollution { Off => "Off", DeepSky => "Deep sky", Uneven => "Uneven" });
 named_enum!(ColorSpace { Srgb => "sRGB", AdobeRgb => "Adobe RGB" });
-named_enum!(Tone { SrgbCurve => "sRGB curve", Stretch => "Stretch", Linear => "Linear" });
+named_enum!(Tone { SrgbCurve => "sRGB curve", Stretch => "MTF stretch", Asinh => "Arcsinh stretch", Ghs => "GHS stretch", Linear => "Linear" });
+named_enum!(BgModel { Rbf => "RBF", Polynomial => "Polynomial" });
+named_enum!(ColorCal { Auto => "Auto", Manual => "Manual" });
 named_enum!(Fade { Off => "Off", In => "Fade in", Out => "Fade out", Both => "Both ends" });
 
 #[derive(Clone, Debug)]
@@ -95,10 +97,29 @@ pub struct Sky {
 }
 #[derive(Clone, Debug)]
 pub struct StretchCfg {
+    /// MTF: black point and midtones measured; Arcsinh / GHS: the black point
+    /// (and GHS's symmetry point) from the sky background.
     pub auto: bool,
     pub black: f64,
     pub mid: f64,
     pub white: f64,
+    /// Arcsinh: stretch factor (1 … 10000).
+    pub asinh: f64,
+    /// GHS: ln(D + 1), local intensity b, symmetry point.
+    pub ghs_d: f64,
+    pub ghs_b: f64,
+    pub ghs_sp: f64,
+}
+
+/// Colour calibration by hand: areas of the result (x0, y0, x1, y1 as
+/// fractions of the width / height) for the background and for the white
+/// reference, then temperature and tint (-1 … 1) on top.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ManualCal {
+    pub background: Option<[f64; 4]>,
+    pub white: Option<[f64; 4]>,
+    pub temperature: f64,
+    pub tint: f64,
 }
 #[derive(Clone, Debug)]
 pub struct LightPollution {
@@ -146,7 +167,18 @@ pub struct StackConfig {
     pub tone: Tone,
     pub stretch: StretchCfg,
     pub bg_extraction: (bool, usize),
+    /// Background model: RBF (sample boxes along the long side, smoothing 0…1) or a polynomial (the degree above).
+    pub bg_model: BgModel,
+    pub bg_samples: usize,
+    pub bg_smooth: f64,
+    /// RBF: how far a sample may stand out before it is left out (1 = default, higher keeps more).
+    pub bg_tolerance: f64,
     pub color_calibration: bool,
+    pub color_cal: ColorCal,
+    pub manual_cal: ManualCal,
+    /// What the file holds: the linear data (for further processing) or the
+    /// stretched image (for viewing). None: by the format (FITS / XISF linear, others stretched).
+    pub save_linear: Option<bool>,
     pub color_noise: (bool, f64),
     pub distortion: Distortion,
     pub light_pollution: LightPollution,
@@ -154,6 +186,13 @@ pub struct StackConfig {
     pub timelapse: (bool, usize),
     pub trails: (Fade, bool),
     pub foreground: Foreground,
+}
+
+impl StackConfig {
+    /// Whether the file `path` gets the linear data (else the stretched image).
+    pub fn saves_linear(&self, path: &str) -> bool {
+        self.save_linear.unwrap_or_else(|| crate::io::is_astro(path))
+    }
 }
 
 impl Default for StackConfig {
@@ -185,9 +224,16 @@ impl Default for StackConfig {
             merge4: false,
             color_space: ColorSpace::Srgb,
             tone: Tone::SrgbCurve,
-            stretch: StretchCfg { auto: true, black: 0.0, mid: 0.25, white: 1.0 },
+            stretch: StretchCfg { auto: true, black: 0.0, mid: 0.25, white: 1.0, asinh: 100.0, ghs_d: 3.0, ghs_b: 2.0, ghs_sp: 0.0 },
             bg_extraction: (false, 2),
+            bg_model: BgModel::Rbf,
+            bg_samples: 20,
+            bg_smooth: 0.5,
+            bg_tolerance: 1.0,
             color_calibration: false,
+            color_cal: ColorCal::Auto,
+            manual_cal: ManualCal::default(),
+            save_linear: None,
             color_noise: (false, 50.0),
             distortion: Distortion::Off,
             light_pollution: LightPollution { filter: Pollution::Off, strength: 50.0, iaa: false, degree: 2, tiles: 20 },

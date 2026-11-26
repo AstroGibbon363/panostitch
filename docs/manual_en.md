@@ -662,6 +662,13 @@ matching and previews since the first photo was added), the saving time, the
 size in pixels and the file with its size, or the error if saving failed.
 × closes it.
 
+**Linear or stretched.** Above **Save panorama…**, **Linear (for processing)**
+saves the panorama without the stretch (exposure and brightness factors
+applied), for astronomy software, and **Stretched (for viewing)** saves it as
+shown. Until you choose, FITS and XISF are linear and TIFF, PNG and JPEG
+stretched. Linear data needs many levels: use FITS, XISF or TIFF for it, not
+JPEG or PNG.
+
 ---
 
 ## 11. Troubleshooting
@@ -851,16 +858,16 @@ Applied to the stacked result at once; **Start** saves with these settings,
 
 | Setting | What it does |
 |---|---|
-| **Background extraction** | Subtracts a smooth model of the sky background (gradients from light pollution or moonlight). |
-| **Color calibration** | Makes the sky background neutral grey and the average star white. |
-| **Reduce colour noise** | Smooths only the colours, removing the coloured speckles of high-ISO shots. |
+| **Background extraction** | Subtracts a smooth model of the sky background (gradients from light pollution, moonlight, vignetting); the sky keeps its average level. For **All sky** (deep sky) the **Model** can be **RBF**: a flexible surface through sample boxes of the sky, which follows several glows or a bright corner that a polynomial cannot; **Samples per line** (boxes along the long side) and **Smoothing** set how closely it follows; **Grid tolerance** sets how far a box may stand out before it counts as an object (higher keeps more), and **Show the samples** marks them on the result (green used, red left out). Stars, galaxies, nebulae and the Milky Way, and the area just around them, are left out of the samples automatically. Landscapes (other sky regions) use the **Polynomial** of the chosen **Degree**. |
+| **Color calibration** | **Auto**: makes the sky background neutral grey and the average star white. **Manual**: drag **▭ Background area** over empty sky and **▭ White reference** over something that should be white on average (a star field, a galaxy, a sun-like star) on the result; **Temperature** and **Tint** adjust on top. Without areas only temperature and tint apply. |
+| **Reduce colour noise** | Removes coloured speckles and blotches: wavelet noise reduction on the colour layers only, the brightness stays exactly as it was. |
 | **Light pollution** | **Deep sky**: removes a smooth glow. **Uneven**: follows the glow tile by tile (domes of city light in wide-angle shots). **Strength** sets how much is removed. Correct the vignetting first (vignetting images), or it gets worse. |
 | **Enhance star light** | Lifts the stars above the sky background without boosting its noise. |
 | **Auto brightness** | Puts the sky at a pleasant level without clipping the brightest stars. |
 | **High dynamic range** | Compresses bright stars and lights instead of clipping them. |
-| **Tone** | **sRGB curve** (as a camera does), **Stretch** (black point, midtones, white point; automatic or by hand) or **Linear** (no curve). |
+| **Tone** | **sRGB curve** (as a camera does), **MTF stretch** (black point, midtones, white point; automatic or by hand), **Arcsinh stretch** (stretch factor; keeps star colours), **GHS stretch** (generalized hyperbolic: stretch, local intensity, symmetry point) or **Linear** (no curve). For Arcsinh and GHS the black point (and GHS's symmetry point) are measured on the sky background unless you untick **Black point from the background**. |
 | **Color space** | sRGB or Adobe RGB for TIFF and JPEG output. |
-| **Linear (for processing)** | Switches everything off and saves a linear 32-bit FITS: what Siril or PixInsight expect. |
+| **Save: Linear / Stretched** | **Linear (for processing)**: the file gets the light as measured (after background extraction, colour calibration and brightness), for the Post-processing tab, Siril or PixInsight; it looks dark in ordinary viewers, so use FITS, XISF or TIFF. **Stretched (for viewing)**: the file gets the image as shown, ready to view and share. Until you choose, FITS / XISF get linear data and TIFF / PNG / JPEG the stretched image. |
 | **Use in the Stitcher** | Adds the saved result to the Panorama stitcher tab, as one panel of a panorama (see 13.7). |
 
 ### 13.6 Projects
@@ -1103,6 +1110,19 @@ sky and foreground looks, but not the turn, the crop or the export size (they
 belong to one image). **Preset** applies a saved look to the open image
 (Ctrl+Z undoes it); **Delete** removes the preset whose name is typed.
 Presets are kept in the settings folder (`presets`).
+
+**Noise reduction** works with wavelets: the image is split into layers of
+fine to coarse detail, and in each the small wiggles that noise makes are
+shrunk while stars, edges and structure stay. The noise is measured area by
+area, so it works on linear and on stretched images alike. **Noise
+reduction** treats the brightness, **Colour noise** only the colour (the
+brightness stays exactly as it was).
+
+**Saving linear.** When the image is linear (a stretch is chosen), **Linear
+(for processing)** under the file name saves only the linear steps: turn and
+crop, background extraction, colour calibration and white balance, for
+further processing elsewhere. **Stretched (for viewing)** saves everything as
+shown.
 
 ## 17. Timelapse
 

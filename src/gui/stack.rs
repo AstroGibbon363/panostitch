@@ -83,7 +83,8 @@ pub struct StackTab {
     brush: f64,
     view: ViewKind,
     vstate: View,
-    result: Option<StackResult>,
+    /// The last result, shared: the views and saving read it without copying its images.
+    result: Option<Arc<StackResult>>,
     raw_small: Option<(Img, Gray, f64)>,
     post: Option<PostResult>,
     post_key: u64,
@@ -92,6 +93,11 @@ pub struct StackTab {
     disp_processed: bool,
     post_busy: bool,
     show_bg: bool,
+    /// Picking an area of the result for the manual colour calibration (true: the white reference), and the drag's start (fractions).
+    cal_pick: Option<bool>,
+    /// Show the RBF background samples on the result.
+    show_samples: bool,
+    cal_drag: Option<(f64, f64)>,
     res_tex: Option<(u64, egui::TextureHandle)>,
     running: bool,
     /// When the current run started, and what it was given (for the report).
@@ -127,7 +133,7 @@ impl Default for StackTab {
         Self {
             run_info: None, report: None, to_stitcher: vec![], to_finish: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, frame_dims: None, disp_tex: None, overlay_tex: None,
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
-            post: None, post_key: 0, disp_view: Default::default(), disp_processed: true, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
+            post: None, post_key: 0, disp_view: Default::default(), disp_processed: true, post_busy: false, show_bg: false, show_samples: false, cal_pick: None, cal_drag: None, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
             status: tr("Add light frames to begin. Choose a group, then Add… (or type a path).").into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
             simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: super::notes::note("Tone"),
@@ -393,6 +399,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         c.light_pollution.filter = Pollution::Off;
         c.tone = Tone::SrgbCurve;
         c.stretch.auto = true;
+        c.save_linear = None;
         c.timelapse.0 = false;
         c.model = Model::Homography;
         c.distortion = Distortion::Off;
@@ -430,7 +437,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 
     fn post_fingerprint(&self) -> u64 {
         let c = &self.cfg;
-        hash_str(&format!("{:?}{:?}{:?}{:?}{:?}{:?}{}{}{:?}{:?}{:?}{:?}", c.bg_extraction, c.color_calibration, c.color_noise, c.light_pollution, c.enhance_stars, c.auto_brightness, c.hdr, c.tone.name(), c.stretch, c.color_space, c.sky.mode, self.raw_small.as_ref().map(|r| r.0.w)))
+        hash_str(&format!("{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{}{:?}{:?}{:?}{:?}", c.bg_model, c.bg_samples, c.bg_smooth, c.bg_tolerance, c.color_cal, c.manual_cal.temperature, c.manual_cal.tint, c.manual_cal.background, c.manual_cal.white, c.bg_extraction, c.color_calibration, c.color_noise, c.light_pollution, c.enhance_stars, c.auto_brightness, c.hdr, c.tone.name(), c.stretch, c.color_space, c.sky.mode, self.raw_small.as_ref().map(|r| r.0.w)))
     }
 
     fn poll(&mut self) {
@@ -466,7 +473,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                             let _ = m;
                         }
                     }
-                    self.result = Some(*r);
+                    self.result = Some(Arc::new(*r));
                     self.post = None;
                     self.post_key = 0;
                     self.res_tex = None;
@@ -479,6 +486,12 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     if self.cfg.tone == Tone::Stretch && self.cfg.stretch.auto {
                         if let Some((b, m, w)) = p.stretch {
                             (self.cfg.stretch.black, self.cfg.stretch.mid, self.cfg.stretch.white) = (b, m, w);
+                        }
+                    }
+                    // Arcsinh / GHS: the points measured on the background show on their sliders.
+                    if matches!(self.cfg.tone, Tone::Asinh | Tone::Ghs) && self.cfg.stretch.auto {
+                        if let Some((b, sp)) = p.points {
+                            (self.cfg.stretch.black, self.cfg.stretch.ghs_sp) = (b, sp);
                         }
                     }
                     self.post = Some(p);
@@ -562,6 +575,15 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ("light pollution degree", c.light_pollution.degree as f64, Box::new(|c, v| c.light_pollution.degree = v as usize)),
             ("light pollution tiles", c.light_pollution.tiles as f64, Box::new(|c, v| c.light_pollution.tiles = v as usize)),
             ("background degree", c.bg_extraction.1 as f64, Box::new(|c, v| c.bg_extraction.1 = v as usize)),
+            ("background samples", c.bg_samples as f64, Box::new(|c, v| c.bg_samples = (v as usize).clamp(6, 60))),
+            ("background smoothing", c.bg_smooth, Box::new(|c, v| c.bg_smooth = v.clamp(0.0, 1.0))),
+            ("background tolerance", c.bg_tolerance, Box::new(|c, v| c.bg_tolerance = v.clamp(0.25, 4.0))),
+            ("asinh factor", c.stretch.asinh, Box::new(|c, v| c.stretch.asinh = v)),
+            ("ghs stretch", c.stretch.ghs_d, Box::new(|c, v| c.stretch.ghs_d = v)),
+            ("ghs local intensity", c.stretch.ghs_b, Box::new(|c, v| c.stretch.ghs_b = v)),
+            ("ghs symmetry point", c.stretch.ghs_sp, Box::new(|c, v| c.stretch.ghs_sp = v)),
+            ("calibration temperature", c.manual_cal.temperature, Box::new(|c, v| c.manual_cal.temperature = v)),
+            ("calibration tint", c.manual_cal.tint, Box::new(|c, v| c.manual_cal.tint = v)),
             ("colour noise strength", c.color_noise.1, Box::new(|c, v| c.color_noise.1 = v)),
             ("black point", c.stretch.black, Box::new(|c, v| c.stretch.black = v)),
             ("midtones", c.stretch.mid, Box::new(|c, v| c.stretch.mid = v)),
@@ -597,6 +619,11 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ("light pollution", c.light_pollution.filter.name().into()),
             ("color space", c.color_space.name().into()),
             ("tone", c.tone.name().into()),
+            ("background model", c.bg_model.name().into()),
+            ("colour calibration mode", c.color_cal.name().into()),
+            ("calibration background", c.manual_cal.background.map(|r| r.map(|v| format!("{v:.5}")).join(",")).unwrap_or_default()),
+            ("calibration white", c.manual_cal.white.map(|r| r.map(|v| format!("{v:.5}")).join(",")).unwrap_or_default()),
+            ("save as", match c.save_linear { None => "by format", Some(true) => "linear", Some(false) => "stretched" }.into()),
             ("interpolation", c.interpolation.name().into()),
             ("trail fade", c.trails.0.name().into()),
             ("raw decoder", c.raw.decoder.name().into()),
@@ -615,7 +642,16 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             "distortion" => c.distortion = Distortion::from_name(v).unwrap_or(c.distortion),
             "light pollution" => c.light_pollution.filter = Pollution::from_name(v).unwrap_or(c.light_pollution.filter),
             "color space" => c.color_space = ColorSpace::from_name(v).unwrap_or(c.color_space),
-            "tone" => c.tone = Tone::from_name(v).unwrap_or(c.tone),
+            // "Stretch": the MTF stretch's name before v0.4.0.
+            "tone" => c.tone = if v == "Stretch" { Tone::Stretch } else { Tone::from_name(v).unwrap_or(c.tone) },
+            "background model" => c.bg_model = BgModel::from_name(v).unwrap_or(c.bg_model),
+            "colour calibration mode" => c.color_cal = ColorCal::from_name(v).unwrap_or(c.color_cal),
+            "calibration background" | "calibration white" => {
+                let r: Vec<f64> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                let r = (r.len() == 4).then(|| [r[0], r[1], r[2], r[3]]);
+                if k == "calibration background" { c.manual_cal.background = r } else { c.manual_cal.white = r }
+            }
+            "save as" => c.save_linear = match v { "linear" => Some(true), "stretched" => Some(false), _ => None },
             "interpolation" => c.interpolation = Interpolation::from_name(v).unwrap_or(c.interpolation),
             "trail fade" => c.trails.0 = Fade::from_name(v).unwrap_or(c.trails.0),
             "raw decoder" => {
@@ -799,8 +835,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         let tx = self.tx.clone();
         self.status = crate::trf!("Saving {}…", basename(&p));
         crate::sys::background(move || {
-            let _ = tx.send(match save_result(&r, &cfg) {
-                Ok(_) => Msg::Status(crate::trf!("Saved {}{}", p, if io::is_astro(&p) { tr(" (linear 32-bit).") } else { "." })),
+            let linear = cfg.saves_linear(&p);
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| save_result(&r, &cfg))).unwrap_or_else(|_| Err(tr("internal error (panic)").into()));
+            let _ = tx.send(match r {
+                Ok(_) => Msg::Status(crate::trf!("Saved {}{}", p, if !linear { "." } else if io::is_astro(&p) { tr(" (linear 32-bit).") } else { tr(" (linear).") })),
                 Err(e) => Msg::Error(e),
             });
         });
@@ -1485,9 +1523,53 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         if !simple {
             ch(ui.checkbox(&mut c.bg_extraction.0, tr("Background extraction")), "Background extraction");
             if c.bg_extraction.0 {
-                ch(ui.add(egui::Slider::new(&mut c.bg_extraction.1, 1..=4).text(tr("Degree"))), "Background extraction");
+                // RBF for frames that are all sky; landscapes keep the polynomial.
+                let rbf_ok = c.sky.mode == SkyMode::All;
+                if rbf_ok {
+                    egui::Grid::new("bgm").num_columns(2).show(ui, |ui| {
+                        combo(ui, tr("Model"), &mut c.bg_model, BgModel::ALL, |v| v.name());
+                    });
+                }
+                if rbf_ok && c.bg_model == BgModel::Rbf {
+                    ch(ui.add(egui::Slider::new(&mut c.bg_samples, 8..=40).text(tr("Samples per line"))).on_hover_text(tr("Sample boxes along the long side: more follow smaller changes of the background")), "Background extraction");
+                    ch(ui.add(egui::Slider::new(&mut c.bg_tolerance, 0.25..=4.0).logarithmic(true).text(tr("Grid tolerance"))).on_hover_text(tr("How far a sample may stand out from its neighbours before it is taken for an object (galaxy, nebula, Milky Way) and left out, with its surroundings. Higher keeps more samples; lower if objects get darkened around")), "Background extraction");
+                    if ui.checkbox(&mut self.show_samples, tr("Show the samples")).on_hover_text(tr("On the result: green = used, red = left out")).changed() && self.show_samples {
+                        self.view = ViewKind::Result;
+                    }
+                    ch(ui.add(egui::Slider::new(&mut c.bg_smooth, 0.0..=1.0).step_by(0.05).text(tr("Smoothing"))).on_hover_text(tr("0 = the surface goes close to every sample, 1 = very smooth")), "Background extraction");
+                } else {
+                    ch(ui.add(egui::Slider::new(&mut c.bg_extraction.1, 1..=4).text(tr("Degree"))), "Background extraction");
+                    if !rbf_ok {
+                        ui.weak(tr("RBF is offered for All sky (deep sky); landscapes use the polynomial."));
+                    }
+                }
             }
             ch(ui.checkbox(&mut c.color_calibration, tr("Color calibration")), "Color calibration");
+            if c.color_calibration {
+                egui::Grid::new("calm").num_columns(2).show(ui, |ui| {
+                    combo(ui, tr("Mode"), &mut c.color_cal, ColorCal::ALL, |v| v.name());
+                });
+                if c.color_cal == ColorCal::Manual {
+                    ui.horizontal_wrapped(|ui| {
+                        for (white, label, tip) in [
+                            (false, tr("▭ Background area"), tr("Drag a rectangle on the result over empty sky: it becomes neutral grey")),
+                            (true, tr("▭ White reference"), tr("Drag a rectangle over what should be white on average: a field of stars, a galaxy, a sun-like star")),
+                        ] {
+                            let set = if white { c.manual_cal.white.is_some() } else { c.manual_cal.background.is_some() };
+                            if ui.selectable_label(self.cal_pick == Some(white), format!("{label}{}", if set { " ✔" } else { "" })).on_hover_text(tip).clicked() {
+                                self.cal_pick = if self.cal_pick == Some(white) { None } else { Some(white) };
+                                self.cal_drag = None;
+                                self.view = ViewKind::Result;
+                            }
+                            if set && ui.small_button("✕").on_hover_text(tr("Remove this area")).clicked() {
+                                if white { c.manual_cal.white = None } else { c.manual_cal.background = None }
+                            }
+                        }
+                    });
+                    ch(ui.add(egui::Slider::new(&mut c.manual_cal.temperature, -1.0..=1.0).step_by(0.01).text(tr("Temperature"))), "Color calibration");
+                    ch(ui.add(egui::Slider::new(&mut c.manual_cal.tint, -1.0..=1.0).step_by(0.01).text(tr("Tint"))), "Color calibration");
+                }
+            }
             ch(ui.checkbox(&mut c.color_noise.0, tr("Reduce colour noise")), "Reduce colour noise");
             if c.color_noise.0 {
                 ch(ui.add(egui::Slider::new(&mut c.color_noise.1, 5.0..=100.0).step_by(5.0).text(tr("Strength"))), "Reduce colour noise");
@@ -1552,21 +1634,37 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 changed = Some("Tone");
             }
         }
+        if matches!(c.tone, Tone::Asinh | Tone::Ghs) && !simple {
+            if let Some(p) = &self.post {
+                super::stitch::histogram(ui, &p.linear, None);
+            }
+            let mut moved = ui.checkbox(&mut c.stretch.auto, tr("Black point from the background")).on_hover_text(tr("Measured on the sky background; untick to set it by hand")).changed();
+            if c.tone == Tone::Asinh {
+                moved |= ui.add(egui::Slider::new(&mut c.stretch.asinh, 1.0..=10000.0).logarithmic(true).text(tr("Stretch factor"))).on_hover_text(tr("1 = almost none, 10000 = very strong. Long deep-sky stacks with a faint background need several thousand")).changed();
+            } else {
+                moved |= ui.add(egui::Slider::new(&mut c.stretch.ghs_d, 0.0..=10.0).step_by(0.05).text(tr("Stretch ln(D+1)"))).on_hover_text(tr("How strong the stretch is")).changed();
+                moved |= ui.add(egui::Slider::new(&mut c.stretch.ghs_b, -5.0..=15.0).step_by(0.1).text(tr("Local intensity b"))).on_hover_text(tr("Concentrates the stretch around the symmetry point: higher = narrower, more contrast there")).changed();
+                if !c.stretch.auto {
+                    moved |= ui.add(egui::Slider::new(&mut c.stretch.ghs_sp, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).text(tr("Symmetry point"))).changed();
+                }
+            }
+            if !c.stretch.auto {
+                moved |= ui.add(egui::Slider::new(&mut c.stretch.black, 0.0..=0.5).logarithmic(true).smallest_positive(1e-5).text(tr("Black point"))).changed();
+            }
+            if moved {
+                changed = Some("Tone");
+            }
+        }
         if let Some(n) = changed {
             self.post_note = super::notes::note(n);
         }
+        // What the file holds: the linear data or the stretched image.
+        let out = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
+        let linear = self.cfg.saves_linear(&out);
+        if let Some(v) = super::save_kind_ui(ui, linear, &io::ext_of(&out)) {
+            self.cfg.save_linear = Some(v);
+        }
         ui.horizontal_wrapped(|ui| {
-            if ui.button(tr("Linear (for processing)")).clicked() {
-                (self.cfg.bg_extraction.0, self.cfg.color_calibration, self.cfg.color_noise.0, self.cfg.enhance_stars.0, self.cfg.auto_brightness, self.cfg.hdr) = (false, false, false, false, false, false);
-                self.cfg.light_pollution.filter = Pollution::Off;
-                self.cfg.color_space = ColorSpace::Srgb;
-                self.cfg.tone = Tone::Linear;
-                if !self.cfg.output.is_empty() && !io::is_astro(&self.cfg.output) {
-                    self.cfg.output = std::path::Path::new(&self.cfg.output).with_extension("fits").to_string_lossy().to_string();
-                }
-                self.post_note = super::notes::note("Linear");
-                self.status = crate::trf!("Linear output: no post-processing, no brightness change, no tone curve{}", if self.cfg.output.is_empty() { ".".to_string() } else { crate::trf!("; output {} (32-bit).", basename(&self.cfg.output)) });
-            }
             if ui.button(tr("⬇ Save result…")).clicked() && self.dialog.is_none() {
                 match &self.result {
                     None => self.status = tr("Nothing to save yet: press Start.").into(),
@@ -1768,10 +1866,59 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         }
         let t = self.res_tex.as_ref().unwrap().1.clone();
         let (w, h) = (r.image.w as f64, r.image.h as f64);
-        image_view(ui, &mut self.vstate, (w, h), &[(&t, [0.5, w + 0.5, 0.5, h + 0.5])], true);
+        let s = image_view(ui, &mut self.vstate, (w, h), &[(&t, [0.5, w + 0.5, 0.5, h + 0.5])], self.cal_pick.is_none());
+        // The RBF background samples: green used, red left out.
+        if self.show_samples {
+            if let Some(p) = &self.post {
+                let painter = ui.painter().with_clip_rect(s.rect);
+                for &(x, y, used) in &p.samples {
+                    let at = s.to_screen(x as f64 * w + 0.5, y as f64 * h + 0.5);
+                    let col = if used { Color32::from_rgb(60, 220, 90) } else { Color32::from_rgb(240, 70, 60) };
+                    painter.rect_stroke(egui::Rect::from_center_size(at, egui::vec2(7.0, 7.0)), 0.0, Stroke::new(1.5, col), egui::StrokeKind::Middle);
+                }
+            }
+        }
+        // Manual colour calibration: its areas, and drawing a new one.
+        let c = &self.cfg;
+        if !(c.color_calibration && c.color_cal == ColorCal::Manual) {
+            self.cal_pick = None;
+            return;
+        }
+        let p = ui.painter().with_clip_rect(s.rect);
+        let to_screen = |r: [f64; 4]| egui::Rect::from_two_pos(s.to_screen(r[0] * w + 0.5, r[1] * h + 0.5), s.to_screen(r[2] * w + 0.5, r[3] * h + 0.5));
+        for (r, col, label) in [(c.manual_cal.background, Color32::from_rgb(80, 200, 255), tr("background")), (c.manual_cal.white, Color32::from_rgb(255, 220, 60), tr("white"))] {
+            if let Some(r) = r {
+                let rr = to_screen(r);
+                p.rect_stroke(rr, 0.0, Stroke::new(2.0, col), egui::StrokeKind::Middle);
+                p.text(rr.left_top() + egui::vec2(4.0, 2.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional(14.0), col);
+            }
+        }
+        let Some(white) = self.cal_pick else { return };
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        let frac = |pos: Pos2| {
+            let (x, y) = s.to_image(pos);
+            (((x - 0.5) / w).clamp(0.0, 1.0), ((y - 0.5) / h).clamp(0.0, 1.0))
+        };
+        if s.resp.drag_started_by(egui::PointerButton::Primary) {
+            self.cal_drag = s.resp.interact_pointer_pos().map(frac);
+        }
+        if let (Some(a), Some(pos)) = (self.cal_drag, s.resp.interact_pointer_pos()) {
+            let b = frac(pos);
+            let r = [a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)];
+            p.rect_stroke(to_screen(r), 0.0, Stroke::new(1.5, Color32::WHITE), egui::StrokeKind::Middle);
+            if s.resp.drag_stopped() {
+                self.cal_drag = None;
+                if (r[2] - r[0]) * w >= 3.0 && (r[3] - r[1]) * h >= 3.0 {
+                    if white { self.cfg.manual_cal.white = Some(r) } else { self.cfg.manual_cal.background = Some(r) }
+                    self.cal_pick = None;
+                    self.status = if white { tr("White reference set: the colours are calibrated so that it averages to white.") } else { tr("Background area set: it becomes neutral grey.") }.into();
+                }
+            }
+        }
     }
 
     fn show_report(&mut self, ui: &mut egui::Ui) {
+        // A shared handle: the report is read without copying the images.
         let Some(r) = self.result.clone() else {
             ui.weak(tr("No report yet: press Quick preview or Start."));
             return;
@@ -1898,7 +2045,7 @@ impl StackTab {
         self.run(preview);
     }
     pub fn t_result(&self) -> Option<&StackResult> {
-        self.result.as_ref()
+        self.result.as_deref()
     }
     pub fn t_post_ready(&self) -> bool {
         self.post.is_some() && !self.post_busy
