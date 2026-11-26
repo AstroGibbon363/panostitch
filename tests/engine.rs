@@ -624,3 +624,94 @@ fn capture_times_and_zoom_groups() {
     assert_eq!(g, vec![0, 0, 2, 0, 1]);
     assert!((r[2] - 15.0 / 17.0).abs() < 1e-9 && r[3] == 1.0 && (r[4] - 11.5 / 17.0).abs() < 1e-9, "{r:?}");
 }
+
+#[test]
+fn display_range_low_and_high() {
+    use panostitch::finish::{display_view, Display, ViewStretch};
+    let img = Img::from_fn(1, 5, |_, x| { let v = [0.0, 0.005, 0.01, 0.05, 0.5][x]; [v, v, v] });
+    // Linear with Low 0.005, High 0.01: below black, between linear, above white.
+    let v = ViewStretch { mode: Display::Linear, low: 0.005, high: 0.01 };
+    let out = display_view(&img, v, &img);
+    let l: Vec<f32> = out.px.iter().map(|c| c[0]).collect();
+    assert!(l[0] == 0.0 && l[1].abs() < 1e-6 && (l[2] - 1.0).abs() < 1e-6 && l[3] == 1.0 && l[4] == 1.0, "{l:?}");
+    // The full range shows the image as it is.
+    assert_eq!(display_view(&img, ViewStretch::default(), &img).px, img.px);
+    // A narrow range of faint values keeps its steps (applied before the curve's table).
+    let ramp = Img::from_fn(1, 100, |_, x| { let v = x as f32 * 1e-5; [v, v, v] });
+    let a = display_view(&ramp, ViewStretch { mode: Display::Asinh, low: 0.0, high: 0.001 }, &ramp);
+    let distinct: std::collections::HashSet<u32> = a.px.iter().map(|c| c[0].to_bits()).collect();
+    assert!(distinct.len() > 95, "posterised: {} levels", distinct.len());
+}
+
+#[test]
+fn control_points_give_the_rotation_and_snap_to_stars() {
+    // Two views of one camera turned by 20° (yaw) and 3° (pitch): a handful of
+    // points give back the homography between them.
+    let (h, w, f) = (400usize, 600usize, 700.0);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let k = st::kmat(f, c);
+    let r = st::rotation_h(20f64.to_radians(), 3f64.to_radians(), f, c, 0.0);
+    let truth = r; // pixels of the second view into the first
+    let p2: Vec<st::Pt> = vec![[100.0, 80.0], [150.0, 320.0], [60.0, 200.0]];
+    let p1: Vec<st::Pt> = p2.iter().map(|q| { let (x, y) = st::apply_h(&truth, q[0], q[1]); [x, y] }).collect();
+    let _ = k;
+    for n in [2, 3] {
+        let hh = st::stars::rotation_from_points(&p1[..n], &p2[..n], (h, w), (h, w), f, f).expect("fit");
+        for q in [[300.0, 200.0], [50.0, 50.0]] {
+            let (a, b) = (st::apply_h(&hh, q[0], q[1]), st::apply_h(&truth, q[0], q[1]));
+            assert!((a.0 - b.0).hypot(a.1 - b.1) < 0.05, "{n} points: {a:?} vs {b:?}");
+        }
+    }
+    assert!(st::stars::rotation_from_points(&p1[..1], &p2[..1], (h, w), (h, w), f, f).is_none());
+    // A click 4 px off a star lands on its centre; on a flat area it stays put.
+    let mut img = Img::from_fn(60, 60, |_, _| [0.1; 3]);
+    let (sy, sx) = (30.3f64, 25.6f64); // centre, 1-based
+    for y in 0..60 {
+        for x in 0..60 {
+            let d2 = (x as f64 + 1.0 - sx).powi(2) + (y as f64 + 1.0 - sy).powi(2);
+            img.px[y * 60 + x][0] += (0.8 * (-d2 / 2.0).exp()) as f32;
+            img.px[y * 60 + x][1] = img.px[y * 60 + x][0];
+            img.px[y * 60 + x][2] = img.px[y * 60 + x][0];
+        }
+    }
+    let q = st::stars::snap_to_star(&img, sx + 3.0, sy - 2.5, 8.0).expect("snapped");
+    assert!((q[0] - sx).hypot(q[1] - sy) < 0.3, "{q:?}");
+    let flat = Img::from_fn(60, 60, |_, _| [0.3; 3]);
+    assert!(st::stars::snap_to_star(&flat, 30.0, 30.0, 8.0).is_none());
+}
+
+#[test]
+fn source_masks_force_one_photo() {
+    // Two photos of the same view, red and green, rendered on top of each other:
+    // where the green photo's mask is painted, only green shows; elsewhere the
+    // two blend; outside the mask nothing changes.
+    let (h, w) = (120usize, 160usize);
+    let red = Img::from_fn(h, w, |_, _| [1.0, 0.0, 0.0]);
+    let green = Img::from_fn(h, w, |_, _| [0.0, 1.0, 0.0]);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let id = st::M3::identity();
+    let mask = st::mask_raster(&[st::MaskDab { x: 40.0, y: 60.0, r: 20.0, erase: false }, st::MaskDab { x: 40.0, y: 60.0, r: 6.0, erase: true }], h, w).expect("mask");
+    assert!(st::mask_raster(&[st::MaskDab { x: 1.0, y: 1.0, r: 5.0, erase: true }], h, w).is_none());
+    for blend in [st::Blend::Average, st::Blend::Feather, st::Blend::Smart] {
+        let cp = st::ComposeParams { projection: st::Projection::Rectilinear, f: 400.0, c, blend, ..Default::default() };
+        let box_ = st::bounds(&[st::outline(&id, h, w, cp.projection, cp.f, c, cp.lens, 24)]);
+        let force = std::sync::Arc::new(vec![None, Some(std::sync::Arc::new(mask.clone()))]);
+        let cpm = st::ComposeParams { force: Some(force), ..cp.clone() };
+        let (plain, _) = st::compose(&[&red, &green], &[id, id], box_, &cp, &[1.0, 1.0], &[1.0, 1.0], &[(h, w), (h, w)], false);
+        let (masked, _) = st::compose(&[&red, &green], &[id, id], box_, &cpm, &[1.0, 1.0], &[1.0, 1.0], &[(h, w), (h, w)], false);
+        let at = |im: &Img, x: usize, y: usize| im.at(y - 1, x - 1);
+        // Inside the painted ring: green only.
+        let g = at(&masked, 40 + 14, 60);
+        assert!(g[1] > 0.97 && g[0] < 0.03, "{blend:?}: {g:?}");
+        // In the erased centre (too small for the smart blend's pyramid to keep) and far away: as without masks.
+        let spots: &[(usize, usize)] = if blend == st::Blend::Smart { &[(130, 30)] } else { &[(40, 60), (130, 30)] };
+        for &(x, y) in spots {
+            let (a, b) = (at(&plain, x, y), at(&masked, x, y));
+            assert!((a[0] - b[0]).abs() < 0.02 && (a[1] - b[1]).abs() < 0.02, "{blend:?} at {x},{y}: {a:?} vs {b:?}");
+        }
+    }
+    // Output point → photo pixel, and outside the photo nothing.
+    let q = st::uv_to_pixel(&id, (h, w), st::Projection::Rectilinear, 400.0, c, (0.0, 1.0), 0.0, 0.0).unwrap();
+    assert!((q[0] - c[0]).abs() < 1e-9 && (q[1] - c[1]).abs() < 1e-9, "{q:?}");
+    assert!(st::uv_to_pixel(&id, (h, w), st::Projection::Rectilinear, 400.0, c, (0.0, 1.0), 500.0, 0.0).is_none());
+}

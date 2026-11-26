@@ -574,3 +574,52 @@ fn drop_remember_and_recent() {
     assert_eq!(w3.app.stack.settings_table(), w.app.stack.settings_table());
     w3.frame();
 }
+
+#[test]
+fn control_points_and_source_masks() {
+    use panostitch::stitcher::{MaskDab, Model};
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_string_lossy().to_string();
+    let sc = scene(500, 1300, 5);
+    let paths: Vec<String> = (0..3)
+        .map(|k| {
+            let p = pj(&d, &format!("cp{k}.png"));
+            panostitch::io::save_panorama(&p, &sc.crop(0, 500, k * 400, k * 400 + 500)).unwrap();
+            p
+        })
+        .collect();
+    let mut w = Win::new(paths);
+    w.idle("loading");
+    w.app.stitch.t_set_model(Model::Translation);
+    w.app.stitch.t_run_all();
+    w.idle("run all");
+    assert_eq!(w.app.stitch.t_pairs_ok(), 2, "{}", w.app.stitch.t_status());
+    let before = w.app.stitch.t_offsets();
+    let _ = before;
+    // Frames 1 and 3 do not overlap, so matching never tried them: points placed
+    // by hand (here as if frame 3 overlapped frame 1 by 100 px) make a pair of
+    // their own, kept by the next run.
+    let pts: Vec<([f64; 2], [f64; 2])> = vec![([450.0, 100.0], [50.0, 100.0]), ([480.0, 300.0], [80.0, 300.0]), ([460.0, 450.0], [60.0, 450.0])];
+    w.app.stitch.t_control_points(0, 2, &pts);
+    w.idle("control points");
+    assert_eq!(w.app.stitch.t_manual_pairs(), vec![(0, 2, true, 3)], "{}", w.app.stitch.t_status());
+    assert!(w.app.stitch.t_status().starts_with("Control points used for pair 1–3"), "{}", w.app.stitch.t_status());
+    assert!(w.app.stitch.t_pair_results().iter().any(|r| r.0 == 0 && r.1 == 2 && r.5.contains("mean error 0.00 px")), "{:?}", w.app.stitch.t_pair_results());
+    w.app.stitch.t_run_all();
+    w.idle("run all again");
+    assert_eq!(w.app.stitch.t_manual_pairs(), vec![(0, 2, true, 3)], "a new run dropped the pair placed by hand");
+    // A source mask on frame 2, kept in the project with the pair placed by hand.
+    let dab = MaskDab { x: 250.0, y: 250.0, r: 60.0, erase: false };
+    w.app.stitch.t_paint_mask(1, &[dab]);
+    w.idle("mask");
+    assert!(w.app.stitch.t_pano_size().is_some(), "{}", w.app.stitch.t_status());
+    let proj = w.app.stitch.save_project(&pj(&d, "cp")).unwrap();
+    let mut w2 = Win::new(vec![proj]);
+    w2.idle("open project");
+    assert_eq!(w2.app.stitch.t_manual_pairs(), vec![(0, 2, true, 3)]);
+    assert_eq!(w2.app.stitch.t_masks(), vec![vec![], vec![dab], vec![]]);
+    // Undo takes the mask back.
+    w.app.stitch.t_undo(false);
+    w.idle("undo");
+    assert!(w.app.stitch.t_masks()[1].is_empty(), "{}", w.app.stitch.t_status());
+}

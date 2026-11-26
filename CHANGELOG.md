@@ -1,5 +1,14 @@
 # Changes
 
+## v0.5.0 (in development)
+
+### Panorama tab
+- **Control points by hand**, as in PTGui: **✚ Control points…** opens two images side by side, each with its own zoom; click the same point in both (clicks can snap to the centre of the nearest star). Two points are enough; lines show how well each point fits, and a cross where the partner of a new point should be. The pair replaces any other result for the two images, is kept by a new matching run, is never rejected by the refinement, and is saved in the project. For pairs the matching missed or got wrong (low-contrast sky, the grass under the tripod).
+- **Source masks:** **✐ Source masks** paints, on the panorama, where a chosen image must be used (a tree or a person that moved, a car, a ghost). Shift+click picks the image under the cursor (again: the next one there); left drag paints, right drag erases. Any number of images can have a mask; the masks are shown tinted and numbered, have a soft edge, belong to their image (they stay put when the projection or crop changes), are undoable and saved in the project. All blend modes respect them.
+
+### All tabs
+- **Display modes as in Siril**, view only: Linear, Logarithm, Square root, Squared, Asinh, AutoStretch, Histogram equalisation, with **Low** and **High** cut-offs (applied exactly, so a narrow range of faint linear data is not posterised). In the Panorama tab and the Star stacking result (also *As processed*, the tab's own stretch) and in Post-processing.
+
 ## v0.4.0-beta1
 
 Test version of v0.4: try it and report problems on GitHub or the forum. v0.3.2 stays the current stable release.

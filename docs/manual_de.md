@@ -361,6 +361,23 @@ wird in der Liste mit `UNLINKED` markiert und **nicht ins Panorama
 images** (rechte Spalte) ein, um solche Bilder in einer Reihe unter dem
 Panorama anzuzeigen und sie mit **Strg + Ziehen** von Hand zu platzieren.
 
+**Kontrollpunkte von Hand.** Wenn zwei Bilder nicht von selbst zueinander
+finden (ein kontrastarmer Himmel, das Gras unter dem Stativ, ein falsch
+zugeordnetes Paar), setzen Sie passende Punkte selbst, wie in PTGui:
+**✚ Kontrollpunkte…** im Bereich Matching öffnet die beiden Bilder des gezeigten
+Paars nebeneinander, jedes mit eigenem Zoom. Andere Bilder wählen Sie mit
+**Links** / **Rechts**. Klicken Sie einen Punkt in einem Bild an, dann denselben
+im anderen; **an Sternen einrasten** setzt einen Klick in die Mitte des nächsten
+Sterns. Für das übliche Modell (Homographie) genügen zwei Punkte; setzen Sie
+4–8 über die Überlappung verteilt. Sind genug gesetzt, zeigt eine Linie an jedem
+Punkt, wohin die Berechnung ihn legt (lange Linie: falscher Punkt; Rechtsklick
+entfernt ihn), und ein gelbes Kreuz zeigt, wo der Partner eines neuen Punkts
+liegen sollte. Für Punkte am Himmel zwischen Aufnahmen im Abstand von Minuten
+**die Punkte sind Sterne** ankreuzen. **✔ Punkte verwenden** bildet das Paar: es
+ersetzt jedes andere Ergebnis für diese zwei Bilder, bleibt bei erneutem
+Matching erhalten (Re-match pair ersetzt es), wird von der Verfeinerung nie
+verworfen und im Projekt gespeichert.
+
 ### 5.4 Schritt 3: Projektion (Projection)
 
 Wie die einzelnen Projektionen aussehen, beschreibt das Kapitel
@@ -421,6 +438,20 @@ bewegt sich zusammen mit den Bildern, die weiter vom Referenzbild entfernt an
 ihm hängen (entlang der gelben Verbindungen). Das Referenzbild bewegt sich
 nicht; das ganze Panorama verschieben Sie mit Pitch und Roll.
 
+**Quellbild-Masken.** Wo die Überblendung das falsche Foto wählt (ein Baum oder
+eine Person, die sich bewegt haben, ein Auto, ein Geist), sagen Sie ihr, welches
+sie nehmen soll: **✐ Quellbild-Masken** über der Ansicht. Umschalt+Klick ins
+Panorama wählt das Bild unter dem Zeiger (erneuter Umschalt+Klick: das nächste
+Bild dort; sein Umriss wird in seiner Farbe gezeichnet), oder tippen Sie seine
+Nummer ein. Malen Sie dann mit der linken Maustaste, wo dieses Bild verwendet
+werden muss; die rechte radiert. Jedes Bild hat seine eigene Maske, malen Sie
+also so viele Bilder wie nötig (die Zeile unter den Knöpfen listet sie; ✕
+entfernt eine). Die Masken werden getönt und nummeriert gezeigt, die Vorschau
+erneuert sich nach jedem Strich, und der Rand ist weich, sodass der Wechsel
+nahtlos ist. Masken gehören zum Bild (sie bleiben an ihrem Platz, wenn Sie die
+Projektion oder den Zuschnitt ändern), lassen sich rückgängig machen und werden
+im Projekt gespeichert.
+
 ### 5.6 Schritt 5: Histogramm-Streckung (Stretch)
 
 Astronomische Bilder (und dunkle RAW-Umwandlungen) sind meist **linear**: Die
@@ -444,6 +475,14 @@ macht sie sichtbar.
   basierend auf allen geladenen FITS-Bildern zusammen.
 - Änderungen der Streckung wirken sofort; nichts muss neu berechnet werden.
 - **Belichtung** wird vor der Streckung angewendet.
+
+**Anzeigemodi (nur Ansicht).** **Anzeige** über der Ansicht zeigt die Daten wie
+Siril: *Linear*, *Logarithmus*, *Quadratwurzel*, *Quadriert*, *Asinh*,
+*AutoStretch* oder *Histogrammausgleich*, mit **Low** und **High**: Werte unter
+Low sind schwarz, über High weiß (für schwache lineare Daten High um 0,01–0,1
+versuchen; ↺ setzt sie zurück). *Wie bearbeitet* zeigt die Streckung dieses
+Bereichs. Der Anzeigemodus ändert nie, was gespeichert wird. Das Ergebnis des
+Sternstackings und der Tab Nachbearbeitung haben dasselbe Bedienelement.
 
 ### 5.7 Rückgängig, Wiederherstellen und Projekte
 

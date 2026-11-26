@@ -333,6 +333,21 @@ same shift, and a mean error of 1–2 px.
 Switch on **show unlinked images** (right column) to show such images in a row
 below the panorama and place them by hand with **Ctrl+drag**.
 
+**Control points by hand.** When two images do not match on their own (a
+low-contrast sky, the grass under the tripod, a pair matched wrongly), place
+matching points yourself, as in PTGui: **✚ Control points…** in the Matching
+panel opens the two images of the shown pair side by side, each with its own
+zoom. Choose other images with **Left** / **Right**. Click a point in one image,
+then the same point in the other; **snap to stars** puts a click on the centre
+of the nearest star. Two points are enough for the usual (homography) model;
+use 4–8 spread over the overlap. Once enough are placed, a line from each point
+shows where the fit puts it (a long line: a wrong point; right-click removes
+it), and a yellow cross shows where the partner of a new point should be. Tick
+**the points are stars** for points on the sky between shots minutes apart.
+**✔ Use the points** makes the pair: it replaces any other result for these two
+images, is kept when you match again (Re-match pair replaces it), is never
+rejected by the refinement and is saved in the project.
+
 ### 5.4 Step 3: Projection
 
 See [Projections](#7-projections) for what each one looks like.
@@ -387,6 +402,18 @@ keys or the **Nudge** buttons. The image moves together with the images
 attached to it further from the reference (along the yellow links). The
 reference image does not move; use Pitch and Roll to move everything.
 
+**Source masks.** Where the blend picks the wrong photo (a tree or a person
+that moved, a car, a ghost), tell it which one to use: **✐ Source masks** above
+the view. Shift+click on the panorama picks the image under the cursor (Shift+click
+again: the next image there; its outline is drawn in its colour), or type its
+number. Then paint with the left mouse button where that image must be used;
+the right button erases. Each image has its own mask, so paint as many images
+as needed (the row under the buttons lists them; ✕ removes one). The masks are
+shown tinted and numbered, the preview updates after each stroke, and the edge
+is soft, so the change is seamless. Masks belong to the image (they stay put
+when you change the projection or crop), are undoable and are saved in the
+project.
+
 ### 5.6 Step 5: Stretch
 
 Astronomical images (and dark RAW renderings) are usually **linear**: the
@@ -408,6 +435,14 @@ the image looks almost black. The histogram stretch makes it visible.
   based on all loaded FITS images together.
 - Changing the stretch is instant: nothing has to be recomputed.
 - **Exposure** is applied before the stretch.
+
+**Display modes (view only).** **Display** above the view shows the data as
+Siril does: *Linear*, *Logarithm*, *Square root*, *Squared*, *Asinh*,
+*AutoStretch* or *Histogram equalisation*, with **Low** and **High**: values
+below Low are black, above High white (for faint linear data try High around
+0.01–0.1; ↺ resets them). *As processed* shows the stretch of this panel. The
+display mode never changes what is saved. The Star stacking result and the
+Post-processing tab have the same control.
 
 ### 5.7 Undo, redo and projects
 

@@ -376,6 +376,107 @@ pub struct ComposeParams {
     pub levels: Option<usize>,
     /// Night sky: the stars of each photo turned back to one moment (see `SkyAlign`).
     pub sky: Option<std::sync::Arc<SkyAlign>>,
+    /// Source masks (indexed like the images; see `mask_raster`): where a photo's
+    /// mask is 1, only that photo is used; its soft edge fades the others out.
+    pub force: Option<std::sync::Arc<Vec<Option<std::sync::Arc<Gray>>>>>,
+}
+
+/// A dab of a source mask: a disc in the photo's own pixels (1-based), adding
+/// to the mask or erasing from it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MaskDab {
+    pub x: f64,
+    pub y: f64,
+    pub r: f64,
+    pub erase: bool,
+}
+
+/// Cells on the long side of a source mask's raster.
+const MASK_CELLS: usize = 256;
+
+/// A photo's source mask (h × w px) as a soft raster, 1 where the photo must be
+/// used, or None when nothing is painted. Dabs apply in order.
+pub fn mask_raster(dabs: &[MaskDab], h: usize, w: usize) -> Option<Gray> {
+    if !dabs.iter().any(|d| !d.erase) || h == 0 || w == 0 {
+        return None;
+    }
+    let k = MASK_CELLS as f64 / h.max(w) as f64;
+    let (mh, mw) = (((h as f64 * k).round() as usize).max(1), ((w as f64 * k).round() as usize).max(1));
+    let mut m = Gray::new(mh, mw);
+    for d in dabs {
+        // Cell (cx, cy) has its centre at pixel ((cx + 0.5) / k + 0.5, …).
+        let (cx, cy, r) = ((d.x - 0.5) * k - 0.5, (d.y - 0.5) * k - 0.5, (d.r * k).max(0.5));
+        let (x0, x1) = ((cx - r).floor().max(0.0) as usize, ((cx + r).ceil().max(0.0) as usize).min(mw - 1));
+        let (y0, y1) = ((cy - r).floor().max(0.0) as usize, ((cy + r).ceil().max(0.0) as usize).min(mh - 1));
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                if (x as f64 - cx).powi(2) + (y as f64 - cy).powi(2) <= r * r {
+                    m.px[y * mw + x] = if d.erase { 0.0 } else { 1.0 };
+                }
+            }
+        }
+    }
+    if m.px.iter().all(|&v| v == 0.0) {
+        return None;
+    }
+    Some(blur(&m, 1.5))
+}
+
+/// The pixel (1-based, in the photo as it is, with its lens distortion) of a
+/// photo of `size` (h, w) placed by `g` that shows output point (u, v), or None.
+pub fn uv_to_pixel(g: &M3, size: (usize, usize), proj: Projection, f: f64, c: Pt, lens: Lens, u: f64, v: f64) -> Option<Pt> {
+    let (xx, yy, zz) = proj_inverse(proj, u / f, v / f)?;
+    let m = inv(g) * kmat(f, c);
+    let sw = m[(2, 0)] * xx + m[(2, 1)] * yy + m[(2, 2)] * zz;
+    if sw <= 0.0 {
+        return None;
+    }
+    let (ix, iy) = ((m[(0, 0)] * xx + m[(0, 1)] * yy + m[(0, 2)] * zz) / sw, (m[(1, 0)] * xx + m[(1, 1)] * yy + m[(1, 2)] * zz) / sw);
+    let (h, w) = size;
+    let ci = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let (ox, oy) = distort(ix, iy, ci, lens);
+    (1.0 <= ox && ox <= w as f64 && 1.0 <= oy && oy <= h as f64).then_some([ox, oy])
+}
+
+/// Which photo the source masks ask for at every output pixel of `box_` at
+/// `p.scale` (0: none, else index + 1) and how strongly (0…1), as (w, h,
+/// photo, strength). None without masks.
+pub fn source_map(g: &[M3], sizes: &[(usize, usize)], box_: (f64, f64, f64, f64), p: &ComposeParams) -> Option<(usize, usize, Vec<i32>, Vec<f32>)> {
+    let force = p.force.as_ref().filter(|f| f.iter().any(|m| m.is_some()))?;
+    let (umin, umax, vmin, vmax) = box_;
+    let wc = (((umax - umin + 1.0) * p.scale).round() as usize).max(1);
+    let hc = (((vmax - vmin + 1.0) * p.scale).round() as usize).max(1);
+    let mut fi = vec![0i32; hc * wc];
+    let mut fm = vec![0f32; hc * wc];
+    let k = kmat(p.f, p.c);
+    for (i, m) in force.iter().enumerate() {
+        let (Some(m), Some(gi), Some(&(h, w))) = (m, g.get(i), sizes.get(i)) else { continue };
+        let ms = inv(gi) * k;
+        let o = outline(gi, h, w, p.projection, p.f, p.c, p.lens, 24);
+        let Some((x0, x1, y0, y1)) = outline_box(&o, umin, vmin, p.scale, wc, hc) else { continue };
+        let ci = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+        let (kh, kw) = (m.h as f64 / h as f64, m.w as f64 / w as f64);
+        fi.par_chunks_mut(wc).zip(fm.par_chunks_mut(wc)).enumerate().skip(y0 - 1).take(y1 - y0 + 1).for_each(|(y, (irow, mrow))| {
+            for x in x0..=x1 {
+                let Some((xx, yy, zz)) = proj_inverse(p.projection, ((x as f64 - 0.5) / p.scale + umin - 0.5) / p.f, ((y as f64 + 0.5) / p.scale + vmin - 0.5) / p.f) else { continue };
+                let sw = ms[(2, 0)] * xx + ms[(2, 1)] * yy + ms[(2, 2)] * zz;
+                if sw <= 0.0 {
+                    continue;
+                }
+                let (ix, iy) = ((ms[(0, 0)] * xx + ms[(0, 1)] * yy + ms[(0, 2)] * zz) / sw, (ms[(1, 0)] * xx + ms[(1, 1)] * yy + ms[(1, 2)] * zz) / sw);
+                let (ox, oy) = distort(ix, iy, ci, p.lens);
+                if !(1.0 <= ox && ox <= w as f64 && 1.0 <= oy && oy <= h as f64) {
+                    continue;
+                }
+                let v = bilinear(m, (oy - 0.5) * kh + 0.5, (ox - 0.5) * kw + 0.5);
+                if v > mrow[x - 1] {
+                    mrow[x - 1] = v;
+                    irow[x - 1] = (i + 1) as i32;
+                }
+            }
+        });
+    }
+    Some((wc, hc, fi, fm))
 }
 
 /// The sky turns while a panorama is shot, so the stars of frames taken
@@ -400,7 +501,7 @@ pub struct SkyMap {
 
 impl Default for ComposeParams {
     fn default() -> Self {
-        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12, levels: None, sky: None }
+        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12, levels: None, sky: None, force: None }
     }
 }
 
@@ -544,6 +645,16 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
     let mut bestw = if smart { Gray::new(hc, wc) } else { Gray::new(0, 0) };
     let mut besti: Vec<i32> = vec![0; if smart { hc * wc } else { 0 }];
     let outlines: Vec<Vec<Pt>> = (0..n).map(|i| outline(&g[i], sizes[i].0, sizes[i].1, p.projection, p.f, p.c, p.lens, 24)).collect();
+    // Source masks: where photo k is asked for with strength m, the other photos
+    // weigh (1 - m) times as much, so the masked photo takes over smoothly.
+    let fmap = source_map(g, sizes, box_, p).map(|(_, _, fi, fm)| (fi, fm));
+    let fmap = fmap.as_ref();
+    let adj = |i: usize, k: usize, wt: f32| -> f32 {
+        match fmap {
+            Some((fi, fm)) if fm[k] > 0.0 && fi[k] != (i + 1) as i32 => wt * (1.0 - fm[k]).max(0.0),
+            _ => wt,
+        }
+    };
     for i in 0..n {
         let Some((x0, x1, y0, y1)) = outline_box(&outlines[i], umin, vmin, p.scale, wc, hc) else { continue };
         let rows = acc.px.par_chunks_mut(wc).zip(wsum.px.par_chunks_mut(wc)).enumerate().skip(y0 - 1).take(y1 - y0 + 1);
@@ -552,6 +663,7 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
                 |((y, (arow, wrow)), ((brow, bwrow), birow))| {
                     for x in x0..=x1 {
                         let Some((col, wt, _)) = s.sample(i, x as f64, (y + 1) as f64) else { continue };
+                        let wt = adj(i, y * wc + x - 1, wt);
                         arow[x - 1] = arow[x - 1].add(col.scale(wt));
                         wrow[x - 1] += wt;
                         if wt > bwrow[x - 1] {
@@ -567,6 +679,7 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
             rows.for_each(|(y, (arow, wrow))| {
                 for x in x0..=x1 {
                     let Some((col, wt, _)) = s.sample(i, x as f64, (y + 1) as f64) else { continue };
+                    let wt = adj(i, y * wc + x - 1, wt);
                     if seam {
                         if wt > wrow[x - 1] {
                             arow[x - 1] = col;
@@ -639,6 +752,10 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
             // the overlap, where the multi-band blend makes it gradual.
             let margin = 0.06 * sizes[ki].0.min(sizes[ki].1) as f64;
             for (y, x) in pix {
+                // A photo asked for by a source mask stays.
+                if fmap.is_some_and(|(_, fm)| fm[y * wc + x] > 0.5) {
+                    continue;
+                }
                 if let Some((_, _, dist)) = s.sample(ki, (x + 1) as f64, (y + 1) as f64) {
                     if dist >= margin {
                         sel[y * wc + x] = kbest;

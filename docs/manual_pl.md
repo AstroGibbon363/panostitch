@@ -352,6 +352,22 @@ zepsuło. Włącz **pokaż niepołączone zdjęcia** (prawa kolumna), by pokaza�
 zdjęcia w rzędzie pod panoramą i rozmieścić je ręcznie przez
 **Ctrl+przeciąganie**.
 
+**Punkty kontrolne ręcznie.** Gdy dwa zdjęcia nie dopasują się same (mało
+kontrastowe niebo, trawa pod statywem, źle dopasowana para), ustaw odpowiadające
+sobie punkty sam, jak w PTGui: **✚ Punkty kontrolne…** w panelu dopasowania
+otwiera oba zdjęcia pokazanej pary obok siebie, każde z własnym powiększeniem.
+Inne zdjęcia wybierzesz w **Lewe** / **Prawe**. Kliknij punkt na jednym
+zdjęciu, potem ten sam punkt na drugim; **przyciągaj do gwiazd** stawia
+kliknięcie w środku najbliższej gwiazdy. Dla zwykłego modelu (homografia)
+wystarczą dwa punkty; ustaw 4–8 rozłożonych na części wspólnej. Gdy jest ich
+dość, linia przy każdym punkcie pokazuje, gdzie stawia go obliczenie (długa
+linia: zły punkt; prawy klik go usuwa), a żółty krzyżyk pokazuje, gdzie powinien
+być partner nowego punktu. Dla punktów na niebie między zdjęciami robionymi
+w odstępie minut zaznacz **punkty to gwiazdy**. **✔ Użyj punktów** tworzy parę:
+zastępuje każdy inny wynik dla tych dwóch zdjęć, zostaje przy ponownym
+dopasowaniu (Re-match pair ją zastępuje), udokładnienie nigdy jej nie odrzuca
+i zapisuje się w projekcie.
+
 ### 5.4 Krok 3: projekcja
 
 Zob. [Projekcje](#7-projekcje), jak wygląda każda z nich.
@@ -409,6 +425,18 @@ zdjęciami do niego dołączonymi dalej od odniesienia (wzdłuż żółtych poł
 Zdjęcie odniesienia się nie rusza; do przesunięcia wszystkiego użyj pochylenia
 i przechyłu.
 
+**Maski zdjęć źródłowych.** Tam, gdzie łączenie wybiera złe zdjęcie (drzewo
+lub osoba, które się poruszyły, samochód, duch), wskaż, którego użyć: **✐ Maski
+zdjęć** nad widokiem. Shift+klik na panoramie wybiera zdjęcie pod kursorem
+(kolejny Shift+klik: następne zdjęcie w tym miejscu; jego obrys rysowany jest
+jego kolorem), albo wpisz jego numer. Potem lewym przyciskiem zamaluj, gdzie to
+zdjęcie ma być użyte; prawy wymazuje. Każde zdjęcie ma własną maskę, więc
+maluj tyle zdjęć, ile trzeba (wiersz pod przyciskami je wymienia; ✕ usuwa
+jedną). Maski są pokazane w kolorze i ponumerowane, podgląd odświeża się po
+każdym pociągnięciu, a krawędź jest miękka, więc zmiana nie ma szwu. Maski
+należą do zdjęcia (zostają na miejscu przy zmianie projekcji czy kadrowania),
+można je cofnąć i zapisują się w projekcie.
+
 ### 5.6 Krok 5: rozciąganie
 
 Zdjęcia astronomiczne (i ciemne wywołania RAW) są zwykle **liniowe**:
@@ -431,6 +459,14 @@ widocznymi.
   podglądu, liczone ze wszystkich wczytanych obrazów FITS razem.
 - Zmiana rozciągania jest natychmiastowa: nic nie trzeba przeliczać.
 - **Ekspozycja** jest stosowana przed rozciąganiem.
+
+**Tryby wyświetlania (tylko widok).** **Wyświetlanie** nad widokiem pokazuje
+dane jak Siril: *Liniowy*, *Logarytm*, *Pierwiastek*, *Kwadrat*, *Asinh*,
+*AutoStretch* lub *Wyrównanie histogramu*, z suwakami **Low** i **High**:
+wartości poniżej Low są czarne, powyżej High białe (dla słabych danych
+liniowych spróbuj High około 0,01–0,1; ↺ je przywraca). *Jak przetworzono*
+pokazuje rozciągnięcie z tego panelu. Tryb wyświetlania nigdy nie zmienia tego,
+co się zapisuje. Wynik stackowania gwiazd i karta Obróbka mają ten sam element.
 
 ### 5.7 Cofanie, ponawianie i projekty
 

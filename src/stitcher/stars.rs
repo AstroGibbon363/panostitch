@@ -137,6 +137,77 @@ fn kabsch(a: &[V3], b: &[V3]) -> M3 {
     u * M3::from_diagonal(&V3::new(1.0, 1.0, d)) * vt
 }
 
+/// Control points placed by hand: the rotation homography mapping pixels of the
+/// second frame into the first (as `StarMatch::h`) that best fits points `p2`
+/// onto `p1` (at least two). `size`: (h, w) of each frame; `f`: focal lengths (px).
+pub fn rotation_from_points(p1: &[Pt], p2: &[Pt], size1: (usize, usize), size2: (usize, usize), f1: f64, f2: f64) -> Option<M3> {
+    let n = p1.len().min(p2.len());
+    if n < 2 {
+        return None;
+    }
+    let c1 = [(size1.1 as f64 + 1.0) / 2.0, (size1.0 as f64 + 1.0) / 2.0];
+    let c2 = [(size2.1 as f64 + 1.0) / 2.0, (size2.0 as f64 + 1.0) / 2.0];
+    let mut a: Vec<V3> = p1[..n].iter().map(|&p| ray(p, c1, f1)).collect();
+    let mut b: Vec<V3> = p2[..n].iter().map(|&p| ray(p, c2, f2)).collect();
+    if n == 2 {
+        // Two rays fix a rotation together with their cross product.
+        let (ca, cb) = (a[0].cross(&a[1]), b[0].cross(&b[1]));
+        if ca.norm() < 1e-9 || cb.norm() < 1e-9 {
+            return None;
+        }
+        a.push(ca.normalize());
+        b.push(cb.normalize());
+    }
+    let r = kabsch(&a, &b);
+    let h = super::kmat(f1, c1) * r * super::inv(&super::kmat(f2, c2));
+    h.iter().all(|v| v.is_finite()).then_some(h)
+}
+
+/// The centre of the star nearest to (x, y) within `r` px (image coordinates,
+/// 1-based as everywhere): the brightest pixel, refined by the centroid of its
+/// light above the local background. None when nothing there stands out (a
+/// point on the ground), so the click is kept as it is.
+pub fn snap_to_star(img: &Img, x: f64, y: f64, r: f64) -> Option<Pt> {
+    let (w, h) = (img.w as i64, img.h as i64);
+    let (cx, cy) = ((x - 1.0).round() as i64, (y - 1.0).round() as i64);
+    let r = r.round().max(2.0) as i64;
+    let lum = |xx: i64, yy: i64| crate::image::luminance(img.at(yy as usize, xx as usize));
+    let mut vals = Vec::new();
+    let mut best = (f32::MIN, 0i64, 0i64);
+    for yy in (cy - r).max(0)..=(cy + r).min(h - 1) {
+        for xx in (cx - r).max(0)..=(cx + r).min(w - 1) {
+            let v = lum(xx, yy);
+            vals.push(v);
+            if v > best.0 {
+                best = (v, xx, yy);
+            }
+        }
+    }
+    if vals.len() < 9 {
+        return None;
+    }
+    vals.sort_by(|a, b| a.total_cmp(b));
+    let bg = vals[vals.len() / 2];
+    let mad = {
+        let mut d: Vec<f32> = vals.iter().map(|v| (v - bg).abs()).collect();
+        d.sort_by(|a, b| a.total_cmp(b));
+        d[d.len() / 2].max(1e-6)
+    };
+    if best.0 - bg < 6.0 * 1.4826 * mad {
+        return None;
+    }
+    let (mut sw, mut sx, mut sy) = (0.0f64, 0.0f64, 0.0f64);
+    for yy in (best.2 - 2).max(0)..=(best.2 + 2).min(h - 1) {
+        for xx in (best.1 - 2).max(0)..=(best.1 + 2).min(w - 1) {
+            let v = (lum(xx, yy) - bg).max(0.0) as f64;
+            sw += v;
+            sx += v * xx as f64;
+            sy += v * yy as f64;
+        }
+    }
+    (sw > 0.0).then(|| [sx / sw + 1.0, sy / sw + 1.0])
+}
+
 /// Two frames matched by their stars.
 #[derive(Clone, Debug)]
 pub struct StarMatch {

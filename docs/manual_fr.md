@@ -364,6 +364,23 @@ le gâcher. Activez **montrer les images non reliées** (colonne de droite) pour
 afficher ces images sur une rangée sous le panorama et les placer à la main
 avec **Ctrl+glisser**.
 
+**Points de contrôle à la main.** Quand deux images ne s'associent pas
+seules (un ciel peu contrasté, l'herbe sous le trépied, une paire mal associée),
+placez vous-même des points correspondants, comme dans PTGui : **✚ Points de
+contrôle…** dans le panneau d'association ouvre côte à côte les deux images de la
+paire affichée, chacune avec son propre zoom. Choisissez d'autres images avec
+**Gauche** / **Droite**. Cliquez un point dans une image, puis le même point dans
+l'autre ; **aimanter aux étoiles** place le clic au centre de l'étoile la plus
+proche. Deux points suffisent pour le modèle habituel (homographie) ; placez-en
+4 à 8 répartis sur le recouvrement. Dès qu'il y en a assez, une ligne à chaque
+point montre où le calcul le place (ligne longue : point erroné ; un clic droit
+le supprime), et une croix jaune indique où devrait se trouver le partenaire
+d'un nouveau point. Cochez **les points sont des étoiles** pour des points dans
+le ciel entre des prises espacées de quelques minutes. **✔ Utiliser les points**
+crée la paire : elle remplace tout autre résultat pour ces deux images, est
+gardée lors d'une nouvelle association (Re-match pair la remplace), n'est jamais
+rejetée par l'affinage et est enregistrée dans le projet.
+
 ### 5.4 Étape 3 : projection
 
 Voir [Projections](#7-projections) pour l'aspect de chacune.
@@ -421,6 +438,19 @@ bouge avec les images qui y sont rattachées plus loin de la référence (le lon
 des liens jaunes). L'image de référence ne bouge pas ; utilisez le tangage et
 le roulis pour tout déplacer.
 
+**Masques d'image source.** Là où le fondu choisit la mauvaise photo (un arbre
+ou une personne qui a bougé, une voiture, un fantôme), indiquez-lui laquelle
+prendre : **✐ Masques d'image** au-dessus de la vue. Maj+clic sur le panorama
+choisit l'image sous le curseur (nouveau Maj+clic : l'image suivante à cet
+endroit ; son contour est tracé dans sa couleur), ou tapez son numéro. Peignez
+ensuite au bouton gauche là où cette image doit être utilisée ; le bouton droit
+efface. Chaque image a son propre masque : peignez autant d'images que
+nécessaire (la ligne sous les boutons les énumère ; ✕ en supprime un). Les
+masques sont affichés teintés et numérotés, l'aperçu se met à jour après chaque
+trait, et le bord est doux, si bien que le changement est sans couture. Les
+masques appartiennent à l'image (ils restent en place quand vous changez la
+projection ou le recadrage), s'annulent et sont enregistrés dans le projet.
+
 ### 5.6 Étape 5 : étirement
 
 Les images astronomiques (et les rendus RAW sombres) sont en général
@@ -444,6 +474,15 @@ L'étirement de l'histogramme le rend visible.
   chargement, calculé sur toutes les images FITS chargées ensemble.
 - Changer l'étirement est instantané : rien n'est à recalculer.
 - L'**Exposition** est appliquée avant l'étirement.
+
+**Modes d'affichage (vue seulement).** **Affichage** au-dessus de la vue
+montre les données comme Siril : *Linéaire*, *Logarithme*, *Racine carrée*,
+*Au carré*, *Asinh*, *AutoStretch* ou *Égalisation d'histogramme*, avec **Low** et
+**High** : les valeurs sous Low sont noires, au-dessus de High blanches (pour des
+données linéaires faibles, essayez High vers 0,01–0,1 ; ↺ les réinitialise).
+*Tel que traité* montre l'étirement de ce panneau. Le mode d'affichage ne change
+jamais ce qui est enregistré. Le résultat de l'empilement d'étoiles et l'onglet
+Post-traitement ont la même commande.
 
 ### 5.7 Annuler, rétablir et projets
 

@@ -87,6 +87,9 @@ pub struct StackTab {
     raw_small: Option<(Img, Gray, f64)>,
     post: Option<PostResult>,
     post_key: u64,
+    /// The result's display mode (Siril-like), or as processed.
+    disp_view: crate::finish::ViewStretch,
+    disp_processed: bool,
     post_busy: bool,
     show_bg: bool,
     res_tex: Option<(u64, egui::TextureHandle)>,
@@ -124,7 +127,7 @@ impl Default for StackTab {
         Self {
             run_info: None, report: None, to_stitcher: vec![], to_finish: vec![], files: Default::default(), group: 0, cfg, shown: None, disp: None, frame_dims: None, disp_tex: None, overlay_tex: None,
             aux: false, show_stars: false, brush: 5.0, view: ViewKind::Base, vstate: View::default(), result: None, raw_small: None,
-            post: None, post_key: 0, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
+            post: None, post_key: 0, disp_view: Default::default(), disp_processed: true, post_busy: false, show_bg: false, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
             status: tr("Add light frames to begin. Choose a group, then Add… (or type a path).").into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
             simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: super::notes::note("Tone"),
@@ -1605,6 +1608,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             if ui.button(tr("Fit")).on_hover_text("F").clicked() {
                 self.vstate.fit = true;
             }
+            if self.view == ViewKind::Result {
+                ui.separator();
+                super::view_stretch_ui(ui, "stack_disp", &mut self.disp_view, Some(&mut self.disp_processed));
+            }
             ui.add_space(30.0);
             if ui.button(tr("⇪ Open project…")).on_hover_text(tr("Ctrl+O")).clicked() {
                 self.ask_open_project();
@@ -1747,11 +1754,14 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         };
         let showing_bg = self.show_bg && self.post.as_ref().is_some_and(|p| p.background.is_some());
         ui.label(format!("{}{}: {}", if showing_bg { "Removed background" } else { "Result" }, if r.preview { " (quick preview)" } else { "" }, r.saved.last().map(|s| basename(s)).unwrap_or_else(|| "not saved".into())));
-        let key = self.post_key ^ (showing_bg as u64);
+        let key = self.post_key ^ (showing_bg as u64) ^ if self.disp_processed { 0 } else { self.disp_view.key().rotate_left(3) | 1 };
         if self.res_tex.as_ref().is_none_or(|(k, _)| *k != key) {
             let img = match &self.post {
                 Some(p) if showing_bg => p.background.clone().unwrap(),
+                // A display mode shows the linear result, as Siril does.
+                Some(p) if !self.disp_processed => crate::finish::display_view(&p.linear, self.disp_view, &p.linear),
                 Some(p) => p.image.clone(),
+                None if !self.disp_processed => crate::finish::display_view(&r.image, self.disp_view, &r.image),
                 None => r.image.clone(),
             };
             self.res_tex = Some((key, texture(ctx, "result", &img)));

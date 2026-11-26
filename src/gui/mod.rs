@@ -119,6 +119,51 @@ pub fn zoom_by(view: &mut View, k: f32) {
     view.zoom = (view.zoom * k).clamp(0.005, 64.0);
 }
 
+/// The display mode of a preview with Low / High cut-offs, as Siril's (only the
+/// view changes). `processed`: offer "As processed" first, which shows the
+/// preview with the tab's own stretch (`*processed == true`). Returns true when
+/// something changed.
+pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewStretch, mut processed: Option<&mut bool>) -> bool {
+    use crate::finish::Display;
+    let before = (*v, processed.as_deref().copied());
+    let as_processed = processed.as_deref().copied().unwrap_or(false);
+    let offers_processed = processed.is_some();
+    let name = |m: Display| if offers_processed && m == Display::Linear { tr("Linear") } else { tr(m.name()) };
+    ui.label(tr("Display"));
+    egui::ComboBox::from_id_salt(id).selected_text(if as_processed { tr("As processed") } else { name(v.mode) }).show_ui(ui, |ui| {
+        if let Some(p) = processed.as_deref_mut() {
+            if ui.selectable_label(*p, tr("As processed")).on_hover_text(tr("The preview with the stretch set in the panel")).clicked() {
+                *p = true;
+            }
+        }
+        for m in Display::ALL {
+            if ui.selectable_label(!as_processed && v.mode == m, name(m)).clicked() {
+                v.mode = m;
+                if let Some(p) = processed.as_deref_mut() {
+                    *p = false;
+                }
+            }
+        }
+    }).response.on_hover_text(tr("How the preview is shown, as Siril's display modes: only the view changes, never the saved image. Low and High set the range of values shown."));
+    let as_processed = processed.as_deref().copied().unwrap_or(false);
+    if !as_processed && v.has_range() {
+        ui.spacing_mut().slider_width = 90.0;
+        let tip = tr("Low: values below it are shown black. High: values above it are shown white. For faint linear data try High around 0.01–0.1.");
+        ui.add(egui::Slider::new(&mut v.low, 0.0..=1.0).logarithmic(true).smallest_positive(1e-5).max_decimals(5).text(tr("Low"))).on_hover_text(tip);
+        ui.add(egui::Slider::new(&mut v.high, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).max_decimals(5).text(tr("High"))).on_hover_text(tip);
+        if v.low >= v.high {
+            v.low = (v.high * 0.5).max(0.0);
+        }
+        if (v.low != 0.0 || v.high != 1.0) && ui.small_button("↺").on_hover_text(tr("Low 0, High 1")).clicked() {
+            (v.low, v.high) = (0.0, 1.0);
+        }
+    }
+    if !as_processed && !v.plain() {
+        ui.colored_label(Color32::from_rgb(230, 150, 30), tr("view only"));
+    }
+    (*v, processed.as_deref().copied()) != before
+}
+
 /// A slider with a label (row of a grid).
 pub fn slider<N: egui::emath::Numeric>(ui: &mut egui::Ui, label: &str, v: &mut N, r: std::ops::RangeInclusive<N>, step: f64) -> bool {
     ui.label(label);

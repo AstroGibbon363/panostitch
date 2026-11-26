@@ -356,6 +356,23 @@ estropee. Active **mostrar imágenes no enlazadas** (columna derecha) para ver
 esas imágenes en una fila bajo la panorámica y colocarlas a mano con
 **Ctrl+arrastrar**.
 
+**Puntos de control a mano.** Cuando dos imágenes no se emparejan solas (un
+cielo de poco contraste, la hierba bajo el trípode, un par mal emparejado),
+coloque usted los puntos que se corresponden, como en PTGui: **✚ Puntos de
+control…** en el panel de emparejado abre las dos imágenes del par mostrado una
+al lado de la otra, cada una con su propio zoom. Elija otras imágenes con
+**Izquierda** / **Derecha**. Haga clic en un punto de una imagen y luego en el
+mismo punto de la otra; **ajustar a estrellas** lleva el clic al centro de la
+estrella más cercana. Para el modelo habitual (homografía) bastan dos puntos;
+ponga 4–8 repartidos por el solapamiento. Con suficientes puntos, una línea en
+cada uno muestra dónde lo pone el ajuste (línea larga: punto erróneo; clic
+derecho lo quita), y una cruz amarilla indica dónde debería estar la pareja de
+un punto nuevo. Marque **los puntos son estrellas** para puntos en el cielo
+entre tomas separadas por minutos. **✔ Usar los puntos** crea el par: sustituye
+cualquier otro resultado de estas dos imágenes, se conserva al emparejar de nuevo
+(Re-match pair lo sustituye), el refinado nunca lo descarta y se guarda en el
+proyecto.
+
 ### 5.4 Paso 3: proyección
 
 Vea [Proyecciones](#7-proyecciones) para saber cómo es cada una.
@@ -413,6 +430,19 @@ con las imágenes unidas a ella más lejos de la referencia (por los enlaces
 amarillos). La imagen de referencia no se mueve; use cabeceo y alabeo para
 mover todo.
 
+**Máscaras de imagen fuente.** Donde la fusión elige la foto equivocada (un
+árbol o una persona que se movió, un coche, un fantasma), dígale cuál usar:
+**✐ Máscaras de imagen** sobre la vista. Mayús+clic en la panorámica elige la
+imagen bajo el cursor (otro Mayús+clic: la siguiente imagen ahí; su contorno se
+dibuja en su color), o escriba su número. Luego pinte con el botón izquierdo
+dónde debe usarse esa imagen; el derecho borra. Cada imagen tiene su propia
+máscara, así que pinte tantas imágenes como necesite (la fila bajo los botones
+las enumera; ✕ quita una). Las máscaras se muestran tintadas y numeradas, la
+vista previa se actualiza tras cada trazo y el borde es suave, de modo que el
+cambio no deja costura. Las máscaras pertenecen a la imagen (se quedan en su
+sitio al cambiar la proyección o el recorte), se pueden deshacer y se guardan en
+el proyecto.
+
 ### 5.6 Paso 5: estirado
 
 Las imágenes astronómicas (y los revelados RAW oscuros) suelen ser
@@ -436,6 +466,15 @@ lo hace visible.
   basado en todas las imágenes FITS cargadas juntas.
 - Cambiar el estirado es instantáneo: no hay que recalcular nada.
 - La **Exposición** se aplica antes del estirado.
+
+**Modos de visualización (solo vista).** **Visualización** sobre la vista
+muestra los datos como Siril: *Lineal*, *Logaritmo*, *Raíz cuadrada*, *Al
+cuadrado*, *Asinh*, *AutoStretch* o *Ecualización del histograma*, con **Low**
+y **High**: los valores bajo Low son negros, sobre High blancos (para datos
+lineales débiles pruebe High en torno a 0,01–0,1; ↺ los restablece). *Como está
+procesada* muestra el estirado de este panel. El modo de visualización nunca
+cambia lo que se guarda. El resultado del apilado de estrellas y la pestaña
+Posprocesado tienen el mismo control.
 
 ### 5.7 Deshacer, rehacer y proyectos
 

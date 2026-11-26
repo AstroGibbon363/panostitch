@@ -342,6 +342,21 @@ označen `UNLINKED` a **do panoramy se nezahrne**, aby ji nepokazil. Zapněte
 **ukázat nepropojené obrázky** (pravý sloupec), aby se takové snímky ukázaly v řadě
 pod panoramou, a umístěte je ručně pomocí **Ctrl + tažení**.
 
+**Kontrolní body ručně.** Když se dva snímky samy nespojí (málo kontrastní
+obloha, tráva pod stativem, špatně spojený pár), zadejte odpovídající body sami,
+jako v PTGui: **✚ Kontrolní body…** v panelu Párování otevře oba snímky
+zobrazeného páru vedle sebe, každý s vlastním zoomem. Jiné snímky zvolíte
+v **Vlevo** / **Vpravo**. Klikněte na bod v jednom snímku, pak na stejný bod ve
+druhém; **přichytit na hvězdy** posadí kliknutí na střed nejbližší hvězdy. Pro
+obvyklý model (homografie) stačí dva body; zadejte jich 4–8 rozložených po
+překryvu. Jakmile je bodů dost, čára od každého bodu ukazuje, kam ho klade
+výpočet (dlouhá čára: špatný bod; pravé kliknutí ho smaže), a žlutý křížek
+ukazuje, kde by měl být protějšek nového bodu. U bodů na obloze mezi snímky
+focenými minuty po sobě zaškrtněte **body jsou hvězdy**. **✔ Použít body**
+vytvoří pár: nahradí jiný výsledek pro tyto dva snímky, zůstane i při novém
+párování (Re-match pair ho nahradí), zpřesnění ho nikdy neodmítne a uloží se
+do projektu.
+
 ### 5.4 Krok 3: Projekce (Projection)
 
 Jak jednotlivé projekce vypadají, popisuje kapitola [Projekce](#7-projekce).
@@ -396,6 +411,18 @@ Přepínačem **překryvy** v liště je vypnete a uvidíte samotnou panoramu.
 němu připojené dál od reference (podél žlutých vazeb). Referenční snímek se
 nehýbe; celou panoramu posunete pomocí Pitch a Roll.
 
+**Masky snímků.** Kde spojení vybere špatnou fotku (strom nebo člověk, který se
+pohnul, auto, duch), řekněte mu, kterou použít: **✐ Masky snímků** nad
+náhledem. Shift+kliknutí do panoramatu vybere snímek pod kurzorem (další
+Shift+kliknutí: další snímek v tom místě; jeho obrys se vykreslí jeho barvou),
+nebo napište jeho číslo. Pak levým tlačítkem namalujte, kde se má ten snímek
+použít; pravé tlačítko maže. Každý snímek má vlastní masku, takže namalujte
+tolik snímků, kolik potřebujete (řádek pod tlačítky je vypíše; ✕ jednu
+odstraní). Masky jsou zobrazené barevně a očíslované, náhled se po každém tahu
+obnoví a okraj je měkký, takže změna nemá šev. Masky patří ke snímku (zůstanou
+na místě i při změně projekce nebo ořezu), jdou vrátit přes Zpět a ukládají se
+do projektu.
+
 ### 5.6 Krok 5: Roztažení histogramu (Stretch)
 
 Astronomické snímky (a tmavé převody RAW) jsou obvykle **lineární**: zajímavé
@@ -417,6 +444,14 @@ skoro černě. Roztažení histogramu je zviditelní.
   podle všech načtených snímků FITS dohromady.
 - Změna roztažení je okamžitá, nic se nepřepočítává.
 - **Expozice** se uplatní před roztažením.
+
+**Zobrazovací režimy (jen pohled).** **Zobrazení** nad náhledem ukáže data jako
+Siril: *Lineární*, *Logaritmus*, *Odmocnina*, *Druhá mocnina*, *Asinh*,
+*AutoStretch* nebo *Vyrovnání histogramu*, s posuvníky **Low** a **High**:
+hodnoty pod Low jsou černé, nad High bílé (pro slabá lineární data zkuste High
+kolem 0,01–0,1; ↺ je vrátí). *Jak je zpracováno* ukazuje roztažení z tohoto
+panelu. Zobrazovací režim nikdy nemění, co se uloží. Výsledek skládání hvězd
+a záložka Dodatečné úpravy mají stejný ovládací prvek.
 
 ### 5.7 Zpět, znovu a projekty
 

@@ -42,6 +42,8 @@ pub struct Item {
     pub stars: Option<Arc<Vec<Pt>>>,
     /// Where it shows sky, and its background (found when needed for rendering a turning sky).
     pub sky_map: Option<Arc<SkyMap>>,
+    /// Source mask: where this image must be used (painted on the panorama).
+    pub mask: Arc<Vec<MaskDab>>,
 }
 
 pub type FeatKey = (usize, usize, u64, u64);
@@ -60,6 +62,9 @@ pub struct PairRes {
     pub msg: String,
     /// Matched by star patterns (the sky may have turned between the two shots).
     pub stars: bool,
+    /// Control points placed by hand: kept by a new matching run and never
+    /// rejected by the global refinement.
+    pub manual: bool,
 }
 
 #[derive(Clone)]
@@ -289,13 +294,46 @@ struct CropEdit {
     drag: Option<(super::finish::CropGrip, (f64, f64, f64, f64), (f64, f64))>,
 }
 
+/// Control points placed by hand on two images (left `i`, right `j`), in each
+/// image's pixels, as in PTGui: for pairs the matching missed or got wrong.
+struct CpEdit {
+    i: usize,
+    j: usize,
+    pts: Vec<(Pt, Pt)>,
+    /// A point on one side waiting for its partner: (on the right, point).
+    pending: Option<(bool, Pt)>,
+    /// The points are stars (the sky may have turned between the shots).
+    stars: bool,
+    /// Clicks snap to the nearest star.
+    snap: bool,
+    va: View,
+    vb: View,
+}
+
+/// Painting source masks: the image to use, the brush (screen px), and the
+/// stroke being drawn (output coordinates; right button: erasing).
+struct MaskEdit {
+    src: usize,
+    brush: f32,
+    stroke: Vec<(f64, f64)>,
+    erase: bool,
+}
+
 pub struct StitchTab {
     /// Saved panoramas handed to the Post-processing tab.
     pub to_finish: Vec<String>,
+    /// The display mode of the views (Siril-like), or as processed (the stretch panel).
+    disp_view: crate::finish::ViewStretch,
+    disp_processed: bool,
     /// Hand the panorama being saved to the Post-processing tab when it is done.
     post_after: bool,
     /// The crop frame being drawn on the panorama view.
     crop_edit: Option<CropEdit>,
+    /// Control points being placed by hand on two images.
+    cp: Option<CpEdit>,
+    /// Source masks being painted, and their tinted view (key, texture, numbers at their centres).
+    mask_edit: Option<MaskEdit>,
+    mask_tex: Option<(u64, Option<egui::TextureHandle>, Vec<(usize, f64, f64)>)>,
     /// The panorama being saved, and the last one saved.
     saving_to: Option<String>,
     last_pano: Option<String>,
@@ -354,7 +392,7 @@ pub struct StitchTab {
 struct Detail {
     key: u64,
     tex: egui::TextureHandle,
-    tex_key: (u64, u64, u64),
+    tex_key: (u64, u64, u64, u64),
     img: Img,
     box_: (f64, f64, f64, f64),
     scale: f64,
@@ -375,6 +413,7 @@ struct Snap {
 struct ProjData {
     path: String,
     offsets: Vec<([f64; 2], f64)>,
+    masks: Vec<Vec<MaskDab>>,
     missing: Vec<String>,
     pairs: Vec<PairRes>,
     reference: Option<usize>,
@@ -433,6 +472,9 @@ fn describe(a: &Snap, b: &Snap) -> String {
     if a.items.iter().zip(&b.items).any(|(x, y)| x.gain != y.gain) {
         return tr("brightness").into();
     }
+    if a.items.iter().zip(&b.items).any(|(x, y)| x.mask != y.mask) {
+        return tr("source mask").into();
+    }
     let (mut qa, mut qb) = (a.p.clone(), b.p.clone());
     for ((n, x, _), (_, y, _)) in sliders(&mut qa).into_iter().zip(sliders(&mut qb)) {
         if x != y {
@@ -471,7 +513,7 @@ impl Default for StitchTab {
             items: vec![], pairs: vec![], layout: None, p: Params::default(), sel: 0, ref_choice: None, pairsel: 0, show_outliers: true,
             overlays: true, view: ViewKind::Image, vstate: View::default(), pano: None, crop: None,
             status: tr("Add images to begin (any order).").into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
-            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], post_after: false, crop_edit: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
+            dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], disp_view: Default::default(), disp_processed: true, post_after: false, crop_edit: None, cp: None, mask_edit: None, mask_tex: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
         }
     }
@@ -550,7 +592,7 @@ pub fn relayout(sizes: &[(usize, usize)], shots: &[ShotInfo], pairs: &mut [PairR
             // Reject pairs far off the common solution, or clearly worse than typical while resting on few inliers.
             let weak = 2 * p.mininl;
             let bad: Vec<usize> = (0..e.len())
-                .filter(|&q| b.med[q].is_finite() && (b.med[q] > (4.0 * p.tol).max(8.0) || (b.med[q] > (3.0 * typ).max(2.0 * p.tol) && pairs[e[q]].inl.len() < weak)))
+                .filter(|&q| !pairs[e[q]].manual && b.med[q].is_finite() && (b.med[q] > (4.0 * p.tol).max(8.0) || (b.med[q] > (3.0 * typ).max(2.0 * p.tol) && pairs[e[q]].inl.len() < weak)))
                 .collect();
             if pass < 3 && !bad.is_empty() {
                 for &q in &bad {
@@ -713,7 +755,7 @@ impl StitchTab {
                     let r = io::load_any(p, &opt).map(|img| {
                         let f = (DISP_MAX as f64 / img.w.max(img.h) as f64).min(1.0);
                         let disp = if f < 1.0 { resize(&img, f) } else { img.clone() };
-                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native, shot: io::shot_info(p), stars: None, sky_map: None }
+                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native, shot: io::shot_info(p), stars: None, sky_map: None, mask: Arc::new(vec![]) }
                     });
                     if available_memory() < reserve {
                         full.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -865,11 +907,16 @@ impl StitchTab {
         let known_stars: Vec<Option<Arc<Vec<Pt>>>> = self.items.iter().map(|it| it.stars.clone()).collect();
         let n = imgs.len();
         let given = ij.is_some();
-        let ij = ij.unwrap_or_else(|| candidate_pairs(n, p.layout, p.cols, p.snake));
+        let mut ij = ij.unwrap_or_else(|| candidate_pairs(n, p.layout, p.cols, p.snake));
+        // A full run keeps the pairs placed by hand (Re-match pair replaces one).
+        let manual: Vec<(usize, usize)> = self.pairs.iter().filter(|q| q.manual && q.ok).map(|q| (q.i, q.j)).collect();
+        if !given {
+            ij.retain(|ij| !manual.contains(ij));
+        }
         let mut old: Vec<PairRes> = self.pairs.iter().filter(|q| !ij.contains(&(q.i, q.j))).cloned().collect();
-        // Pairs whose images got new features are stale.
+        // Pairs whose images got new features are stale (not those placed by hand).
         let stale: Vec<usize> = (0..n).filter(|&i| imgs[i].1.is_none()).collect();
-        old.retain(|q| !stale.contains(&q.i) && !stale.contains(&q.j));
+        old.retain(|q| q.manual || (!stale.contains(&q.i) && !stale.contains(&q.j)));
         let ref_choice = self.ref_choice;
         let sizes: Vec<(usize, usize)> = self.items.iter().map(|it| (it.img.h, it.img.w)).collect();
         self.preview_pending = then_preview;
@@ -894,9 +941,9 @@ impl StitchTab {
                             let (ok, why) = accept_pair(p1.len(), inl.len(), &h, sizes[j].0, sizes[j].1, p.mininl, &inl.iter().map(|&k| p2[k]).collect::<Vec<_>>());
                             let err = inl.iter().map(|&k| reproj_err(&h, p2[k], p1[k])).sum::<f64>() / inl.len().max(1) as f64;
                             let msg = crate::trf!("{}: {} matches, {} inliers ({}%), mean error {} px{}", name, p1.len(), inl.len(), 100 * inl.len() / p1.len().max(1), format!("{err:.2}"), if ok { String::new() } else { format!("\nREJECTED: {why}.") });
-                            PairRes { i, j, p1, p2, h, inl, ok, listed: listed || ok, msg, stars: false }
+                            PairRes { i, j, p1, p2, h, inl, ok, listed: listed || ok, msg, stars: false, manual: false }
                         }
-                        Err(e) => PairRes { i, j, p1, p2, h: M3::zeros(), inl: vec![], ok: false, listed, msg: format!("{name} FAILED: {e}"), stars: false },
+                        Err(e) => PairRes { i, j, p1, p2, h: M3::zeros(), inl: vec![], ok: false, listed, msg: format!("{name} FAILED: {e}"), stars: false, manual: false },
                     }
                 })
                 .collect();
@@ -931,7 +978,7 @@ impl StitchTab {
                         let m = stars::match_stars(a, b, p.tol).ok()?;
                         let nm = m.p1.len();
                         let msg = crate::trf!("Pair {}–{} (stars): {} of {} stars in the overlap match, mean error {} px", i + 1, j + 1, nm, m.expected, format!("{:.2}", m.err));
-                        Some((k, PairRes { i, j, p1: m.p1, p2: m.p2, h: m.h, inl: (0..nm).collect(), ok: true, listed: true, msg, stars: true }))
+                        Some((k, PairRes { i, j, p1: m.p1, p2: m.p2, h: m.h, inl: (0..nm).collect(), ok: true, listed: true, msg, stars: true, manual: false }))
                     })
                     .collect();
                 for (k, pr) in found {
@@ -1028,11 +1075,12 @@ impl StitchTab {
         let scale = (p.prev_px as f64 / side).min(1.0);
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let sky = self.sky_job(&vis, &g);
+        let force = self.force_job(&vis);
         let uncropped = crop.is_none();
         self.spawn(tr("Rendering preview…"), move |tx| {
             let sky = sky.map(|j| j.finish(tx));
             let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky };
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
             let (img, cov) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, uncropped);
             Ok(Msg::Preview(img, box_, scale, outlines, cov))
         });
@@ -1075,13 +1123,14 @@ impl StitchTab {
         let Some((f, c, g, vis, lens)) = self.geometry() else { return };
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let sky = self.sky_job(&vis, &g);
+        let force = self.force_job(&vis);
         let (proj, blend, tx) = (self.p.proj, self.p.blend, self.tx.clone());
         self.detail_busy = true;
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| {
                 let sky = sky.map(|j| j.finish(&tx));
                 let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky };
+                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
                 compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, false).0
             });
             let _ = tx.send(match r {
@@ -1096,7 +1145,7 @@ impl StitchTab {
     }
 
     fn fingerprint(&self) -> u64 {
-        let items: Vec<(&str, [f64; 2], f64)> = self.items.iter().map(|i| (i.path.as_str(), i.offset, i.gain)).collect();
+        let items: Vec<(&str, [f64; 2], f64, usize, f64)> = self.items.iter().map(|i| (i.path.as_str(), i.offset, i.gain, i.mask.len(), i.mask.iter().map(|d| d.x + d.y + d.r).sum::<f64>())).collect();
         let pairs: Vec<(usize, usize, bool, usize)> = self.pairs.iter().map(|q| (q.i, q.j, q.ok, q.inl.len())).collect();
         hash_of(&format!("{items:?}{pairs:?}{:?}{:?}{:?}{}", self.ref_choice, self.crop, self.p, self.layout.is_some()))
     }
@@ -1165,6 +1214,8 @@ impl StitchTab {
             return;
         }
         self.crop_edit = None;
+        self.cp = None;
+        self.mask_tex = None;
         // A change still settling counts first.
         let fp = self.fingerprint();
         if self.committed.as_ref().is_some_and(|c| c.0 != fp) {
@@ -1206,6 +1257,10 @@ impl StitchTab {
                 t.insert("relative".into(), super::relpath(&ap, &dir).into());
                 t.insert("offset".into(), Value::Array(vec![it.offset[0].into(), it.offset[1].into()]));
                 t.insert("gain".into(), it.gain.into());
+                if !it.mask.is_empty() {
+                    // Source mask: dabs [x, y, radius, erase (0/1)] in the image's pixels.
+                    t.insert("mask".into(), Value::Array(it.mask.iter().map(|d| Value::Array([d.x, d.y, d.r, if d.erase { 1.0 } else { 0.0 }].into_iter().map(Value::from).collect())).collect()));
+                }
                 Value::Table(t)
             })
             .collect();
@@ -1248,6 +1303,9 @@ impl StitchTab {
                 t.insert("message".into(), pr.msg.clone().into());
                 if pr.stars {
                     t.insert("stars".into(), true.into());
+                }
+                if pr.manual {
+                    t.insert("manual".into(), true.into());
                 }
                 Value::Table(t)
             })
@@ -1328,6 +1386,7 @@ impl StitchTab {
         let recs = d.get("images").and_then(|v| v.as_array()).cloned().unwrap_or_default();
         let mut paths = Vec::new();
         let mut offsets = Vec::new();
+        let mut masks = Vec::new();
         let mut missing = Vec::new();
         for r in &recs {
             let ap = r.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -1335,6 +1394,12 @@ impl StitchTab {
             let found = if std::path::Path::new(ap).is_file() { Some(ap.to_string()) } else if rel.is_file() { Some(rel.to_string_lossy().to_string()) } else { None };
             let off = r.get("offset").and_then(|v| v.as_array()).map(|a| [a.first().and_then(num).unwrap_or(0.0), a.get(1).and_then(num).unwrap_or(0.0)]).unwrap_or([0.0; 2]);
             offsets.push((off, r.get("gain").and_then(num).unwrap_or(1.0)));
+            masks.push(
+                r.get("mask")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|d| d.as_array()).filter(|d| d.len() == 4).filter_map(|d| Some(MaskDab { x: num(&d[0])?, y: num(&d[1])?, r: num(&d[2])?, erase: num(&d[3])? > 0.5 })).collect())
+                    .unwrap_or_default(),
+            );
             match found {
                 Some(p) => paths.push(p),
                 None => {
@@ -1366,11 +1431,12 @@ impl StitchTab {
                 listed: r.get("listed").and_then(|v| v.as_bool()).unwrap_or(true),
                 msg: r.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 stars: r.get("stars").and_then(|v| v.as_bool()).unwrap_or(false),
+                manual: r.get("manual").and_then(|v| v.as_bool()).unwrap_or(false),
             });
         }
         let reference = d.get("reference").and_then(|v| v.as_integer()).filter(|&r| r > 0).map(|r| r as usize - 1);
         let crop = d.get("crop").map(|v| fv(Some(v))).filter(|c| c.len() == 4).map(|c| (c[0], c[1], c[2], c[3]));
-        Ok((paths, ProjData { path: path.to_string(), offsets, missing, pairs, reference, crop }))
+        Ok((paths, ProjData { path: path.to_string(), offsets, masks, missing, pairs, reference, crop }))
     }
 
     /// Images of an opened project, placed as saved. `items[k]` belongs to record k.
@@ -1380,6 +1446,7 @@ impl StitchTab {
         for (k, it) in items.into_iter().enumerate() {
             if let Some(mut it) = it {
                 (it.offset, it.gain) = pd.offsets[k];
+                it.mask = Arc::new(pd.masks.get(k).cloned().unwrap_or_default());
                 newidx[k] = Some(self.items.len());
                 self.items.push(it);
             }
@@ -1462,6 +1529,7 @@ impl StitchTab {
         }
         let (imgs, mut scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let sky = self.sky_job(&vis, &g);
+        let force = self.force_job(&vis);
         // Above the loaded resolution, read RAWs loaded at half size again at full size.
         let reread: Vec<(usize, String)> = vis.iter().enumerate().filter(|(_, &i)| self.items[i].native > 1.0 && scale > 1.0).map(|(k, &i)| (k, self.items[i].path.clone())).collect();
         if let Err(e) = crate::sys::check_writable(&out) {
@@ -1497,7 +1565,7 @@ impl StitchTab {
             }
             let refs: Vec<&Source> = srcs.iter().collect();
             let sky = sky.map(|j| j.finish(tx));
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky };
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
             let (wu, hu) = (w as usize, h as usize);
             let astro = io::is_astro(&out);
             // The panorama in the file's own format, filled band by band.
@@ -1618,8 +1686,8 @@ impl StitchTab {
                 Msg::Detail(key, img, box_, scale) => {
                     self.detail_busy = false;
                     if self.pano.is_some() {
-                        let tex = texture(ctx, "detail", &look(&img, 1.0, &self.p));
-                        let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits());
+                        let tex = texture(ctx, "detail", &self.shown_img(&img, 1.0, self.pano.as_ref().map(|p| &p.img)));
+                        let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), self.disp_key());
                         self.detail = Some(Detail { key, tex, tex_key: tk, img, box_, scale });
                     }
                 }
@@ -1749,14 +1817,14 @@ impl StitchTab {
     }
 
     fn tex_for(&mut self, ctx: &egui::Context, i: usize) -> egui::TextureHandle {
-        let key = (self.items[i].path.clone(), self.p.ev.to_bits() ^ self.p.black.to_bits().rotate_left(7) ^ self.p.mid.to_bits().rotate_left(13) ^ self.p.white.to_bits().rotate_left(19));
+        let key = (self.items[i].path.clone(), self.p.ev.to_bits() ^ self.p.black.to_bits().rotate_left(7) ^ self.p.mid.to_bits().rotate_left(13) ^ self.p.white.to_bits().rotate_left(19) ^ self.disp_key().rotate_left(29));
         if let Some(t) = self.tex_cache.get(&key) {
             return t.clone();
         }
         if self.tex_cache.len() > 64 {
             self.tex_cache.clear();
         }
-        let t = texture(ctx, &key.0, &look(&self.items[i].disp, 2f64.powf(self.p.ev), &self.p));
+        let t = texture(ctx, &key.0, &self.shown_img(&self.items[i].disp, 2f64.powf(self.p.ev), None));
         self.tex_cache.insert(key, t.clone());
         t
     }
@@ -1969,6 +2037,9 @@ impl StitchTab {
                     Some(ij) => self.match_pairs(Some(vec![ij]), false),
                     None => self.status = tr("Choose a pair first.").into(),
                 }
+            }
+            if ui.button(tr("✚ Control points…")).on_hover_text(tr("Place matching points by hand on two images, as in PTGui: for pairs the program could not match or matched wrongly")).clicked() {
+                self.open_cp();
             }
             if ui.button(tr("Discard pair")).clicked() && !self.busy {
                 if let Some(q) = self.pairs.get_mut(self.pairsel) {
@@ -2290,6 +2361,424 @@ impl StitchTab {
         self.request_preview();
     }
 
+    /// Open the control-point editor on the chosen pair (or the selected image and the next one).
+    fn open_cp(&mut self) {
+        let n = self.items.len();
+        if n < 2 {
+            self.status = tr("Add at least two images first.").into();
+            return;
+        }
+        let (i, j) = self.pairs.get(self.pairsel).map(|q| (q.i, q.j)).unwrap_or((self.sel.min(n - 2), self.sel.min(n - 2) + 1));
+        self.cp = Some(self.cp_for(i, j, true));
+        self.view = ViewKind::Pair;
+    }
+
+    /// The editor on images `i` (left) and `j` (right), with the points placed by hand on them before.
+    fn cp_for(&self, i: usize, j: usize, snap: bool) -> CpEdit {
+        let q = self.pairs.iter().find(|q| q.manual && ((q.i, q.j) == (i, j) || (q.i, q.j) == (j, i)));
+        let pts = q.map(|q| q.p1.iter().zip(&q.p2).map(|(a, b)| if q.i == i { (*a, *b) } else { (*b, *a) }).collect()).unwrap_or_default();
+        let stars = self.pairs.iter().find(|q| (q.i, q.j) == (i.min(j), i.max(j))).is_some_and(|q| q.stars);
+        CpEdit { i, j, pts, pending: None, stars, snap, va: View::default(), vb: View::default() }
+    }
+
+    /// Focal length (px) of image `i`: from the placement, else from the pairs, else a guess.
+    fn focal_guess(&self, i: usize) -> f64 {
+        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot).collect();
+        let (grp, rho) = zoom(&shots);
+        if let Some(l) = &self.layout {
+            return l.f * rho[i] / rho[l.ref_];
+        }
+        let sizes: Vec<(usize, usize)> = self.items.iter().map(|it| (it.img.h, it.img.w)).collect();
+        group_focal(&self.pairs, &sizes, &grp, &rho).map(|f| f * rho[i]).unwrap_or(sizes[i].0.max(sizes[i].1) as f64)
+    }
+
+    /// Fewest control points the matching model needs.
+    fn cp_needed(&self) -> usize {
+        match self.p.model {
+            Model::Translation => 1,
+            Model::Homography | Model::Similarity => 2,
+            Model::Affine => 3,
+        }
+    }
+
+    /// The pair's transform from the control points (pixels of the right image
+    /// into the left one) and the mean error (px).
+    fn cp_fit(&self, cp: &CpEdit) -> Option<(M3, f64)> {
+        if cp.pts.len() < self.cp_needed() {
+            return None;
+        }
+        let p1: Vec<Pt> = cp.pts.iter().map(|p| p.0).collect();
+        let p2: Vec<Pt> = cp.pts.iter().map(|p| p.1).collect();
+        let (a, b) = (&self.items[cp.i].img, &self.items[cp.j].img);
+        let h = if self.p.model == Model::Homography {
+            stars::rotation_from_points(&p1, &p2, (a.h, a.w), (b.h, b.w), self.focal_guess(cp.i), self.focal_guess(cp.j))?
+        } else {
+            fit_model(self.p.model, &p2, &p1).ok()?
+        };
+        let err = p1.iter().zip(&p2).map(|(x, y)| reproj_err(&h, *y, *x)).sum::<f64>() / p1.len() as f64;
+        err.is_finite().then_some((h, err))
+    }
+
+    /// Use the control points: the pair placed by hand replaces any other result for these two images.
+    fn cp_apply(&mut self) {
+        let Some(cp) = &self.cp else { return };
+        let Some((h, err)) = self.cp_fit(cp) else {
+            self.status = crate::trf!("Place at least {} points in both images.", self.cp_needed());
+            return;
+        };
+        let (i, j, pts, h) = if cp.i < cp.j { (cp.i, cp.j, cp.pts.clone(), h) } else { (cp.j, cp.i, cp.pts.iter().map(|p| (p.1, p.0)).collect(), inv(&h)) };
+        let n = pts.len();
+        let msg = crate::trf!("Pair {}–{} (control points): {} points placed by hand, mean error {} px", i + 1, j + 1, n, format!("{err:.2}"));
+        let pr = PairRes { i, j, p1: pts.iter().map(|p| p.0).collect(), p2: pts.iter().map(|p| p.1).collect(), h, inl: (0..n).collect(), ok: true, listed: true, msg, stars: cp.stars, manual: true };
+        match self.pairs.iter().position(|q| (q.i, q.j) == (i, j)) {
+            Some(k) => self.pairs[k] = pr,
+            None => {
+                self.pairs.push(pr);
+                self.pairs.sort_by_key(|q| (q.i, q.j));
+            }
+        }
+        self.pairsel = self.pairs.iter().position(|q| (q.i, q.j) == (i, j)).unwrap_or(0);
+        let note = self.relayout_now();
+        self.crop = None;
+        self.status = crate::trf!("Control points used for pair {}–{}; placement updated.{}", i + 1, j + 1, note);
+        if self.layout.is_some() {
+            // Shown again once the preview is ready (it reports in the status line too).
+            self.note_after = Some(self.status.clone());
+            self.request_preview();
+        }
+    }
+
+    /// The control-point editor: the two images side by side, each with its own zoom.
+    fn show_cp(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let n = self.items.len();
+        let Some(mut cp) = self.cp.take() else { return };
+        if cp.i >= n || cp.j >= n || n < 2 {
+            return;
+        }
+        let mut close = false;
+        let mut apply = false;
+        ui.horizontal_wrapped(|ui| {
+            let (mut i, mut j) = (cp.i, cp.j);
+            let num = |v: f64, _: std::ops::RangeInclusive<usize>| format!("{}", v as usize + 1);
+            let parse = |s: &str| s.trim().parse::<f64>().ok().map(|v| v - 1.0);
+            ui.label(tr("Left"));
+            ui.add(egui::DragValue::new(&mut i).range(0..=n - 1).custom_formatter(num).custom_parser(parse));
+            ui.label(tr("Right"));
+            ui.add(egui::DragValue::new(&mut j).range(0..=n - 1).custom_formatter(num).custom_parser(parse));
+            if (i, j) != (cp.i, cp.j) && i != j {
+                cp = self.cp_for(i, j, cp.snap);
+            }
+            ui.checkbox(&mut cp.snap, tr("snap to stars")).on_hover_text(tr("A click lands on the centre of the nearest star; elsewhere (the ground) it stays where you clicked"));
+            ui.checkbox(&mut cp.stars, tr("the points are stars")).on_hover_text(tr("The sky turns between shots minutes apart: star points let the refinement measure it. Leave off for points on the ground"));
+            let need = self.cp_needed();
+            if ui.add_enabled(cp.pts.len() >= need, egui::Button::new(egui::RichText::new(tr("✔ Use the points")).strong())).on_disabled_hover_text(crate::trf!("Place at least {} points in both images.", need)).clicked() {
+                apply = true;
+            }
+            if ui.add_enabled(!cp.pts.is_empty(), egui::Button::new(tr("Clear"))).clicked() {
+                cp.pts.clear();
+                cp.pending = None;
+            }
+            if ui.button(tr("Close")).clicked() {
+                close = true;
+            }
+        });
+        let fit = self.cp_fit(&cp);
+        ui.label(match &fit {
+            Some((_, e)) => crate::trf!("{} points · mean error {} px. Right-click a point to remove it.", cp.pts.len(), format!("{e:.2}")),
+            None => crate::trf!("Click a point in one image, then the same point in the other (at least {}; spread them over the overlap). Scroll to zoom, drag to pan.", self.cp_needed()),
+        });
+        let (ta, tb) = (self.tex_for(ctx, cp.i), self.tex_for(ctx, cp.j));
+        let sizes = [(self.items[cp.i].img.w as f64, self.items[cp.i].img.h as f64), (self.items[cp.j].img.w as f64, self.items[cp.j].img.h as f64)];
+        let palette = [Color32::from_rgb(255, 80, 80), Color32::from_rgb(80, 220, 80), Color32::from_rgb(90, 160, 255), Color32::from_rgb(255, 200, 40), Color32::from_rgb(230, 90, 230), Color32::from_rgb(60, 220, 220)];
+        let mut clicked: Option<(bool, Pt, f32)> = None;
+        let mut removed: Option<usize> = None;
+        let avail = ui.available_size();
+        let (pts, pending) = (cp.pts.clone(), cp.pending);
+        ui.horizontal(|ui| {
+            for right in [false, true] {
+                let (w, h) = sizes[right as usize];
+                let tex = if right { &tb } else { &ta };
+                let view = if right { &mut cp.vb } else { &mut cp.va };
+                let label = if right { cp.j + 1 } else { cp.i + 1 };
+                ui.allocate_ui(egui::vec2((avail.x - 8.0) / 2.0, avail.y), |ui| {
+                    let s = image_view(ui, view, (w, h), &[(tex, [0.5, w + 0.5, 0.5, h + 0.5])], true);
+                    let p = ui.painter().with_clip_rect(s.rect);
+                    p.text(s.rect.left_top() + egui::vec2(6.0, 4.0), egui::Align2::LEFT_TOP, label.to_string(), egui::FontId::proportional(20.0), Color32::WHITE);
+                    for (k, pt) in pts.iter().enumerate() {
+                        let q = if right { pt.1 } else { pt.0 };
+                        let c = palette[k % palette.len()];
+                        let at = s.to_screen(q[0], q[1]);
+                        p.circle_stroke(at, 7.0, Stroke::new(2.0, c));
+                        p.text(at + egui::vec2(9.0, -9.0), egui::Align2::LEFT_BOTTOM, (k + 1).to_string(), egui::FontId::proportional(15.0), c);
+                        // Where the fit puts this point: a long line means a wrong point.
+                        if let Some((hh, _)) = &fit {
+                            let (x, y) = if right { apply_h(&inv(hh), pt.0[0], pt.0[1]) } else { apply_h(hh, pt.1[0], pt.1[1]) };
+                            p.line_segment([at, s.to_screen(x, y)], Stroke::new(1.0, c));
+                        }
+                    }
+                    if let Some((on_right, q)) = pending {
+                        if on_right == right {
+                            p.circle_stroke(s.to_screen(q[0], q[1]), 9.0, Stroke::new(2.5, Color32::YELLOW));
+                        } else if let Some((hh, _)) = &fit {
+                            // The partner's likely place in this image.
+                            let (x, y) = if right { apply_h(&inv(hh), q[0], q[1]) } else { apply_h(hh, q[0], q[1]) };
+                            let at = s.to_screen(x, y);
+                            let st = Stroke::new(1.5, Color32::YELLOW);
+                            p.line_segment([at - egui::vec2(12.0, 0.0), at + egui::vec2(12.0, 0.0)], st);
+                            p.line_segment([at - egui::vec2(0.0, 12.0), at + egui::vec2(0.0, 12.0)], st);
+                        }
+                    }
+                    if let Some(pos) = s.resp.interact_pointer_pos() {
+                        if s.resp.clicked() {
+                            let (x, y) = s.to_image(pos);
+                            if x >= 0.5 && x <= w + 0.5 && y >= 0.5 && y <= h + 0.5 {
+                                clicked = Some((right, [x, y], s.zoom));
+                            }
+                        } else if s.resp.secondary_clicked() {
+                            removed = pts
+                                .iter()
+                                .enumerate()
+                                .map(|(k, pt)| {
+                                    let q = if right { pt.1 } else { pt.0 };
+                                    (k, s.to_screen(q[0], q[1]).distance(pos))
+                                })
+                                .filter(|(_, d)| *d < 14.0)
+                                .min_by(|a, b| a.1.total_cmp(&b.1))
+                                .map(|(k, _)| k);
+                        }
+                    }
+                });
+            }
+        });
+        if let Some(k) = removed {
+            cp.pts.remove(k);
+        }
+        if let Some((right, q, zoom)) = clicked {
+            let img = &self.items[if right { cp.j } else { cp.i }].img;
+            let q = if cp.snap { stars::snap_to_star(img, q[0], q[1], (8.0 / zoom as f64).clamp(3.0, 30.0)).unwrap_or(q) } else { q };
+            cp.pending = match cp.pending {
+                Some((other, o)) if other != right => {
+                    cp.pts.push(if right { (o, q) } else { (q, o) });
+                    None
+                }
+                _ => Some((right, q)),
+            };
+        }
+        if !close {
+            self.cp = Some(cp);
+        }
+        if apply {
+            self.cp_apply();
+        }
+    }
+
+    /// An image as the views show it: with the stretch panel, or with the
+    /// display mode (measured on `reference`, the whole preview, when given).
+    fn shown_img(&self, a: &Img, gain: f64, reference: Option<&Img>) -> Img {
+        if self.disp_processed {
+            return look(a, gain, &self.p);
+        }
+        let g = gain as f32;
+        let b = if g == 1.0 { a.clone() } else { a.map(move |c| [c[0] * g, c[1] * g, c[2] * g]) };
+        crate::finish::display_view(&b, self.disp_view, reference.unwrap_or(&b))
+    }
+
+    fn disp_key(&self) -> u64 {
+        if self.disp_processed { 0 } else { self.disp_view.key().rotate_left(5) | 2 }
+    }
+
+    /// The source masks of the images `vis` as soft rasters for rendering (None when there are none).
+    fn force_job(&self, vis: &[usize]) -> Option<Arc<Vec<Option<Arc<crate::image::Gray>>>>> {
+        let v: Vec<Option<Arc<crate::image::Gray>>> = vis.iter().map(|&i| mask_raster(&self.items[i].mask, self.items[i].img.h, self.items[i].img.w).map(Arc::new)).collect();
+        v.iter().any(|m| m.is_some()).then(|| Arc::new(v))
+    }
+
+    /// Start or stop painting source masks on the panorama.
+    fn toggle_masks(&mut self) {
+        if self.mask_edit.take().is_some() {
+            self.mask_tex = None;
+            return;
+        }
+        if self.pano.is_none() {
+            self.status = tr("Preview the panorama first.").into();
+            return;
+        }
+        if self.crop_edit.is_some() {
+            self.toggle_crop();
+        }
+        let vis = self.visible();
+        let src = if vis.contains(&self.sel) { self.sel } else { vis.first().copied().unwrap_or(0) };
+        self.mask_edit = Some(MaskEdit { src, brush: 40.0, stroke: vec![], erase: false });
+        self.view = ViewKind::Pano;
+        self.status = tr("Source masks: choose the image with Shift+click on the panorama (again for the next image there), then paint where it must be used. Right drag erases.").into();
+    }
+
+    /// The tools of source-mask painting (a row under the view's buttons).
+    fn mask_tools(&mut self, ui: &mut egui::Ui) {
+        let n = self.items.len();
+        let Some(me) = self.mask_edit.as_mut() else { return };
+        let mut clear: Option<usize> = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("Source image"));
+            ui.add(egui::DragValue::new(&mut me.src).range(0..=n.saturating_sub(1)).custom_formatter(|v, _| format!("{}", v as usize + 1)).custom_parser(|s| s.trim().parse::<f64>().ok().map(|v| v - 1.0)))
+                .on_hover_text(tr("The image to use where you paint. Shift+click on the panorama picks the image under the cursor; Shift+click again picks the next one there"));
+            ui.spacing_mut().slider_width = 110.0;
+            ui.add(egui::Slider::new(&mut me.brush, 4.0..=250.0).logarithmic(true).text(tr("Brush")).suffix(" px"));
+            ui.weak(tr("left drag paints, right drag erases"));
+            if ui.button(tr("Clear this image's mask")).clicked() {
+                clear = Some(me.src);
+            }
+        });
+        let masked: Vec<usize> = (0..n).filter(|&i| !self.items[i].mask.is_empty()).collect();
+        if !masked.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(crate::trf!("Masks ({}):", masked.len()));
+                for i in masked {
+                    let me = self.mask_edit.as_mut().unwrap();
+                    if ui.selectable_label(me.src == i, (i + 1).to_string()).on_hover_text(tr("Paint on this image's mask")).clicked() {
+                        me.src = i;
+                    }
+                    if ui.small_button("✕").on_hover_text(crate::trf!("Remove the mask of image {}", i + 1)).clicked() {
+                        clear = Some(i);
+                    }
+                }
+            });
+        }
+        if let Some(i) = clear {
+            if !self.items[i].mask.is_empty() {
+                self.items[i].mask = Arc::new(vec![]);
+                self.mask_tex = None;
+                self.request_preview();
+            }
+        }
+    }
+
+    /// Painting source masks on the shown panorama: Shift+click picks the image,
+    /// drags paint (left) or erase (right) its mask, which is shown tinted.
+    fn mask_input(&mut self, ui: &egui::Ui, s: &super::Shown) {
+        let Some((f, c, g, vis, lens)) = self.geometry() else { return };
+        let Some(pv) = self.pano.as_ref() else { return };
+        let (box_, scale, pw, ph) = (pv.box_, pv.scale, pv.img.w, pv.img.h);
+        let palette = [Color32::from_rgb(255, 60, 60), Color32::from_rgb(60, 220, 60), Color32::from_rgb(70, 140, 255), Color32::from_rgb(255, 200, 30), Color32::from_rgb(230, 70, 230), Color32::from_rgb(40, 220, 220), Color32::from_rgb(255, 130, 40)];
+        // The masks, tinted in each image's colour and numbered (recomputed when they or the preview change).
+        let mfp = hash_of(&format!("{:?}{}{box_:?}{scale}", self.items.iter().map(|it| (it.mask.len(), it.mask.iter().map(|d| d.x + d.y + d.r).sum::<f64>())).collect::<Vec<_>>(), self.pano_version));
+        if self.mask_tex.as_ref().map(|m| m.0) != Some(mfp) {
+            let force = self.force_job(&vis);
+            let gv: Vec<M3> = vis.iter().map(|&i| g[i]).collect();
+            let sizes: Vec<(usize, usize)> = vis.iter().map(|&i| (self.items[i].img.h, self.items[i].img.w)).collect();
+            let cp = ComposeParams { scale, projection: self.p.proj, f, c, lens, force, ..Default::default() };
+            let mut labels = Vec::new();
+            let tex = source_map(&gv, &sizes, box_, &cp).filter(|m| m.0 == pw && m.1 == ph).map(|(w, h, fi, fm)| {
+                let mut rgba = vec![0u8; w * h * 4];
+                let mut sums: HashMap<i32, (f64, f64, f64)> = HashMap::new();
+                for k in 0..w * h {
+                    if fi[k] > 0 && fm[k] > 0.02 {
+                        let i = vis[(fi[k] - 1) as usize];
+                        let col = palette[i % palette.len()];
+                        rgba[4 * k..4 * k + 4].copy_from_slice(&[col.r(), col.g(), col.b(), (fm[k] * 110.0) as u8]);
+                        if fm[k] > 0.5 {
+                            let e = sums.entry(fi[k]).or_insert((0.0, 0.0, 0.0));
+                            *e = (e.0 + (k % w) as f64, e.1 + (k / w) as f64, e.2 + 1.0);
+                        }
+                    }
+                }
+                for (k, (sx, sy, sn)) in sums {
+                    labels.push((vis[(k - 1) as usize], (sx / sn + 0.5) / scale + box_.0 - 0.5, (sy / sn + 0.5) / scale + box_.2 - 0.5));
+                }
+                ui.ctx().load_texture("source_masks", egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba), egui::TextureOptions::LINEAR)
+            });
+            self.mask_tex = Some((mfp, tex, labels));
+        }
+        let p = ui.painter().with_clip_rect(s.rect);
+        let (u0, u1, v0, v1) = (box_.0 - 0.5, pw as f64 / scale + box_.0 - 0.5, box_.2 - 0.5, ph as f64 / scale + box_.2 - 0.5);
+        if let Some((_, Some(t), labels)) = &self.mask_tex {
+            p.image(t.id(), egui::Rect::from_min_max(s.to_screen(u0, v0), s.to_screen(u1, v1)), egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            for &(i, u, v) in labels {
+                p.text(s.to_screen(u, v), egui::Align2::CENTER_CENTER, (i + 1).to_string(), egui::FontId::proportional(20.0), palette[i % palette.len()]);
+            }
+        }
+        let Some(me) = self.mask_edit.as_mut() else { return };
+        let src = me.src.min(self.items.len().saturating_sub(1));
+        // The chosen image's outline.
+        if let Some(o) = self.pano.as_ref().and_then(|pv| pv.outlines.get(src)) {
+            let mut pts: Vec<Pos2> = o.iter().filter(|q| q[0].is_finite()).map(|q| s.to_screen(q[0], q[1])).collect();
+            if let Some(&f0) = pts.first() {
+                pts.push(f0);
+            }
+            p.line(pts, Stroke::new(3.0, palette[src % palette.len()]));
+        }
+        let shift = ui.input(|i| i.modifiers.shift);
+        let size = |i: usize| (self.items[i].img.h, self.items[i].img.w);
+        let to_px = |i: usize, u: f64, v: f64| uv_to_pixel(&g[i], size(i), self.p.proj, f, c, lens, u, v);
+        if let Some(pos) = s.resp.hover_pos() {
+            let col = if me.erase && !me.stroke.is_empty() { Color32::from_rgb(255, 90, 90) } else { Color32::WHITE };
+            p.circle_stroke(pos, me.brush, Stroke::new(1.5, col));
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        // Shift+click: the image under the cursor (the next one on each click).
+        if shift && s.resp.clicked() {
+            if let Some(pos) = s.resp.interact_pointer_pos() {
+                let (u, v) = s.to_image(pos);
+                let here: Vec<usize> = vis.iter().copied().filter(|&i| to_px(i, u, v).is_some()).collect();
+                if let Some(k) = here.iter().position(|&i| i == me.src).map(|k| (k + 1) % here.len()).or((!here.is_empty()).then_some(0)) {
+                    me.src = here[k];
+                    self.status = crate::trf!("Source image {} (images here: {}).", here[k] + 1, here.iter().map(|i| (i + 1).to_string()).collect::<Vec<_>>().join(", "));
+                }
+            }
+            return;
+        }
+        let pointer = s.resp.interact_pointer_pos();
+        let started = s.resp.drag_started_by(egui::PointerButton::Primary) || s.resp.drag_started_by(egui::PointerButton::Secondary);
+        let single = (s.resp.clicked() || s.resp.secondary_clicked()) && !shift;
+        if started || single {
+            me.stroke.clear();
+            me.erase = s.resp.drag_started_by(egui::PointerButton::Secondary) || s.resp.secondary_clicked();
+        }
+        if let Some(pos) = pointer {
+            if s.resp.dragged() || started || single {
+                let q = s.to_image(pos);
+                if me.stroke.last() != Some(&q) {
+                    me.stroke.push(q);
+                }
+            }
+        }
+        for &(u, v) in &me.stroke {
+            p.circle_filled(s.to_screen(u, v), me.brush, if me.erase { Color32::from_rgba_unmultiplied(255, 60, 60, 40) } else { Color32::from_rgba_unmultiplied(255, 255, 255, 40) });
+        }
+        if !(s.resp.drag_stopped() || single) || me.stroke.is_empty() {
+            return;
+        }
+        // The stroke into the source image's own pixels, without gaps between the points.
+        let r_uv = me.brush as f64 / s.zoom as f64;
+        let mut dabs = Vec::new();
+        let pts = std::mem::take(&mut me.stroke);
+        let erase = me.erase;
+        let mut dab = |u: f64, v: f64| {
+            if let Some(q) = to_px(src, u, v) {
+                let r = to_px(src, u + r_uv, v).or_else(|| to_px(src, u - r_uv, v)).map(|e| (e[0] - q[0]).hypot(e[1] - q[1])).unwrap_or(r_uv);
+                dabs.push(MaskDab { x: q[0], y: q[1], r, erase });
+            }
+        };
+        dab(pts[0].0, pts[0].1);
+        for w in pts.windows(2) {
+            let d = (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1);
+            let k = (d / (0.4 * r_uv)).ceil().max(1.0) as usize;
+            for t in 1..=k {
+                let a = t as f64 / k as f64;
+                dab(w[0].0 + a * (w[1].0 - w[0].0), w[0].1 + a * (w[1].1 - w[0].1));
+            }
+        }
+        if dabs.is_empty() {
+            self.status = crate::trf!("The stroke is outside image {}: Shift+click there to choose the image under it.", src + 1);
+            return;
+        }
+        if erase && self.items[src].mask.is_empty() {
+            return;
+        }
+        Arc::make_mut(&mut self.items[src].mask).extend(dabs);
+        self.request_preview();
+    }
+
     /// Start drawing the crop frame on the panorama, or apply it.
     fn toggle_crop(&mut self) {
         let full = self.pano.as_ref().map(|p| bounds(&p.outlines)).filter(|b| b.1 > b.0 && b.3 > b.2);
@@ -2443,9 +2932,15 @@ impl StitchTab {
                 self.vstate.fit = true;
             }
             ui.checkbox(&mut self.overlays, tr("overlays"));
+            ui.separator();
+            super::view_stretch_ui(ui, "pano_disp", &mut self.disp_view, Some(&mut self.disp_processed));
+            ui.separator();
             let editing = self.crop_edit.is_some();
             if ui.selectable_label(editing, if editing { tr("✂ Crop: done") } else { tr("✂ Crop") }).on_hover_text(tr("Draw the part of the panorama to keep: drag a frame, drag its edges or corners to adjust it, drag inside it to move it. Click again when done (Esc cancels). Only that part is rendered and saved, so a big panorama needs less memory.")).clicked() {
                 self.toggle_crop();
+            }
+            if ui.selectable_label(self.mask_edit.is_some(), tr("✐ Source masks")).on_hover_text(tr("Paint where a chosen image must be used, e.g. the one frame where a moving tree, person or car is sharp, or where the blend left a ghost. Each image has its own mask; paint as many as needed")).clicked() {
+                self.toggle_masks();
             }
             if ui.button(tr("⬇ Save & post-process…")).on_hover_text(tr("Save the panorama, then open it in the Post-processing tab")).clicked() {
                 self.ask_save_pano();
@@ -2458,6 +2953,9 @@ impl StitchTab {
                 self.step(true);
             }
         });
+        if self.mask_edit.is_some() {
+            self.mask_tools(ui);
+        }
         let status_h = 60.0;
         let avail = ui.available_size();
         ui.allocate_ui(egui::vec2(avail.x, (avail.y - status_h).max(100.0)), |ui| match self.view {
@@ -2553,6 +3051,10 @@ impl StitchTab {
     }
 
     fn show_pair(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.cp.is_some() {
+            self.show_cp(ui, ctx);
+            return;
+        }
         let Some(q) = self.pairs.get(self.pairsel).cloned() else {
             ui.centered_and_justified(|ui| ui.weak(tr("No pairs matched yet.")));
             return;
@@ -2576,13 +3078,15 @@ impl StitchTab {
     }
 
     fn show_pano(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let dk = self.disp_key();
         let Some(pv) = &mut self.pano else {
             ui.centered_and_justified(|ui| ui.weak(tr("Panorama: press “Preview panorama”.")));
             return;
         };
-        let key = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), 1);
+        let key = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), dk | 1);
         if pv.tex.is_none() || pv.tex_key != key {
-            pv.tex = Some(texture(ctx, "pano", &look(&pv.img, 1.0, &self.p)));
+            let shown = if self.disp_processed { look(&pv.img, 1.0, &self.p) } else { crate::finish::display_view(&pv.img, self.disp_view, &pv.img) };
+            pv.tex = Some(texture(ctx, "pano", &shown));
             pv.tex_key = key;
         }
         let tex = pv.tex.clone().unwrap();
@@ -2596,7 +3100,7 @@ impl StitchTab {
         }
         // Image coordinates of this view = output (u, v) coordinates.
         let mut vs = self.vstate;
-        let s = image_view(ui, &mut vs, (u1 - u0, v1 - v0), &[], !ui.input(|i| i.modifiers.ctrl) && self.crop_edit.is_none());
+        let s = image_view(ui, &mut vs, (u1 - u0, v1 - v0), &[], !ui.input(|i| i.modifiers.ctrl) && self.crop_edit.is_none() && self.mask_edit.is_none());
         // image_view assumes the box starts at 0.5: shift the view so (u, v) are used directly.
         if vs.fit != self.vstate.fit || self.vstate.fit {
             vs.center = egui::vec2(((u0 + u1) / 2.0) as f32, ((v0 + v1) / 2.0) as f32);
@@ -2631,9 +3135,10 @@ impl StitchTab {
             self.detail = None;
         }
         if let Some(d) = &mut self.detail {
-            let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits());
+            let tk = (self.p.black.to_bits(), self.p.mid.to_bits(), self.p.white.to_bits(), dk);
             if d.tex_key != tk {
-                d.tex = texture(ctx, "detail", &look(&d.img, 1.0, &self.p));
+                let shown = if self.disp_processed { look(&d.img, 1.0, &self.p) } else { crate::finish::display_view(&d.img, self.disp_view, self.pano.as_ref().map(|p| &p.img).unwrap_or(&d.img)) };
+                d.tex = texture(ctx, "detail", &shown);
                 d.tex_key = tk;
             }
             let (du0, du1) = (d.box_.0 - 0.5, d.img.w as f64 / d.scale + d.box_.0 - 0.5);
@@ -2672,6 +3177,10 @@ impl StitchTab {
         }
         if self.crop_edit.is_some() {
             self.crop_input(ui, &s, bounds(&outlines));
+            return;
+        }
+        if self.mask_edit.is_some() {
+            self.mask_input(ui, &s);
             return;
         }
         // Click selects; Ctrl + drag moves an image (with the images attached beyond it).
@@ -2903,6 +3412,27 @@ impl StitchTab {
         }).map(|(i, _)| i).collect()
     }
     /// Accepted pairs: (i, j, by stars).
+    /// Control points on images `i` (left) and `j` (right), used as with ✔ Use the points.
+    pub fn t_control_points(&mut self, i: usize, j: usize, pts: &[(Pt, Pt)]) {
+        let mut cp = self.cp_for(i, j, false);
+        cp.pts = pts.to_vec();
+        self.cp = Some(cp);
+        self.cp_apply();
+    }
+    pub fn t_set_model(&mut self, m: Model) {
+        self.p.model = m;
+    }
+    /// Pairs placed by hand: (i, j, accepted, points).
+    pub fn t_manual_pairs(&self) -> Vec<(usize, usize, bool, usize)> {
+        self.pairs.iter().filter(|q| q.manual).map(|q| (q.i, q.j, q.ok, q.p1.len())).collect()
+    }
+    pub fn t_paint_mask(&mut self, i: usize, dabs: &[MaskDab]) {
+        Arc::make_mut(&mut self.items[i].mask).extend_from_slice(dabs);
+        self.request_preview();
+    }
+    pub fn t_masks(&self) -> Vec<Vec<MaskDab>> {
+        self.items.iter().map(|it| it.mask.to_vec()).collect()
+    }
     pub fn t_links(&self) -> Vec<(usize, usize, bool)> {
         self.pairs.iter().filter(|q| q.ok).map(|q| (q.i, q.j, q.stars)).collect()
     }
