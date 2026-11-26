@@ -118,7 +118,7 @@ Remarques :
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -503,8 +503,8 @@ points de correspondance enregistrés : environ 50 ko par image.
 | Action | Souris | Clavier | Bouton |
 |---|---|---|---|
 | Déplacer | glisser avec le bouton **gauche** | flèches (vues Image et Paire) | |
-| Zoomer | molette vers le haut | `+` | **Zoom +** |
-| Dézoomer | molette vers le bas | `-` | **Zoom -** |
+| Zoomer | molette vers le haut | `+` | **+** |
+| Dézoomer | molette vers le bas | `-` | **−** |
 | Réinitialiser le zoom | | `F`, `0` ou `Début` | **Ajuster** |
 | Sélectionner une image (vue Panorama) | clic dans son contour | | |
 | Afficher / masquer contours, numéros, liens | | | interrupteur **superpositions** |

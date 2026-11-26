@@ -163,10 +163,13 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
         let tip = tr("Low: values below it are shown black. High: values above it are shown white. For faint linear data try High around 0.01–0.1.");
         // slider + its value (up to "0.00001") + its name
         let slider_w = |ui: &egui::Ui, t: &str| 90.0 + text_w(ui, "0.000001") + text_w(ui, t) + 4.0 * ui.spacing().item_spacing.x;
+        // The name before its slider (as "Display" before its menu), slider and value kept together.
         room(ui, slider_w(ui, tr("Low")));
-        ui.add(egui::Slider::new(&mut v.low, 0.0..=1.0).logarithmic(true).smallest_positive(1e-5).max_decimals(5).text(tr("Low"))).on_hover_text(tip);
+        ui.label(tr("Low")).on_hover_text(tip);
+        ui.add(egui::Slider::new(&mut v.low, 0.0..=1.0).logarithmic(true).smallest_positive(1e-5).max_decimals(5)).on_hover_text(tip);
         room(ui, slider_w(ui, tr("High")) + 30.0);
-        ui.add(egui::Slider::new(&mut v.high, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).max_decimals(5).text(tr("High"))).on_hover_text(tip);
+        ui.label(tr("High")).on_hover_text(tip);
+        ui.add(egui::Slider::new(&mut v.high, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).max_decimals(5)).on_hover_text(tip);
         if v.low >= v.high {
             v.low = (v.high * 0.5).max(0.0);
         }
@@ -196,10 +199,11 @@ pub fn save_kind_ui(ui: &mut egui::Ui, linear: bool, ext: &str) -> Option<bool> 
     let mut pick = None;
     ui.horizontal_wrapped(|ui| {
         ui.label(tr("Save"));
-        if ui.selectable_label(linear, tr("Linear (for processing)")).on_hover_text(save_kind_tip(true)).clicked() {
+        // Radio buttons: a highlighted label next to a plain one did not read as a choice.
+        if ui.radio(linear, tr("Linear (for processing)")).on_hover_text(save_kind_tip(true)).clicked() {
             pick = Some(true);
         }
-        if ui.selectable_label(!linear, tr("Stretched (for viewing)")).on_hover_text(save_kind_tip(false)).clicked() {
+        if ui.radio(!linear, tr("Stretched (for viewing)")).on_hover_text(save_kind_tip(false)).clicked() {
             pick = Some(false);
         }
     });
@@ -635,7 +639,7 @@ impl App {
                             ui.selectable_value(&mut self.prefs.lang, l, tr(l.name()));
                         }
                     });
-                    ui.checkbox(&mut self.prefs.simple, tr("✓ Simple")).on_hover_text(tr("Leave out the advanced controls"));
+                    ui.checkbox(&mut self.prefs.simple, tr("Simple")).on_hover_text(tr("Leave out the advanced controls"));
                     ui.checkbox(&mut self.prefs.modern, tr("◆ Modern"));
                     ui.checkbox(&mut self.prefs.dark, tr("☾ Dark"));
                     if self.prefs != before {

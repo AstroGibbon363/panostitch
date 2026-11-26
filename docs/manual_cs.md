@@ -114,7 +114,7 @@ Poznámky:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  nabídka projekce   │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  nabídka projekce   │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  pole pro cestu      │                                      │  Roll               │
 │  seznam snímků       │                                      │ 4 · Compose         │
@@ -470,8 +470,8 @@ shodné body: asi 50 kB na snímek.
 | Akce | Myš | Klávesnice | Tlačítko |
 |---|---|---|---|
 | Posun | tažení **levým** tlačítkem | šipky (pohledy Image a Pair) | |
-| Přiblížení | kolečko nahoru | `+` | **Přiblížit +** |
-| Oddálení | kolečko dolů | `-` | **Oddálit -** |
+| Přiblížení | kolečko nahoru | `+` | **+** |
+| Oddálení | kolečko dolů | `-` | **−** |
 | Zpět na celek | | `F`, `0` nebo `Home` | **Přizpůsobit** |
 | Výběr snímku (pohled Panorama) | klik do jeho obrysu | | |
 | Zobrazit / skrýt obrysy, čísla, vazby | | | přepínač **překryvy** |

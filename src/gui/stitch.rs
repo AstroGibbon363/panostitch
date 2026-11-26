@@ -894,7 +894,7 @@ impl StitchTab {
                 .par_iter()
                 .map(|&(i, j)| {
                     let (p1, p2) = match_pair(&feats[i], &feats[j], p.ratio, p.maxd);
-                    let name = crate::trf!("Pair {}–{} ({})", i + 1, j + 1, p.model.name());
+                    let name = crate::trf!("Pair {}–{} ({})", i + 1, j + 1, tr(p.model.name()));
                     match ransac(&p2, &p1, p.model, 2000, p.tol) {
                         Ok((h, inl)) => {
                             let (ok, why) = accept_pair(p1.len(), inl.len(), &h, sizes[j].0, sizes[j].1, p.mininl, &inl.iter().map(|&k| p2[k]).collect::<Vec<_>>());
@@ -1991,8 +1991,8 @@ impl StitchTab {
         });
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Pair"));
-            let label = |q: &PairRes| format!("{}–{}  {}", q.i + 1, q.j + 1, if q.ok { format!("{} inl", q.inl.len()) } else { "rejected".into() });
-            let cur = self.pairs.get(self.pairsel).filter(|q| q.listed).map(label).unwrap_or_else(|| "(none)".into());
+            let label = |q: &PairRes| format!("{}–{}  {}", q.i + 1, q.j + 1, if q.ok { crate::trf!("{} inliers", q.inl.len()) } else { tr("rejected").into() });
+            let cur = self.pairs.get(self.pairsel).filter(|q| q.listed).map(label).unwrap_or_else(|| tr("(none)").into());
             egui::ComboBox::from_id_salt("pair").selected_text(cur).width(150.0).show_ui(ui, |ui| {
                 for (k, q) in self.pairs.iter().enumerate().filter(|(_, q)| q.listed) {
                     if ui.selectable_label(k == self.pairsel, label(q)).clicked() {
@@ -2005,7 +2005,7 @@ impl StitchTab {
             ui.checkbox(&mut self.show_outliers, tr("outliers"));
         });
         if let Some(q) = self.pairs.get(self.pairsel) {
-            ui.label(egui::RichText::new(&q.msg).small());
+            ui.label(egui::RichText::new(&q.msg).size(12.5));
         }
     }
 
@@ -2151,7 +2151,7 @@ impl StitchTab {
         }
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Format"));
-            let cur = self.save_format.and_then(|e| io::OUTPUT_FORMATS.iter().find(|f| f.0 == e)).map(|f| f.1).unwrap_or("automatic");
+            let cur = self.save_format.and_then(|e| io::OUTPUT_FORMATS.iter().find(|f| f.0 == e)).map(|f| f.1).unwrap_or(tr("automatic"));
             egui::ComboBox::from_id_salt("savefmt").selected_text(cur).width(240.0).show_ui(ui, |ui| {
                 ui.selectable_value(&mut self.save_format, None, tr("automatic")).on_hover_text(tr("TIFF; FITS or XISF when all images are"));
                 for (e, d) in io::OUTPUT_FORMATS {
@@ -2170,23 +2170,24 @@ impl StitchTab {
                 None => ui.weak(tr("(preview to see the size in pixels)")),
             };
             ui.end_row();
-            // Live estimate of what saving needs, against what is free.
+        });
+        // Live estimate of what saving needs, against what is free (wrapped:
+        // a long line would widen the panel over the preview).
+        {
             if let (Some(pv), Some(first)) = (&self.pano, self.items.first()) {
                 let auto = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
                 let nd = self.save_needs(pv.box_, self.save_format.unwrap_or(auto));
                 let dir = std::path::Path::new(&first.path).parent().filter(|d| !d.as_os_str().is_empty()).map(|d| d.to_path_buf()).unwrap_or_else(|| ".".into());
                 let (mem, disk) = crate::sys::free_cached(&dir);
                 let text = crate::trf!("needs ≈ {} memory ({} free), file ≤ {}{}", gb(nd.mem), gb((mem - memory_reserve()).max(0.0)), gb(nd.file), disk.map(|d| crate::trf!(" ({} free here)", gb(d as f64))).unwrap_or_default());
-                ui.label("");
                 match nd.check(&dir, false) {
-                    Ok(()) => ui.weak(text),
-                    Err(e) => ui.colored_label(Color32::from_rgb(220, 120, 0), format!("⚠ {text}")).on_hover_text(e),
+                    Ok(()) => ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap()),
+                    Err(e) => ui.add(egui::Label::new(egui::RichText::new(format!("⚠ {text}")).color(Color32::from_rgb(220, 120, 0))).wrap()).on_hover_text(e),
                 };
-                ui.end_row();
             }
-        });
+        }
         ui.horizontal_wrapped(|ui| {
-            for (t, pct) in [("¼", 25.0), ("½", 50.0), ("full", 100.0), ("2×", 200.0)] {
+            for (t, pct) in [("¼", 25.0), ("½", 50.0), (tr("full"), 100.0), ("2×", 200.0)] {
                 if ui.selectable_label(self.p.out_pct == pct, t).clicked() {
                     self.p.out_pct = pct;
                 }
@@ -2467,10 +2468,12 @@ impl StitchTab {
                     self.vstate.fit = true;
                 }
             }
-            if ui.button(tr("Zoom +")).clicked() {
+            ui.separator();
+            // Short buttons: the toolbar wraps to fewer lines on small screens.
+            if ui.button(" + ").on_hover_text(tr("Zoom in (+ or the mouse wheel)")).clicked() {
                 super::zoom_by(&mut self.vstate, 1.5);
             }
-            if ui.button(tr("Zoom -")).clicked() {
+            if ui.button(" − ").on_hover_text(tr("Zoom out (− or the mouse wheel)")).clicked() {
                 super::zoom_by(&mut self.vstate, 1.0 / 1.5);
             }
             if ui.button(tr("Fit")).on_hover_text(tr("F (or 0, Home); + / − zoom")).clicked() {
@@ -2631,7 +2634,7 @@ impl StitchTab {
         if let Some(l) = &self.layout {
             let w = self.items[l.ref_].img.w as f64;
             let fov = 2.0 * (w / 2.0 / (l.f * self.p.focal)).atan().to_degrees();
-            ui.label(crate::trf!("{}: {}×{} px · focal {} px (ref. FOV {}°){}{}", self.p.proj.name(), b.1 - b.0 + 1.0, b.3 - b.2 + 1.0, format!("{:.0}", l.f * self.p.focal), format!("{fov:.1}"), l.typical.map(|t| format!(" · typical error {t:.1} px")).unwrap_or_default(), if self.overlays { " · orange = selected, cyan = reference, yellow = links" } else { "" }));
+            ui.label(crate::trf!("{}: {}×{} px · focal {} px (ref. FOV {}°){}{}", tr(self.p.proj.name()), b.1 - b.0 + 1.0, b.3 - b.2 + 1.0, format!("{:.0}", l.f * self.p.focal), format!("{fov:.1}"), l.typical.map(|t| crate::trf!(" · typical error {} px", format!("{t:.1}"))).unwrap_or_default(), if self.overlays { tr(" · orange = selected, cyan = reference, yellow = links") } else { "" }));
         }
         // Image coordinates of this view = output (u, v) coordinates.
         let mut vs = self.vstate;

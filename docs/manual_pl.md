@@ -114,7 +114,7 @@ Uwagi:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -487,8 +487,8 @@ dopasowań: około 50 kB na zdjęcie.
 | Czynność | Mysz | Klawiatura | Przycisk |
 |---|---|---|---|
 | Przesuwanie | przeciąganie **lewym** przyciskiem | strzałki (widoki Obraz i Para) | |
-| Powiększenie | kółko w górę | `+` | **Powiększ +** |
-| Pomniejszenie | kółko w dół | `-` | **Pomniejsz -** |
+| Powiększenie | kółko w górę | `+` | **+** |
+| Pomniejszenie | kółko w dół | `-` | **−** |
 | Reset powiększenia | | `F`, `0` lub `Home` | **Dopasuj** |
 | Zaznaczenie zdjęcia (widok Panorama) | klik wewnątrz jego obrysu | | |
 | Pokaż / ukryj obrysy, numery, połączenia | | | przełącznik **nakładki** |

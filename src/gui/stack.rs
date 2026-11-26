@@ -122,6 +122,7 @@ pub struct StackTab {
     project: Option<String>,
     /// Fingerprint of the setup last saved to (or opened from) a project file.
     saved_fp: Option<u64>,
+    /// Which note (notes.rs key) explains the last setting touched; translated when drawn.
     post_note: &'static str,
 }
 
@@ -136,7 +137,7 @@ impl Default for StackTab {
             post: None, post_key: 0, disp_view: Default::default(), disp_processed: true, post_busy: false, show_bg: false, show_samples: false, cal_pick: None, cal_drag: None, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
             status: tr("Add light frames to begin. Choose a group, then Add… (or type a path).").into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
-            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: super::notes::note("Tone"),
+            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: "Tone",
         }
     }
 }
@@ -1656,7 +1657,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
         }
         if let Some(n) = changed {
-            self.post_note = super::notes::note(n);
+            self.post_note = n;
         }
         // What the file holds: the linear data or the stretched image.
         let out = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
@@ -1692,7 +1693,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 _ => self.status = tr("Press Start first: the saved result goes to Post-processing.").into(),
             }
         }
-        ui.label(egui::RichText::new(self.post_note).weak().size(12.5));
+        ui.label(egui::RichText::new(super::notes::note(self.post_note)).weak().size(12.5));
     }
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1739,7 +1740,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ui.centered_and_justified(|ui| ui.weak(tr("Base frame preview: add light frames.")));
             return;
         };
-        ui.label(format!("{}{}", if self.shown == self.base() { "Base frame: " } else { "Preview: " }, self.shown.as_deref().map(basename).unwrap_or_default()));
+        ui.label(format!("{}: {}", if self.shown == self.base() { tr("Base frame") } else { tr("Preview") }, self.shown.as_deref().map(basename).unwrap_or_default()));
         if self.disp_tex.is_none() {
             let img = if self.aux { disp.map(|c| [(3.0 * c[0].max(0.0).powf(0.7)).min(1.0), (3.0 * c[1].max(0.0).powf(0.7)).min(1.0), (3.0 * c[2].max(0.0).powf(0.7)).min(1.0)]) } else { (*disp).clone() };
             self.disp_tex = Some(texture(ctx, "base", &img));
@@ -1851,7 +1852,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             return;
         };
         let showing_bg = self.show_bg && self.post.as_ref().is_some_and(|p| p.background.is_some());
-        ui.label(format!("{}{}: {}", if showing_bg { "Removed background" } else { "Result" }, if r.preview { " (quick preview)" } else { "" }, r.saved.last().map(|s| basename(s)).unwrap_or_else(|| "not saved".into())));
+        ui.label(format!("{}{}: {}", if showing_bg { tr("Removed background") } else { tr("Result") }, if r.preview { tr(" (quick preview)") } else { "" }, r.saved.last().map(|s| basename(s)).unwrap_or_else(|| tr("not saved").into())));
         let key = self.post_key ^ (showing_bg as u64) ^ if self.disp_processed { 0 } else { self.disp_view.key().rotate_left(3) | 1 };
         if self.res_tex.as_ref().is_none_or(|(k, _)| *k != key) {
             let img = match &self.post {

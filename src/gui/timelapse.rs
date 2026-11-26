@@ -332,8 +332,7 @@ impl TimelapseTab {
                 }
             })
             .response
-            .on_hover_text("How camera RAW frames are read. The built-in decoder is fast and treats every frame the same. \
-                RawTherapee applies the edits saved in its .pp3 files, but takes several seconds per frame.");
+            .on_hover_text(tr("How camera RAW frames are read. The built-in decoder is fast and treats every frame the same. RawTherapee applies the edits saved in its .pp3 files, but takes several seconds per frame."));
         });
         let honoured = matches!(self.s.decoder, io::RawDecoder::RawTherapee | io::RawDecoder::Auto);
         if pp3 > 0 && !honoured {

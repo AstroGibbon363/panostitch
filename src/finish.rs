@@ -1014,41 +1014,35 @@ pub fn display_view(img: &Img, v: ViewStretch, reference: &Img) -> Img {
     img.map(move |c| c.map(|x| lut.at(win(x))))
 }
 
-/// A short description of the settings in use (for the status line).
-pub fn summary(p: &FinishParams) -> String {
+/// A short description of the settings in use (for the status line), its
+/// words passed through `t` (the window's translation).
+pub fn summary(p: &FinishParams, t: fn(&'static str) -> &'static str) -> String {
     let d = FinishParams::default();
-    let mut v = Vec::new();
+    let mut v: Vec<String> = Vec::new();
     if !p.quarter.is_multiple_of(4) || p.flip_h || p.angle != 0.0 {
-        v.push("turned".to_string());
+        v.push(t("turned").into());
     }
     if p.crop != d.crop {
-        v.push("cropped".into());
+        v.push(t("cropped").into());
     }
     if p.stretch != StretchMode::Off {
-        v.push(format!("{}{}", if p.inverse && p.stretch.invertible() { "inverse " } else { "" }, p.stretch.name().to_lowercase()));
+        let inv = if p.inverse && p.stretch.invertible() { format!("{} ", t("inverse")) } else { String::new() };
+        v.push(format!("{inv}{}", t(p.stretch.name()).to_lowercase()));
     }
-    if p.wb_used() {
-        v.push("white balance".into());
+    for (used, w) in [
+        (p.wb_used(), "white balance"),
+        (p.tone_used(), "tone"),
+        (p.curves_used(), "curves"),
+        (p.colour_used(), "colour"),
+        (p.noise > 0.0 || p.color_noise > 0.0, "noise reduced"),
+        (p.star_reduce > 0.0, "stars reduced"),
+        (p.sharpen > 0.0, "sharpened"),
+    ] {
+        if used {
+            v.push(t(w).into());
+        }
     }
-    if p.tone_used() {
-        v.push("tone".into());
-    }
-    if p.curves_used() {
-        v.push("curves".into());
-    }
-    if p.colour_used() {
-        v.push("colour".into());
-    }
-    if p.noise > 0.0 || p.color_noise > 0.0 {
-        v.push("noise reduced".into());
-    }
-    if p.star_reduce > 0.0 {
-        v.push("stars reduced".into());
-    }
-    if p.sharpen > 0.0 {
-        v.push("sharpened".into());
-    }
-    if v.is_empty() { "no changes".into() } else { v.join(", ") }
+    if v.is_empty() { t("no changes").into() } else { v.join(", ") }
 }
 
 // --------------------------------------------------------------------------

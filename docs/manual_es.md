@@ -114,7 +114,7 @@ Notas:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -494,8 +494,8 @@ puntos de coincidencia guardados: unos 50 kB por imagen.
 | Acción | Ratón | Teclado | Botón |
 |---|---|---|---|
 | Desplazar | arrastrar con el botón **izquierdo** | flechas (vistas Imagen y Par) | |
-| Acercar | rueda hacia arriba | `+` | **Zoom +** |
-| Alejar | rueda hacia abajo | `-` | **Zoom -** |
+| Acercar | rueda hacia arriba | `+` | **+** |
+| Alejar | rueda hacia abajo | `-` | **−** |
 | Restablecer zoom | | `F`, `0` o `Inicio` | **Ajustar** |
 | Seleccionar imagen (vista Panorámica) | clic dentro de su contorno | | |
 | Mostrar / ocultar contornos, números, enlaces | | | interruptor **superposiciones** |

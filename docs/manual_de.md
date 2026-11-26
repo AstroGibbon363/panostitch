@@ -118,7 +118,7 @@ Hinweise:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  Projektionsmenü    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  Projektionsmenü    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  Pfadfeld            │                                      │  Roll               │
 │  Bildliste           │                                      │ 4 · Compose         │
@@ -501,8 +501,8 @@ den gespeicherten Zuordnungspunkten: etwa 50 kB pro Bild.
 | Aktion | Maus | Tastatur | Schaltfläche |
 |---|---|---|---|
 | Verschieben | mit der **linken** Taste ziehen | Pfeiltasten (Ansichten Image und Pair) | |
-| Hineinzoomen | Mausrad nach oben | `+` | **Zoom +** |
-| Herauszoomen | Mausrad nach unten | `-` | **Zoom -** |
+| Hineinzoomen | Mausrad nach oben | `+` | **+** |
+| Herauszoomen | Mausrad nach unten | `-` | **−** |
 | Zoom zurücksetzen | | `F`, `0` oder `Pos1` | **Einpassen** |
 | Bild auswählen (Ansicht Panorama) | in seinen Umriss klicken | | |
 | Umrisse, Nummern, Verbindungen ein/aus | | | Schalter **Überlagerungen** |

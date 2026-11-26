@@ -106,7 +106,7 @@ Notes:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -461,8 +461,8 @@ points: about 50 kB per image.
 | Action | Mouse | Keyboard | Button |
 |---|---|---|---|
 | Pan | drag with **left** button | arrow keys (Image and Pair views) | |
-| Zoom in | scroll up | `+` | **Zoom +** |
-| Zoom out | scroll down | `-` | **Zoom -** |
+| Zoom in | scroll up | `+` | **+** |
+| Zoom out | scroll down | `-` | **−** |
 | Reset zoom | | `F`, `0` or `Home` | **Fit** |
 | Select image (Panorama view) | click inside its outline | | |
 | Show / hide outlines, numbers, links | | | **overlays** switch |
