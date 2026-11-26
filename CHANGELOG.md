@@ -3,6 +3,7 @@
 ## v0.4.1 (in development)
 
 ### Fixes
+- **No crash on bad values:** sorting for a median or a quantile (stretch, sky detection, star lists, the matching) could stop a background job with *"comparison function does not correctly implement a total order"* when a value was not a number (NaN), e.g. at the edge of an extreme panorama view. Such values now sort last.
 - **Presets no longer change the exposure:** *astro / night landscape* added +1 EV on top of the Exposure slider; a preset now sets only how to match and project. Brightness stays with **Exposure (EV)** and **Auto exposure**.
 - **Smaller screens (1280 × 720, 1366 × 768):** in the Panorama tab the memory estimate under *Output size* wraps instead of widening the right panel until the preview covered its left edge (cut-off labels, Czech and Spanish especially). A new test renders every tab in every language at these sizes and fails on any text cut off or panel overlap.
 - **Untranslated texts translated:** the line above the panorama (projection, typical error, colour legend), the pair menu (inliers, rejected, none), *full* output size, *automatic* format, the model name in pair messages, the Post-processing summary (*In use: …*), its preset menu, the stacking result line and base frame label, the Timelapse *RAW via* tip. The stacking note under the post-processing options now follows a change of language.

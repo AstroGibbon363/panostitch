@@ -1283,7 +1283,7 @@ pub fn detect_stars(img: &Img, wt: &Gray) -> Vec<Star> {
         let mf = median_f64(stars.iter().map(|s| s.fwhm));
         stars.retain(|s| s.fwhm < 2.5 * mf);
     }
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap_or(std::cmp::Ordering::Equal));
+    stars.sort_by(|a, b| b.flux.total_cmp(&a.flux));
     stars.truncate(MAX_STARS);
     stars
 }

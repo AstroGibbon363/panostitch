@@ -765,3 +765,13 @@ fn wavelet_noise_reduction_keeps_stars_and_brightness() {
     // Nothing at strength 0.
     assert_eq!(panostitch::denoise::reduce_noise(&img, 0.0).px, img.px);
 }
+
+#[test]
+fn medians_survive_values_that_are_not_numbers() {
+    // A NaN must not stop the sort (Rust panics on a comparison that is not a total order).
+    let mut v: Vec<f32> = (0..40).map(|k| if k % 7 == 0 { f32::NAN } else { k as f32 }).collect();
+    let m = panostitch::image::median(&mut v);
+    assert!(m.is_finite(), "median {m}");
+    let m2 = panostitch::image::median_f64((0..40).map(|k| if k % 5 == 0 { f64::NAN } else { k as f64 }));
+    assert!(m2.is_finite(), "median {m2}");
+}

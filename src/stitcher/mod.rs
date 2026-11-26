@@ -278,7 +278,7 @@ pub fn detect(img: &Img, p: &DetectParams) -> Features {
             })
         })
         .collect();
-    cands.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    cands.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
     // Even spread: each grid cell gets a quota first, then the strongest of the rest.
     let gxn = 16usize;
     let gyn = ((16.0 * h as f64 / w as f64).round() as usize).max(1);
@@ -649,7 +649,7 @@ pub fn spanning_tree(n: usize, edges: &[(usize, usize, f64)]) -> Vec<Vec<usize>>
     }
     let mut adj = vec![Vec::new(); n];
     let mut e: Vec<&(usize, usize, f64)> = edges.iter().collect();
-    e.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    e.sort_by(|a, b| b.2.total_cmp(&a.2));
     for &(i, j, _) in e {
         let (a, b) = (find(&mut uf, i), find(&mut uf, j));
         if a == b {
