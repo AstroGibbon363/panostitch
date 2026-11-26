@@ -775,3 +775,40 @@ fn medians_survive_values_that_are_not_numbers() {
     let m2 = panostitch::image::median_f64((0..40).map(|k| if k % 5 == 0 { f64::NAN } else { k as f64 }));
     assert!(m2.is_finite(), "median {m2}");
 }
+
+#[test]
+fn a_photo_of_the_zenith_fills_the_top_of_a_spherical_panorama() {
+    // A camera looking straight up (and one straight down): in a spherical (or
+    // cylindrical) panorama its outline goes round the pole, and the cap
+    // between its edge and the pole must be rendered too (it was left empty).
+    let (h, w, f) = (300usize, 300usize, 250.0);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let img = smooth_scene(h, w, 4).map(|p| [p[0] + 0.1, p[1] + 0.1, p[2] + 0.1]);
+    for (proj, up) in [(st::Projection::Spherical, 90.0), (st::Projection::Spherical, -90.0), (st::Projection::Mollweide, 90.0), (st::Projection::TransverseCylindrical, 0.0)] {
+        // Pointing at the pole: up/down for the others, sideways for the transverse projection.
+        let r = if proj == st::Projection::TransverseCylindrical { rot([0.0, 1.0, 0.0], 90.0) } else { rot([1.0, 0.0, 0.0], up) };
+        let g = st::kmat(f, c) * r.transpose() * st::inv(&st::kmat(f, c));
+        let cp = st::ComposeParams { projection: proj, f, c, blend: st::Blend::Average, scale: 0.5, ..Default::default() };
+        let o = st::outline(&g, h, w, proj, f, c, cp.lens, 24);
+        let b = st::bounds(&[o]);
+        let (out, cov) = st::compose(&[&img], &[g], b, &cp, &[1.0], &[1.0], &[(h, w)], true);
+        let cov = cov.unwrap();
+        // The rows (columns, transverse) at the pole side are covered across.
+        // The pole's side: the one where the box reaches the projection's limit.
+        let (la, lb) = (4.0 * f, if proj == st::Projection::Spherical { std::f64::consts::FRAC_PI_2 * f } else { 2f64.sqrt() * f });
+        let (lines, len, at): (usize, usize, Box<dyn Fn(usize, usize) -> bool>) = if proj == st::Projection::TransverseCylindrical {
+            assert!(b.0 <= -la + 1.0 || b.1 >= la - 1.0, "{proj:?}: box {b:?} does not reach the pole");
+            let left = b.0 <= -la + 1.0;
+            (out.w, out.h, Box::new(move |line, k| cov.v[k * cov.w + if left { line } else { cov.w - 1 - line }]))
+        } else {
+            assert!(b.2 <= -lb + 1.0 || b.3 >= lb - 1.0, "{proj:?}: box {b:?} does not reach the pole");
+            let top = b.2 <= -lb + 1.0;
+            (out.h, out.w, Box::new(move |line, k| cov.v[(if top { line } else { cov.h - 1 - line }) * cov.w + k]))
+        };
+        let edge: Vec<f64> = (0..3.min(lines)).map(|l| (0..len).filter(|&k| at(l, k)).count() as f64 / len as f64).collect();
+        println!("{proj:?} {up}: box {b:?}, pole side covered {edge:.2?}");
+        // Mollweide's pole is a single point: only its middle is covered there.
+        let need = if proj == st::Projection::Mollweide { 0.02 } else { 0.95 };
+        assert!(edge.iter().all(|&e| e >= need), "{proj:?} {up}: the pole side is covered only {edge:?}");
+    }
+}

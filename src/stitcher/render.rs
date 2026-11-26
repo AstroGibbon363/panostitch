@@ -6,6 +6,7 @@
 //! (u, v) = f·(a, b), so one unit ≈ one reference pixel near the centre.
 
 use super::{inv, kmat, Pt, M3};
+type V3 = nalgebra::Vector3<f64>;
 use crate::image::{bilinear, blur, luminance, Bits, Gray, Image, Img, Px, Rgb, Sample};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -207,9 +208,14 @@ pub fn proj_forward(p: Projection, x: f64, y: f64, z: f64) -> (f64, f64) {
 pub fn proj_inverse(p: Projection, a: f64, b: f64) -> Option<(f64, f64, f64)> {
     use Projection::*;
     let (la, lb) = proj_limits(p);
-    if a.abs() > la || b.abs() > lb {
+    // Where the limits are the poles and the seam (cylindrical-type
+    // projections), a point just beyond them (the last row of a canvas whose
+    // size was rounded up) is the pole or the seam itself, not empty.
+    let slack = if polar_axis(p).is_some() { 1.02 } else { 1.0 };
+    if a.abs() > la * slack || b.abs() > lb * slack {
         return None;
     }
+    let (a, b) = (a.clamp(-la, la), b.clamp(-lb, lb));
     Some(match p {
         Rectilinear => (a, b, 1.0),
         Stereographic | LittlePlanet | Tunnel => {
@@ -324,14 +330,76 @@ pub fn outline(g: &M3, h: usize, w: usize, p: Projection, f: f64, c: Pt, lens: L
     pts.extend(lin(1.0, hf).map(|y| (wf, y)));
     pts.extend(lin(wf, 1.0).map(|x| (x, hf)));
     pts.extend(lin(hf, 1.0).map(|y| (1.0, y)));
-    pts.into_iter()
+    let dirs: Vec<V3> = pts
+        .into_iter()
         .map(|(x, y)| {
             let (ux, uy) = undistort(x, y, ci, lens);
             let q = g * nalgebra::Vector3::new(ux, uy, 1.0);
-            let (a, b) = proj_forward(p, (q[0] - c[0] * q[2]) / f, (q[1] - c[1] * q[2]) / f, q[2]);
-            [f * a, f * b]
+            V3::new((q[0] - c[0] * q[2]) / f, (q[1] - c[1] * q[2]) / f, q[2])
         })
-        .collect()
+        .collect();
+    let mut out: Vec<Pt> = dirs.iter().map(|d| { let (a, b) = proj_forward(p, d[0], d[1], d[2]); [f * a, f * b] }).collect();
+    // A photo around a pole of the projection (the zenith or nadir of a
+    // spherical panorama, e.g. after the horizon was levelled): its edge goes
+    // round the pole and crosses the seam behind, so the outline alone would
+    // leave out the cap between its edge and the pole (no box reaches it: an
+    // empty hole at the zenith). Close the outline over the pole, along the seam.
+    if let Some(transverse) = polar_axis(p) {
+        let shows = |d: V3| -> bool {
+            let ip = inv(g) * (kmat(f, c) * d);
+            if ip[2] <= 0.0 {
+                return false;
+            }
+            let (ox, oy) = distort(ip[0] / ip[2], ip[1] / ip[2], ci, lens);
+            (1.0..=wf).contains(&ox) && (1.0..=hf).contains(&oy)
+        };
+        // (azimuth around the polar axis, angle towards the pole) of a direction, and back.
+        let polar = |d: &V3| -> (f64, f64) {
+            let (x, y, z) = if transverse { (d[1], d[0], d[2]) } else { (d[0], d[1], d[2]) };
+            (x.atan2(z), y.atan2(x.hypot(z)))
+        };
+        let dir = |lam: f64, phi: f64| -> V3 {
+            let (a, b, z) = (phi.cos() * lam.sin(), phi.sin(), phi.cos() * lam.cos());
+            if transverse { V3::new(b, a, z) } else { V3::new(a, b, z) }
+        };
+        for sgn in [-1.0f64, 1.0] {
+            let pole = if transverse { V3::new(sgn, 0.0, 0.0) } else { V3::new(0.0, sgn, 0.0) };
+            if !shows(pole) {
+                continue;
+            }
+            let pol: Vec<(f64, f64)> = dirs.iter().map(&polar).collect();
+            let m = pol.len();
+            let Some(k) = (0..m).find(|&k| (pol[(k + 1) % m].0 - pol[k].0).abs() > PI) else { continue };
+            let (a0, a1) = (pol[k].0.signum() * (PI - 1e-9), pol[(k + 1) % m].0.signum() * (PI - 1e-9));
+            let phi_c = (pol[k].1 + pol[(k + 1) % m].1) / 2.0;
+            let top = sgn * PI / 2.0;
+            let steps = 12;
+            let mut cap: Vec<Pt> = Vec::with_capacity(2 * steps + 2);
+            for (lam, from, to) in [(a0, phi_c, top), (a1, top, phi_c)] {
+                for t in 0..=steps {
+                    let phi = from + (to - from) * t as f64 / steps as f64;
+                    let d = dir(lam, phi);
+                    let (a, b) = proj_forward(p, d[0], d[1], d[2]);
+                    cap.push([f * a, f * b]);
+                }
+            }
+            out.splice(k + 1..k + 1, cap);
+            break;
+        }
+    }
+    out
+}
+
+/// The axis whose poles a projection spreads into a line (the zenith and
+/// nadir of cylindrical-type projections; the sides for the transverse ones):
+/// Some(transverse), or None.
+fn polar_axis(p: Projection) -> Option<bool> {
+    use Projection::*;
+    match p {
+        Cylindrical | Spherical | Mercator | Hammer | Mollweide => Some(false),
+        TransverseCylindrical | TransverseMercator => Some(true),
+        _ => None,
+    }
 }
 
 /// Bounding box (umin, umax, vmin, vmax) of outlines.

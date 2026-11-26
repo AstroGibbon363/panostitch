@@ -3,6 +3,7 @@
 ## v0.4.1 (in development)
 
 ### Fixes
+- **No empty hole at the zenith (or nadir):** in a spherical, cylindrical, Mercator, Hammer or Mollweide panorama, a photo that has the zenith in it had the cap between its edge and the pole left out (its outline goes round the pole, and only what the outline spans was rendered), so the top showed an empty patch, and the canvas stopped short of the pole. The outline is now closed over the pole; the last row at the pole is no longer black.
 - **No crash on bad values:** sorting for a median or a quantile (stretch, sky detection, star lists, the matching) could stop a background job with *"comparison function does not correctly implement a total order"* when a value was not a number (NaN), e.g. at the edge of an extreme panorama view. Such values now sort last.
 - **Presets no longer change the exposure:** *astro / night landscape* added +1 EV on top of the Exposure slider; a preset now sets only how to match and project. Brightness stays with **Exposure (EV)** and **Auto exposure**.
 - **Smaller screens (1280 × 720, 1366 × 768):** in the Panorama tab the memory estimate under *Output size* wraps instead of widening the right panel until the preview covered its left edge (cut-off labels, Czech and Spanish especially). A new test renders every tab in every language at these sizes and fails on any text cut off or panel overlap.
