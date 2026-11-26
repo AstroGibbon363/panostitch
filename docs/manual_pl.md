@@ -197,7 +197,7 @@ potem zmienić.
 | Ustawienie | Do czego | Główne parametry |
 |---|---|---|
 | **krajobraz dzienny** | panoramy dzienne, aparat obracany w miejscu | lekkie odszumianie, homografia, cylindryczna |
-| **astro / krajobraz nocny** | nocne niebo, Droga Mleczna nad krajobrazem | mocne odszumianie, luźniejsze dopasowanie, sferyczna, +1 EV (potem **Automatyczna ekspozycja**), wyższy próg narożników (mniej fałszywych narożników w szumie) |
+| **astro / krajobraz nocny** | nocne niebo, Droga Mleczna nad krajobrazem | mocne odszumianie, luźniejsze dopasowanie, sferyczna, wyższy próg narożników (mniej fałszywych narożników w szumie). Jasność: **Automatyczna ekspozycja** lub **Ekspozycja (EV)**; ustawienia wstępne jej nie zmieniają |
 | **mozaika deep-sky** | mozaiki pól gwiazdowych z teleskopu, np. FITS | małe odszumianie (gwiazdy są malutkie), model podobieństwa (przesunięcie + obrót pola), bez dopracowania, prostoliniowa; użyj **Automatyczne rozciągnięcie** |
 | **makro / mikroskop** | szkiełko lub stolik przesuwany pod nieruchomym aparatem | model przesunięcia (klatki tylko się przesuwają), bez dopracowania, prostoliniowa |
 | **skan / płaski dokument** | mapy, obrazy, dokumenty fotografowane częściami | model afiniczny, bez dopracowania, prostoliniowa |

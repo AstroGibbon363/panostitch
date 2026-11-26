@@ -200,7 +200,7 @@ sich danach weiter ändern.
 | Voreinstellung | Für | Wichtigste Einstellungen |
 |---|---|---|
 | **Tageslandschaft** | Tageslicht-Panoramen, Kamera auf der Stelle gedreht | leichtes Entrauschen, Homographie, zylindrische Projektion |
-| **Astro / Nachtlandschaft** | Nachthimmel, Milchstraße über einer Landschaft | starkes Entrauschen, lockerere Zuordnung, sphärische Projektion, +1 EV (dann **Automatische Belichtung**), höhere Eckenschwelle (weniger falsche Ecken im Rauschen) |
+| **Astro / Nachtlandschaft** | Nachthimmel, Milchstraße über einer Landschaft | starkes Entrauschen, lockerere Zuordnung, sphärische Projektion, höhere Eckenschwelle (weniger falsche Ecken im Rauschen). Helligkeit: **Automatische Belichtung** oder **Belichtung (EV)**; Vorgaben ändern sie nicht |
 | **Deep-Sky-Mosaik** | Teleskop-Mosaike von Sternfeldern, z. B. FITS | wenig Entrauschen (Sterne sind klein), Ähnlichkeitsmodell (Verschiebung + Bildfeldrotation), keine Verfeinerung, geradlinige Projektion; **Automatisch strecken** verwenden |
 | **Makro / Mikroskop** | Objektträger oder Tisch unter einer festen Kamera verschoben | Verschiebungsmodell (Bilder verschieben sich nur), keine Verfeinerung, geradlinige Projektion |
 | **Scan / flaches Dokument** | Karten, Gemälde, Dokumente in Teilen fotografiert | affines Modell, keine Verfeinerung, geradlinige Projektion |

@@ -1450,6 +1450,9 @@ fn curve_editor(ui: &mut egui::Ui, pts: &mut Vec<[f64; 2]>, hist: Option<&[f32]>
 /// Hooks for the headless window tests (tests/gui.rs).
 #[doc(hidden)]
 impl FinishTab {
+    pub fn t_set_display(&mut self, v: crate::finish::ViewStretch) {
+        self.display = v;
+    }
     pub fn t_status(&self) -> &str {
         &self.status
     }

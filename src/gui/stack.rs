@@ -2028,6 +2028,10 @@ impl StackTab {
     pub fn t_report(&self) -> Option<&super::JobReport> {
         self.report.as_ref()
     }
+    /// Show the Result view in a display mode of its own (not "As processed").
+    pub fn t_set_display(&mut self, v: crate::finish::ViewStretch) {
+        (self.disp_view, self.disp_processed, self.view) = (v, false, ViewKind::Result);
+    }
     pub fn t_status(&self) -> &str {
         &self.status
     }

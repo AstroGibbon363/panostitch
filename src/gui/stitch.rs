@@ -167,15 +167,17 @@ impl Default for Params {
 
 impl Params {
     fn preset(&mut self, name: &str) -> &'static str {
-        let (det, nkp, thr, den, ratio, maxd, tol, mininl, model, refine, proj, ev, note) = match name {
-            "day landscape" => (2000, 5000, 0.001, 0.5, 0.8, 0.35, 4.0, 20, Model::Homography, true, Projection::Cylindrical, 0.0, tr("Daylight panorama, camera rotated in place.")),
-            "astro / night landscape" => (2000, 6000, 0.0035, 2.0, 0.85, 0.38, 5.0, 16, Model::Homography, true, Projection::Spherical, 1.0, tr("Night or Milky Way panorama: more denoising, looser matching, spherical projection.")),
-            "deep-sky mosaic" => (3000, 4000, 0.002, 0.75, 0.75, 0.3, 3.0, 12, Model::Similarity, false, Projection::Rectilinear, 0.0, tr("Telescope mosaic: frames only shift and rotate. Use Auto stretch to see faint detail.")),
-            "macro / microscope" => (2000, 5000, 0.001, 1.0, 0.8, 0.35, 3.0, 15, Model::Translation, false, Projection::Rectilinear, 0.0, tr("Stage moved under a fixed camera: frames only shift.")),
-            _ => (2500, 5000, 0.001, 0.5, 0.8, 0.35, 3.0, 20, Model::Affine, false, Projection::Rectilinear, 0.0, tr("Flat object scanned or photographed in parts.")),
+        let (det, nkp, thr, den, ratio, maxd, tol, mininl, model, refine, proj, note) = match name {
+            "day landscape" => (2000, 5000, 0.001, 0.5, 0.8, 0.35, 4.0, 20, Model::Homography, true, Projection::Cylindrical, tr("Daylight panorama, camera rotated in place.")),
+            "astro / night landscape" => (2000, 6000, 0.0035, 2.0, 0.85, 0.38, 5.0, 16, Model::Homography, true, Projection::Spherical, tr("Night or Milky Way panorama: more denoising, looser matching, spherical projection.")),
+            "deep-sky mosaic" => (3000, 4000, 0.002, 0.75, 0.75, 0.3, 3.0, 12, Model::Similarity, false, Projection::Rectilinear, tr("Telescope mosaic: frames only shift and rotate. Use Auto stretch to see faint detail.")),
+            "macro / microscope" => (2000, 5000, 0.001, 1.0, 0.8, 0.35, 3.0, 15, Model::Translation, false, Projection::Rectilinear, tr("Stage moved under a fixed camera: frames only shift.")),
+            _ => (2500, 5000, 0.001, 0.5, 0.8, 0.35, 3.0, 20, Model::Affine, false, Projection::Rectilinear, tr("Flat object scanned or photographed in parts.")),
         };
         (self.det_px, self.nkp, self.thr, self.denoise, self.ratio, self.maxd, self.tol, self.mininl) = (det, nkp, thr, den, ratio, maxd, tol, mininl);
-        (self.model, self.refine, self.proj, self.ev, self.layout, self.blend) = (model, refine, proj, ev, Layout::All, Blend::Smart);
+        // The exposure is left alone: a preset sets how to match and project, not
+        // how bright the panorama is (that is the Exposure slider's, or Auto exposure's).
+        (self.model, self.refine, self.proj, self.layout, self.blend) = (model, refine, proj, Layout::All, Blend::Smart);
         note
     }
     fn stretched(&self) -> bool {
@@ -2859,6 +2861,10 @@ pub fn histogram_of(ui: &mut egui::Ui, img: &Img, gain: f32, stretch: Option<(f6
 impl StitchTab {
     pub fn t_report(&self) -> Option<&super::JobReport> {
         self.report.as_ref()
+    }
+    /// Show the preview in a display mode of its own (not "As processed").
+    pub fn t_set_display(&mut self, v: crate::finish::ViewStretch) {
+        (self.disp_view, self.disp_processed) = (v, false);
     }
     pub fn t_status(&self) -> &str {
         &self.status

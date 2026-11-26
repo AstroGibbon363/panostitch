@@ -3,6 +3,7 @@
 ## v0.4.1 (in development)
 
 ### Fixes
+- **Presets no longer change the exposure:** *astro / night landscape* added +1 EV on top of the Exposure slider; a preset now sets only how to match and project. Brightness stays with **Exposure (EV)** and **Auto exposure**.
 - **Smaller screens (1280 × 720, 1366 × 768):** in the Panorama tab the memory estimate under *Output size* wraps instead of widening the right panel until the preview covered its left edge (cut-off labels, Czech and Spanish especially). A new test renders every tab in every language at these sizes and fails on any text cut off or panel overlap.
 - **Untranslated texts translated:** the line above the panorama (projection, typical error, colour legend), the pair menu (inliers, rejected, none), *full* output size, *automatic* format, the model name in pair messages, the Post-processing summary (*In use: …*), its preset menu, the stacking result line and base frame label, the Timelapse *RAW via* tip. The stacking note under the post-processing options now follows a change of language.
 - **Clearer controls:** *Save linear / stretched* are radio buttons (a highlighted label next to a plain one did not read as a choice); **Low** and **High** stand before their sliders; the *Simple* switch lost its ✓ (it looked ticked when off); zoom is **+** / **−** in the Panorama toolbar, so it takes fewer lines; the pair message is readable size; Post-processing's output size reads *full size* instead of *0 px*, and the output file field shows the whole path on hover.

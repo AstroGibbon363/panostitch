@@ -182,7 +182,7 @@ changed afterwards.
 | Preset | For | Main settings |
 |---|---|---|
 | **day landscape** | daylight panoramas, camera rotated in place | light denoising, homography, cylindrical |
-| **astro / night landscape** | night skies, Milky Way over a landscape | strong denoising, looser matching, spherical, +1 EV (then **Auto exposure**), higher corner threshold (fewer false corners in the noise) |
+| **astro / night landscape** | night skies, Milky Way over a landscape | strong denoising, looser matching, spherical, higher corner threshold (fewer false corners in the noise). Brightness: **Auto exposure** or **Exposure (EV)**; presets leave it alone |
 | **deep-sky mosaic** | telescope mosaics of star fields, e.g. FITS | little denoising (stars are tiny), similarity model (shift + field rotation), no refinement, rectilinear; use **Auto stretch** |
 | **macro / microscope** | a slide or stage moved under a fixed camera | translation model (frames only shift), no refinement, rectilinear |
 | **scan / flat document** | maps, paintings, documents photographed in parts | affine model, no refinement, rectilinear |

@@ -120,6 +120,14 @@ fn small_windows_in_every_language() {
     w.app.finish.open(&paths[0]);
     w.idle();
     let mut all = Vec::new();
+    for range in [false, true] {
+    if range {
+        // A display mode with its Low / High sliders (and the reset and "view only" marks).
+        let v = panostitch::finish::ViewStretch { mode: panostitch::finish::Display::Log, low: 0.001, high: 0.5 };
+        w.app.stitch.t_set_display(v);
+        w.app.stack.t_set_display(v);
+        w.app.finish.t_set_display(v);
+    }
     for lang in [Lang::En, Lang::Cs, Lang::De, Lang::Fr, Lang::Es, Lang::Pl] {
         i18n::set_lang(lang);
         for size in [egui::vec2(1280.0, 720.0), egui::vec2(1366.0, 768.0)] {
@@ -132,10 +140,11 @@ fn small_windows_in_every_language() {
                     _ => w.app.show_timelapse(),
                 }
                 for f in w.faults() {
-                    all.push(format!("{lang:?} {}×{} tab {tab}: {f}", size.x, size.y));
+                    all.push(format!("{lang:?} {}×{} tab {tab}{}: {f}", size.x, size.y, if range { " (Low / High)" } else { "" }));
                 }
             }
         }
+    }
     }
     i18n::set_lang(Lang::En);
     assert!(all.is_empty(), "{} layout faults:\n{}", all.len(), all.join("\n"));

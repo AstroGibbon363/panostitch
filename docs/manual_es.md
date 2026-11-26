@@ -198,7 +198,7 @@ puede cambiar después.
 | Preajuste | Para | Ajustes principales |
 |---|---|---|
 | **paisaje de día** | panorámicas diurnas, cámara girada en el sitio | poca reducción de ruido, homografía, cilíndrica |
-| **astro / paisaje nocturno** | cielos nocturnos, Vía Láctea sobre un paisaje | mucha reducción de ruido, emparejado más tolerante, esférica, +1 EV (luego **Exposición automática**), umbral de esquinas más alto (menos esquinas falsas en el ruido) |
+| **astro / paisaje nocturno** | cielos nocturnos, Vía Láctea sobre un paisaje | mucha reducción de ruido, emparejado más tolerante, esférica, umbral de esquinas más alto (menos esquinas falsas en el ruido). Brillo: **Exposición automática** o **Exposición (EV)**; los ajustes predefinidos no lo cambian |
 | **mosaico de cielo profundo** | mosaicos de campos estelares con telescopio, p. ej. FITS | poca reducción de ruido (las estrellas son diminutas), modelo de semejanza (desplazamiento + rotación de campo), sin refinado, rectilínea; use **Estirado automático** |
 | **macro / microscopio** | un portaobjetos o una plataforma movidos bajo una cámara fija | modelo de traslación (las tomas solo se desplazan), sin refinado, rectilínea |
 | **escaneo / documento plano** | mapas, cuadros, documentos fotografiados por partes | modelo afín, sin refinado, rectilínea |

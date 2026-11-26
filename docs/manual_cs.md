@@ -191,7 +191,7 @@ dál měnit.
 | Předvolba | Pro | Hlavní nastavení |
 |---|---|---|
 | **denní krajina** | denní panoramy, fotoaparát otáčený na místě | slabé odšumění, homografie, cylindrická projekce |
-| **astro / noční krajina** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, +1 EV (pak **Automatická expozice**), vyšší práh rohů (méně falešných rohů v šumu) |
+| **astro / noční krajina** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, vyšší práh rohů (méně falešných rohů v šumu). Jas: **Automatická expozice** nebo **Expozice (EV)**; předvolby ho nemění |
 | **deep-sky mozaika** | mozaiky hvězdných polí z dalekohledu, např. FITS | málo odšumění (hvězdy jsou malé), model podobnosti (posun + rotace pole), bez zpřesnění, přímočará projekce; použijte **Automatické roztažení** |
 | **makro / mikroskop** | preparát nebo stolek posouvaný pod pevným fotoaparátem | model posunu (snímky se jen posouvají), bez zpřesnění, přímočará projekce |
 | **sken / plochý dokument** | mapy, obrazy, dokumenty fotografované po částech | afinní model, bez zpřesnění, přímočará projekce |

@@ -204,7 +204,7 @@ valeur peut encore être changée ensuite.
 | Préréglage | Pour | Réglages principaux |
 |---|---|---|
 | **paysage de jour** | panoramas de jour, appareil tourné sur place | débruitage léger, homographie, cylindrique |
-| **astro / paysage de nuit** | ciels nocturnes, Voie lactée sur un paysage | fort débruitage, appariement plus souple, sphérique, +1 EV (puis **Exposition automatique**), seuil des coins plus haut (moins de faux coins dans le bruit) |
+| **astro / paysage de nuit** | ciels nocturnes, Voie lactée sur un paysage | fort débruitage, appariement plus souple, sphérique, seuil des coins plus haut (moins de faux coins dans le bruit). Luminosité : **Exposition automatique** ou **Exposition (EV)** ; les préréglages n'y touchent pas |
 | **mosaïque de ciel profond** | mosaïques de champs stellaires au télescope, p. ex. FITS | peu de débruitage (les étoiles sont minuscules), modèle de similitude (décalage + rotation de champ), pas d'affinage, rectilinéaire ; utilisez **Étirement automatique** |
 | **macro / microscope** | une lame ou une platine déplacée sous un appareil fixe | modèle de translation (les images ne font que se décaler), pas d'affinage, rectilinéaire |
 | **scan / document plat** | cartes, tableaux, documents photographiés par morceaux | modèle affine, pas d'affinage, rectilinéaire |
