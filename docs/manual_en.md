@@ -773,6 +773,13 @@ it.
 | **Foreground image** | Optional: one shot of the ground from the same tripod position – at blue hour, a long exposure or low ISO. It replaces the (noisy, dark) stacked foreground below the sky region. **Match brightness** scales it to the stacked ground; **Exposure (EV)** brightens or darkens it from there. Needs a sky region. |
 | **Output** | Set in the **Save as** row: file name, type and folder. `.tif` / `.png` (16-bit), `.jpg` (8-bit), or `.fits` / `.xisf` (32-bit float, linear, for further processing in Siril, PixInsight etc.). |
 
+**Portrait photos** (the camera turned for an upright frame) are stacked
+upright: after the darks and flats are applied (they need the sensor's own
+orientation), every frame is turned as the base frame's camera tag says. The
+preview, the sky region you draw and the saved stack are all upright. A
+project or setting saved before version 0.4.1 with a sky region drawn by hand
+keeps the old (sideways) orientation, so the drawn line still fits.
+
 All calibration frames are optional. Even a few dark frames help a lot at
 high ISO.
 

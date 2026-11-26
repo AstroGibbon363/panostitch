@@ -832,6 +832,14 @@ gespeicherte Datei mit ihrer Größe, oder was schiefging. × schließt ihn.
 | **Vordergrundbild** | Freiwillig: eine Aufnahme des Bodens vom selben Stativstandort – zur blauen Stunde, lang belichtet oder mit niedriger ISO. Sie ersetzt unterhalb der Himmelsregion den (verrauschten, dunklen) gestackten Vordergrund. **Helligkeit angleichen** passt sie an die Helligkeit des gestackten Vordergrunds an; **Belichtung (EV)** macht sie von dort aus heller oder dunkler. Braucht eine Himmelsregion. |
 | **Ausgabe** | Wird in der Zeile **Speichern als** gesetzt: Name, Typ und Ordner. `.tif` / `.png` (16 Bit), `.jpg` (8 Bit) oder `.fits` / `.xisf` (32-Bit-Gleitkomma, linear, zur Weiterverarbeitung in Siril, PixInsight usw.). |
 
+**Hochformatfotos** (Kamera hochkant gedreht) werden aufrecht gestackt: nach
+dem Abziehen der Darks und Flats (die brauchen die Ausrichtung des Sensors) wird
+jedes Bild so gedreht, wie die Kamera es beim Basisbild vermerkt hat. Vorschau,
+die gezeichnete Himmelsregion und der gespeicherte Stack sind aufrecht. Ein vor
+Version 0.4.1 gespeichertes Projekt oder eine Einstellung mit von Hand
+gezeichneter Himmelsregion behält die alte (seitliche) Ausrichtung, damit die
+gezeichnete Linie weiter passt.
+
 Alle Kalibrierungsbilder sind freiwillig. Bei hoher ISO helfen schon wenige
 Dunkelbilder viel.
 

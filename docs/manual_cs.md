@@ -782,6 +782,13 @@ uložený soubor s jeho velikostí, nebo co se pokazilo. × ho zavře.
 | **Snímek popředí** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Přizpůsobit jas** ho přizpůsobí jasu složeného popředí; **Expozice (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
 | **Výstup** | Nastavuje se v řádku **Uložit jako**: název, typ a složka. `.tif` / `.png` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
 
+**Snímky na výšku** (fotoaparát otočený na výšku) se skládají na výšku: po
+odečtení darků a flatů (ty potřebují orientaci senzoru) se každý snímek otočí
+podle záznamu fotoaparátu u základního snímku. Náhled, hranice oblohy, kterou
+kreslíte, i uložený výsledek jsou na výšku. Projekt nebo nastavení uložené před
+verzí 0.4.1 s ručně nakreslenou oblastí oblohy si ponechá starou (otočenou na
+bok) orientaci, aby nakreslená čára dál seděla.
+
 Všechny kalibrační snímky jsou nepovinné. Při vysokém ISO hodně pomůže i
 několik tmavých snímků.
 

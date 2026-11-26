@@ -834,6 +834,14 @@ enregistré avec sa taille, ou ce qui n'a pas marché. × le ferme.
 | **Image de premier plan** | Facultatif : une prise du sol depuis la même position du trépied – à l'heure bleue, en pose longue ou à ISO bas. Elle remplace le premier plan empilé (bruité, sombre) sous la zone du ciel. **Accorder la luminosité au sol empilé** l'ajuste au sol empilé ; **Exposition (EV)** l'éclaircit ou l'assombrit à partir de là. Nécessite une zone du ciel. |
 | **Sortie** | Se règle sur la ligne **Enregistrer sous** : nom, type et dossier. `.tif` / `.png` (16 bits), `.jpg` (8 bits), ou `.fits` / `.xisf` (virgule flottante 32 bits, linéaire, pour la suite du traitement dans Siril, PixInsight, etc.). |
 
+**Photos en portrait** (appareil tourné) : elles sont empilées droites. Après
+les darks et les flats (qui ont besoin de l'orientation du capteur), chaque image
+est tournée comme l'indique l'appareil pour l'image de référence. L'aperçu, la
+région de ciel que vous tracez et l'empilement enregistré sont droits. Un projet
+ou un réglage enregistré avant la version 0.4.1 avec une région de ciel tracée à
+la main garde l'ancienne orientation (couchée), pour que la ligne tracée
+corresponde toujours.
+
 Toutes les images de calibration sont facultatives. Même quelques darks
 aident beaucoup à ISO élevé.
 

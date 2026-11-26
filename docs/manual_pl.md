@@ -808,6 +808,13 @@ trwało, rozmiar wyniku i zapisany plik z jego rozmiarem albo co poszło źle.
 | **Zdjęcie pierwszego planu** | Opcjonalne: jedno ujęcie ziemi z tego samego miejsca statywu – o niebieskiej godzinie, z długim czasem lub niskim ISO. Zastępuje (zaszumiony, ciemny) stackowany pierwszy plan pod obszarem nieba. **Dopasuj jasność do stackowanej ziemi** skaluje je do stackowanej ziemi; **Ekspozycja (EV)** rozjaśnia lub przyciemnia je od tego punktu. Wymaga obszaru nieba. |
 | **Wynik** | Ustawiany w wierszu **Zapisz jako**: nazwa, typ i folder. `.tif` / `.png` (16 bitów), `.jpg` (8 bitów) lub `.fits` / `.xisf` (32-bitowe liczby zmiennoprzecinkowe, liniowo, do dalszej obróbki w Sirilu, PixInsight itp.). |
 
+**Zdjęcia pionowe** (aparat obrócony) są składane pionowo: po odjęciu darków i
+flatów (te wymagają orientacji matrycy) każda klatka jest obracana tak, jak
+aparat zapisał przy klatce bazowej. Podgląd, rysowany obszar nieba i zapisany
+stos są pionowe. Projekt lub ustawienia zapisane przed wersją 0.4.1 z ręcznie
+narysowanym obszarem nieba zachowują starą (obróconą na bok) orientację, żeby
+narysowana linia nadal pasowała.
+
 Wszystkie klatki kalibracyjne są opcjonalne. Nawet kilka darków bardzo pomaga
 przy wysokim ISO.
 

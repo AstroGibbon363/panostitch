@@ -824,6 +824,14 @@ el archivo guardado con su tamaño, o qué salió mal. × lo cierra.
 | **Imagen de primer plano** | Opcional: una toma del suelo desde la misma posición del trípode – en la hora azul, con exposición larga o ISO bajo. Sustituye el primer plano apilado (ruidoso, oscuro) bajo la región del cielo. **Igualar brillo al suelo apilado** la ajusta al suelo apilado; **Exposición (EV)** la aclara u oscurece a partir de ahí. Necesita una región del cielo. |
 | **Salida** | Se fija en la fila **Guardar como**: nombre, tipo y carpeta. `.tif` / `.png` (16 bits), `.jpg` (8 bits), o `.fits` / `.xisf` (coma flotante de 32 bits, lineal, para procesar después en Siril, PixInsight, etc.). |
 
+**Fotos en vertical** (cámara girada): se apilan derechas. Tras aplicar los
+darks y flats (que necesitan la orientación del sensor), cada fotograma se gira
+según lo que la cámara anotó en el fotograma base. La vista previa, la región de
+cielo que dibuja y el apilado guardado quedan derechos. Un proyecto o ajuste
+guardado antes de la versión 0.4.1 con una región de cielo dibujada a mano
+conserva la orientación antigua (tumbada), para que la línea dibujada siga
+encajando.
+
 Todas las tomas de calibración son opcionales. Incluso unos pocos darks ayudan
 mucho a ISO alto.
 
