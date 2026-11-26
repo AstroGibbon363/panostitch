@@ -176,9 +176,12 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         ),
     );
 
+    // Upright like the base frame (after the calibration: darks and flats are
+    // in the sensor's orientation, and cameras tag them inconsistently).
+    let rot = if cfg.upright { crate::io::orientation_code(&infos[base_i].path) } else { 1 };
     // Load, calibrate and measure every frame (the base first: it fixes the size).
     let prepare = |fi: &FrameInfo| -> Result<Img, String> {
-        let mut img = calibrate(load(&fi.path)?, &cal)?;
+        let mut img = crate::io::orient(calibrate(load(&fi.path)?, &cal)?, rot);
         if cfg.dynamic_noise {
             let hot = dynamic_hot_pixels(&img);
             fix_pixels(&mut img, &hot);
@@ -405,7 +408,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     let mut fg: Option<Img> = None;
     if usefg {
         progress("Loading the foreground image…")?;
-        fg = Some(load_foreground(&cfg, load, h, w)?);
+        fg = Some(load_foreground(&cfg, load, h, w, rot)?);
     }
     let frames: Vec<&FrameInfo> = frames_idx.iter().map(|&(_, i)| &infos[i]).collect();
     let ks: Vec<usize> = frames_idx.iter().map(|&(k, _)| k).collect();
@@ -559,8 +562,14 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
 
 /// The frame report as a text table.
 pub fn report_text(infos: &[FrameInfo]) -> String {
+    report_text_with(infos, ["frame", "stars", "FWHM", "elong", "sky", "light", "align", "status"], &|st| st.name().to_string(), &|r| r.to_string())
+}
+
+/// `report_text` with the column names, status names and reasons in another
+/// language (the window's).
+pub fn report_text_with(infos: &[FrameInfo], head: [&str; 8], status: &dyn Fn(Status) -> String, reason: &dyn Fn(&str) -> String) -> String {
     let f = |v: f64, d: usize| if v.is_finite() { format!("{:.*}", d, v) } else { "–".to_string() };
-    let mut s = format!("{:<26}{:>6}{:>7}{:>7}{:>8}{:>7}{:>8}  status\n", "frame", "stars", "FWHM", "elong", "sky", "light", "align");
+    let mut s = format!("{:<26}{:>6}{:>7}{:>7}{:>8}{:>7}{:>8}  {}\n", head[0], head[1], head[2], head[3], head[4], head[5], head[6], head[7]);
     for fi in infos {
         let name: String = basename(&fi.path).chars().take(25).collect();
         s += &format!(
@@ -572,8 +581,8 @@ pub fn report_text(infos: &[FrameInfo]) -> String {
             f(fi.background, 4),
             f(fi.light, 2),
             f(fi.err, 2),
-            fi.status.name(),
-            if fi.reason.is_empty() { String::new() } else { format!(": {}", fi.reason) }
+            status(fi.status),
+            if fi.reason.is_empty() { String::new() } else { format!(": {}", reason(&fi.reason)) }
         );
     }
     s

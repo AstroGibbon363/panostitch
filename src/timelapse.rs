@@ -573,11 +573,7 @@ impl Sink {
                 }
                 cmd.arg(&out);
                 cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    cmd.creation_flags(0x0800_0000); // no console window
-                }
+                crate::sys::no_console(&mut cmd);
                 let mut child = cmd.spawn().map_err(|e| format!("Cannot start ffmpeg ({}): {e}", ff.display()))?;
                 let stdin = child.stdin.take();
                 let err = child.stderr.take().map(|mut e| {

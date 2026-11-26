@@ -2381,7 +2381,7 @@ impl StitchTab {
         let Some(e) = self.crop_edit.as_mut() else { return };
         let to_uv = |p: Pos2| {
             let (x, y) = s.to_image(p);
-            (x.clamp(full.0, full.1), y.clamp(full.2, full.3))
+            (super::clamp_safe(x, full.0, full.1), super::clamp_safe(y, full.2, full.3))
         };
         let screen = |f: &(f64, f64, f64, f64)| egui::Rect::from_min_max(s.to_screen(f.0, f.2), s.to_screen(f.1, f.3));
         let r = screen(&e.frame);
@@ -2421,8 +2421,8 @@ impl StitchTab {
             let f = match grip {
                 CropGrip::New => (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1)),
                 CropGrip::Move => {
-                    let dx = (b.0 - a.0).clamp(full.0 - f0.0, full.1 - f0.1);
-                    let dy = (b.1 - a.1).clamp(full.2 - f0.2, full.3 - f0.3);
+                    let dx = super::clamp_safe(b.0 - a.0, full.0 - f0.0, full.1 - f0.1);
+                    let dy = super::clamp_safe(b.1 - a.1, full.2 - f0.2, full.3 - f0.3);
                     (f0.0 + dx, f0.1 + dx, f0.2 + dy, f0.3 + dy)
                 }
                 CropGrip::Edges(g) => (

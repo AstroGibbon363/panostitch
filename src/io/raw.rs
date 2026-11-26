@@ -151,7 +151,7 @@ fn decode_with(d: RawDecoder, path: &str, opt: &LoadOptions) -> Result<Img, Stri
     let dir = tempfile::Builder::new().prefix("panostitch-raw-").tempdir().map_err(|e| e.to_string())?;
     let out = dir.path().join("decoded.tif");
     let mut cmd = raw_cmd(d, path, &out, dir.path(), opt);
-    let output = cmd.output().map_err(|e| format!("{} failed to start: {e}", d.exe()))?;
+    let output = crate::sys::no_console(&mut cmd).output().map_err(|e| format!("{} failed to start: {e}", d.exe()))?;
     if !output.status.success() {
         let mut msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
         if msg.is_empty() {
@@ -293,6 +293,38 @@ pub fn exif_seconds(s: &str) -> Option<f64> {
     Some((days * 86400 + v[3] * 3600 + v[4] * 60 + v[5]) as f64)
 }
 
+/// Turn an image as the EXIF orientation `code` says (1 = as it is, 6 = turn
+/// 90° clockwise, 8 = 90° anticlockwise, 3 = 180°; 2, 4, 5, 7 mirrored).
+pub fn orient(img: Img, code: u16) -> Img {
+    match code {
+        2 => img.flip_cols(),
+        3 => img.rotate180(),
+        4 => img.flip_rows(),
+        5 => img.transpose(),
+        6 => img.transpose().flip_cols(),
+        7 => img.transpose().rotate180(),
+        8 => img.transpose().flip_rows(),
+        _ => img,
+    }
+}
+
+/// The EXIF orientation code of a camera RAW file (1 for others, or when not known).
+pub fn orientation_code(path: &str) -> u16 {
+    use rawler::decoders::Orientation;
+    if !super::is_raw(path) {
+        return 1;
+    }
+    let read = || -> Option<u16> {
+        let src = rawler::rawsource::RawSource::new(Path::new(path)).ok()?;
+        let dec = rawler::get_decoder(&src).ok()?;
+        let params = rawler::decoders::RawDecodeParams { image_index: 0 };
+        // As decoding does: the raw image's own, else the EXIF data's.
+        let own = dec.raw_image(&src, &params, true).ok().map(|r| r.orientation).filter(|o| !matches!(o, Orientation::Normal | Orientation::Unknown));
+        own.map(|o| o.to_u16()).or_else(|| dec.raw_metadata(&src, &params).ok().and_then(|m| m.exif.orientation))
+    };
+    std::panic::catch_unwind(read).ok().flatten().filter(|c| (1..=8).contains(c)).unwrap_or(1)
+}
+
 fn decode_builtin_inner(path: &str, opt: &LoadOptions) -> Result<Img, String> {
     use rawler::decoders::Orientation;
 
@@ -407,16 +439,7 @@ pub fn develop(mut raw: rawler::RawImage, orientation: rawler::decoders::Orienta
     };
     img.map_inplace(|p| [p[0].max(0.0), p[1].max(0.0), p[2].max(0.0)]);
     let orientation = if opt.orient { orientation } else { Orientation::Normal };
-    img = match orientation {
-        Orientation::Normal | Orientation::Unknown => img,
-        Orientation::HorizontalFlip => img.flip_cols(),
-        Orientation::Rotate180 => img.rotate180(),
-        Orientation::VerticalFlip => img.flip_rows(),
-        Orientation::Transpose => img.transpose(),
-        Orientation::Rotate90 => img.transpose().flip_cols(),
-        Orientation::Transverse => img.transpose().rotate180(),
-        Orientation::Rotate270 => img.transpose().flip_rows(),
-    };
+    img = orient(img, orientation.to_u16());
     if opt.half {
         img = block_average(&img, 2);
     }

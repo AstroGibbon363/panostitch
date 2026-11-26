@@ -186,6 +186,11 @@ pub struct StackConfig {
     pub timelapse: (bool, usize),
     pub trails: (Fade, bool),
     pub foreground: Foreground,
+    /// Turn the frames upright by the base frame's orientation (a camera held
+    /// upright for a portrait frame), after the calibration, which needs the
+    /// sensor's own orientation. The sky region is drawn on the upright frame.
+    /// Off for setups saved before (their sky region was drawn on the sensor's).
+    pub upright: bool,
 }
 
 impl StackConfig {
@@ -241,6 +246,7 @@ impl Default for StackConfig {
             timelapse: (false, 10),
             trails: (Fade::Off, false),
             foreground: Foreground { path: String::new(), match_brightness: true, ev: 0.0 },
+            upright: true,
         }
     }
 }

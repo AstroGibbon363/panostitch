@@ -1172,8 +1172,8 @@ impl FinishTab {
             match grip {
                 CropGrip::New => f = [a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)],
                 CropGrip::Move => {
-                    let dx = (b.0 - a.0).clamp(-f0[0], 1.0 - f0[2]);
-                    let dy = (b.1 - a.1).clamp(-f0[1], 1.0 - f0[3]);
+                    let dx = super::clamp_safe(b.0 - a.0, -f0[0], 1.0 - f0[2]);
+                    let dy = super::clamp_safe(b.1 - a.1, -f0[1], 1.0 - f0[3]);
                     f = [f0[0] + dx, f0[1] + dy, f0[2] + dx, f0[3] + dy];
                 }
                 CropGrip::Edges(e) => {
@@ -1393,7 +1393,9 @@ fn curve_editor(ui: &mut egui::Ui, pts: &mut Vec<[f64; 2]>, hist: Option<&[f32]>
                 Some(i) => i,
                 None => {
                     let (x, y) = to_c(q);
-                    if x <= 0.005 || x >= 0.995 {
+                    // Not on top of another point (two points closer than 0.02
+                    // could not be moved apart).
+                    if x <= 0.005 || x >= 0.995 || pts.iter().any(|c| (c[0] - x).abs() < 0.02) {
                         usize::MAX
                     } else {
                         let i = pts.iter().position(|c| c[0] > x).unwrap_or(pts.len());
@@ -1416,7 +1418,7 @@ fn curve_editor(ui: &mut egui::Ui, pts: &mut Vec<[f64; 2]>, hist: Option<&[f32]>
             } else if i == n - 1 {
                 x = 1.0;
             } else {
-                x = x.clamp(pts[i - 1][0] + 0.01, pts[i + 1][0] - 0.01);
+                x = super::clamp_safe(x, pts[i - 1][0] + 0.01, pts[i + 1][0] - 0.01);
             }
             if pts[i] != [x, y] {
                 pts[i] = [x, y];

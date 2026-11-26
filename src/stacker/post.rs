@@ -13,8 +13,9 @@ use rayon::prelude::*;
 // --------------------------------------------------------------------------
 
 /// The foreground image at the stack's size (same framing; scaled if only the resolution differs).
-pub fn load_foreground(cfg: &StackConfig, load: super::Loader, h: usize, w: usize) -> Result<Img, String> {
-    let mut img = load(&cfg.foreground.path)?;
+pub fn load_foreground(cfg: &StackConfig, load: super::Loader, h: usize, w: usize, rot: u16) -> Result<Img, String> {
+    // Turned as the light frames are (shot from the same tripod).
+    let mut img = crate::io::orient(load(&cfg.foreground.path)?, rot);
     if cfg.merge4 {
         img = super::merge4(&img);
     }

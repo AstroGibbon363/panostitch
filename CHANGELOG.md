@@ -1,8 +1,14 @@
 # Changes
 
-## v0.4.1 (in development)
+## v0.4.1
+
+Released 2026-11-26. Fixes only: a crash in the curves, the empty hole at the zenith, an empty PowerShell window on Windows, small screens, portrait photos in Star stacking, and texts left in English.
 
 ### Fixes
+- **Crash in the curves (Post-processing):** a point added right next to another (closer than 2 % of the width) and then dragged stopped the program. Points are no longer added on top of each other, and dragging can no longer fail; the same for dragging a very small crop frame (Post-processing and Panorama). Found by a new test that drives the window with thousands of random clicks, drags, wheel turns and keys.
+- **No empty blue window on Windows:** the file dialogs (drawn with PowerShell) and the external RAW decoders opened a console window of their own next to them. They run without one now.
+- **Portrait photos upright in Star stacking:** frames shot with the camera turned were shown and stacked lying on their side, so the sky region had to be drawn on a sideways picture. They are now turned upright by the base frame's orientation, after the calibration (which needs the sensor's own orientation): the preview, the sky region and the saved stack are upright. Projects and settings saved before with a sky region drawn by hand keep the old orientation, so the drawn line still fits.
+- **Star stacking in your language:** the progress, the errors and the reasons why a frame was left out (*alignment failed: star patterns do not agree*, *few stars – clouds?* …) and the columns of the frame report came in English; they are translated now (the command line keeps English).
 - **No empty hole at the zenith (or nadir):** in a spherical, cylindrical, Mercator, Hammer or Mollweide panorama, a photo that has the zenith in it had the cap between its edge and the pole left out (its outline goes round the pole, and only what the outline spans was rendered), so the top showed an empty patch, and the canvas stopped short of the pole. The outline is now closed over the pole; the last row at the pole is no longer black.
 - **No crash on bad values:** sorting for a median or a quantile (stretch, sky detection, star lists, the matching) could stop a background job with *"comparison function does not correctly implement a total order"* when a value was not a number (NaN), e.g. at the edge of an extreme panorama view. Such values now sort last.
 - **Presets no longer change the exposure:** *astro / night landscape* added +1 EV on top of the Exposure slider; a preset now sets only how to match and project. Brightness stays with **Exposure (EV)** and **Auto exposure**.

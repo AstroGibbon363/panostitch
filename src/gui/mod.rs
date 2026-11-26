@@ -2,6 +2,7 @@
 //! zoomable image view, and native file dialogs.
 
 pub mod dialogs;
+pub mod engine_text;
 pub mod finish;
 pub mod help;
 pub mod i18n;
@@ -212,6 +213,12 @@ pub fn save_kind_ui(ui: &mut egui::Ui, linear: bool, ext: &str) -> Option<bool> 
         ui.colored_label(Color32::from_rgb(230, 150, 30), tr("JPEG and PNG have too few levels for linear data: the faint detail is lost. Save linear data as FITS, XISF or TIFF."));
     }
     pick
+}
+
+/// `x` kept within lo…hi; when the range is empty (lo > hi: points or frame
+/// edges closer than the margin), its middle. (`f64::clamp` stops the program then.)
+pub fn clamp_safe(x: f64, lo: f64, hi: f64) -> f64 {
+    if lo <= hi { x.clamp(lo, hi) } else { (lo + hi) / 2.0 }
 }
 
 /// A slider with a label (row of a grid).

@@ -6,6 +6,18 @@ use std::sync::OnceLock;
 pub use crate::stacker::{available_disk, available_memory};
 
 /// Total memory (bytes).
+/// A helper program run without a console window of its own (on Windows
+/// every console program otherwise opens one: the empty blue PowerShell window
+/// behind a file dialog, a black one for a RAW decoder). Elsewhere nothing changes.
+pub fn no_console(c: &mut std::process::Command) -> &mut std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    c
+}
+
 pub fn total_memory() -> f64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
     System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::everything())).total_memory() as f64

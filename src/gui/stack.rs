@@ -237,8 +237,11 @@ impl StackTab {
         self.loading = true;
         let tx = self.tx.clone();
         self.status = crate::trf!("Loading preview of {}…", basename(&p));
+        let upright = self.cfg.upright;
         crate::sys::background(move || {
-            let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| {
+            // Turned as the stacking turns the frames (see StackConfig::upright).
+            let rot = if upright { io::orientation_code(&p) } else { 1 };
+            let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| io::orient(a, rot)).map(|a| {
                 let f = PREVIEW_MAX as f64 / a.w.max(a.h) as f64;
                 ((a.h, a.w), if f < 1.0 { resize(&a, f) } else { a })
             });
@@ -326,7 +329,7 @@ impl StackTab {
                 if let Some(d) = done {
                     p.done = d.max(p.done).min(p.total);
                 }
-                p.msg = m.to_string();
+                p.msg = super::engine_text::tr_msg(m);
                 Ok(())
             };
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stack(&cfg, preview, &progress, None))).unwrap_or_else(|_| Err(tr("internal error (panic)").into()));
@@ -337,7 +340,7 @@ impl StackTab {
                     let nused = r.report.iter().filter(|fi| fi.used()).count();
                     let rej: Vec<&FrameInfo> = r.report.iter().filter(|fi| matches!(fi.status, Status::Rejected | Status::Failed)).collect();
                     let nexcl = r.report.iter().filter(|fi| fi.status == Status::Excluded).count();
-                    let s = crate::trf!("{}{} frame(s) stacked{}{}. Brightness ×{}.{} ({} s)", if preview { tr("Quick preview: ") } else { tr("Done: ") }, nused, if rej.is_empty() { String::new() } else { crate::trf!(", {} left out ({}{}) – see Frame report", rej.len(), rej.iter().take(2).map(|fi| format!("{}: {}", basename(&fi.path), fi.reason)).collect::<Vec<_>>().join("; "), if rej.len() > 2 { "; …" } else { "" }) }, if nexcl > 0 { crate::trf!(", {} excluded by you", nexcl) } else { String::new() }, format!("{:.2}", r.gain), if r.saved.is_empty() { String::new() } else if r.saved.len() == 1 { crate::trf!(" Saved {}.", r.saved[0]) } else { crate::trf!(" Saved {} files.", r.saved.len()) }, t0.elapsed().as_secs());
+                    let s = crate::trf!("{}{} frame(s) stacked{}{}. Brightness ×{}.{} ({} s)", if preview { tr("Quick preview: ") } else { tr("Done: ") }, nused, if rej.is_empty() { String::new() } else { crate::trf!(", {} left out ({}{}) – see Frame report", rej.len(), rej.iter().take(2).map(|fi| format!("{}: {}", basename(&fi.path), super::engine_text::tr_msg(&fi.reason))).collect::<Vec<_>>().join("; "), if rej.len() > 2 { "; …" } else { "" }) }, if nexcl > 0 { crate::trf!(", {} excluded by you", nexcl) } else { String::new() }, format!("{:.2}", r.gain), if r.saved.is_empty() { String::new() } else if r.saved.len() == 1 { crate::trf!(" Saved {}.", r.saved[0]) } else { crate::trf!(" Saved {} files.", r.saved.len()) }, t0.elapsed().as_secs());
                     let fw = r.fwhm * f;
                     let mut r = r;
                     r.fwhm = fw.max(r.fwhm * 0.0 + fw);
@@ -501,8 +504,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 }
                 Msg::Status(s) => self.status = s,
                 Msg::Error(e) => {
+                    let cancelled = e == "Cancelled.";
+                    // The engine's message in the window's language.
+                    let e = if cancelled { tr("Cancelled.").to_string() } else { super::engine_text::tr_msg(&e) };
                     if let Some((t0, _)) = self.run_info.take() {
-                        let cancelled = e == "Cancelled.";
                         let mut rep = super::JobReport::new(if cancelled { tr("Stacking cancelled") } else { tr("Stacking failed") }, false);
                         if !cancelled {
                             rep = rep.row(tr("Error"), e.clone());
@@ -601,7 +606,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ("iaa", &mut c.light_pollution.iaa), ("background extraction", &mut c.bg_extraction.0),
             ("color calibration", &mut c.color_calibration), ("colour noise", &mut c.color_noise.0),
             ("automatic stretch", &mut c.stretch.auto), ("enhance star light", &mut c.enhance_stars.0),
-            ("merge 4 pixels", &mut c.merge4), ("time-lapse", &mut c.timelapse.0),
+            ("merge 4 pixels", &mut c.merge4), ("time-lapse", &mut c.timelapse.0), ("upright", &mut c.upright),
             ("auxiliary highlight", &mut self.aux), ("show stars", &mut self.show_stars), ("show background", &mut self.show_bg),
         ];
         (tg, sl)
@@ -694,6 +699,11 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         let sliders = tbl("sliders");
         if let Some(b) = sliders.get("brush").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))) {
             self.brush = b;
+        }
+        // Saved before frames were turned upright (v0.4.0): a sky region drawn by
+        // hand belongs to the sensor's orientation, so it stays that way.
+        if !toggles.contains_key("upright") {
+            self.cfg.upright = !matches!(self.cfg.sky.mode, SkyMode::BoundaryLine | SkyMode::Gradient | SkyMode::IrregularMask);
         }
         let (tg, sl) = self.named();
         for (k, v) in tg {
@@ -1987,7 +1997,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 }
             }
         }
-        let text = report_text(infos);
+        let text = report_text_with(infos, [tr("frame"), tr("stars"), "FWHM", tr("elong"), tr("sky"), tr("light"), tr("align"), tr("status")], &|st| tr(st.name()).to_string(), &super::engine_text::tr_msg);
         let lines: Vec<&str> = text.lines().collect();
         egui::ScrollArea::vertical().id_salt("rep").show(ui, |ui| {
             ui.monospace(lines[0]);
