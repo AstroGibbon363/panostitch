@@ -1,5 +1,10 @@
 # Changes
 
+## v0.4.1 (in development)
+
+### Fixes
+- **Display modes:** the *Display* menu with **Low** / **High** above the preview (Panorama, Stacking and Post-processing tabs) no longer runs under the panel on the right when the window is narrow: it moves to the next line.
+
 ## v0.4.0
 
 Released 2026-11-25. New since v0.3.2: the Post-processing and Timelapse tabs, night panoramas up to the zenith, star stacking with RBF background extraction and new stretches, wavelet noise reduction, six languages and in-app help.

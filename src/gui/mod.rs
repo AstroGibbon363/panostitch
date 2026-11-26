@@ -129,6 +129,18 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
     let as_processed = processed.as_deref().copied().unwrap_or(false);
     let offers_processed = processed.is_some();
     let name = |m: Display| if offers_processed && m == Display::Linear { tr("Linear") } else { tr(m.name()) };
+    // Compound widgets (a slider with its value, the combo box) are laid out in
+    // a row of their own, so a wrapping toolbar does not move them to the next
+    // line: they would run past the panel's edge, hidden under the side panel.
+    // Start a new line when the rest of this one is too short.
+    let room = |ui: &mut egui::Ui, w: f32| {
+        if ui.available_size_before_wrap().x < w {
+            ui.end_row();
+        }
+    };
+    let text_w = |ui: &egui::Ui, t: &str| egui::WidgetText::from(t).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x;
+    let combo_w = ui.spacing().combo_width.max(text_w(ui, if as_processed { tr("As processed") } else { name(v.mode) }) + 30.0);
+    room(ui, text_w(ui, tr("Display")) + combo_w + 2.0 * ui.spacing().item_spacing.x);
     ui.label(tr("Display"));
     egui::ComboBox::from_id_salt(id).selected_text(if as_processed { tr("As processed") } else { name(v.mode) }).show_ui(ui, |ui| {
         if let Some(p) = processed.as_deref_mut() {
@@ -149,7 +161,11 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
     if !as_processed && v.has_range() {
         ui.spacing_mut().slider_width = 90.0;
         let tip = tr("Low: values below it are shown black. High: values above it are shown white. For faint linear data try High around 0.01–0.1.");
+        // slider + its value (up to "0.00001") + its name
+        let slider_w = |ui: &egui::Ui, t: &str| 90.0 + text_w(ui, "0.000001") + text_w(ui, t) + 4.0 * ui.spacing().item_spacing.x;
+        room(ui, slider_w(ui, tr("Low")));
         ui.add(egui::Slider::new(&mut v.low, 0.0..=1.0).logarithmic(true).smallest_positive(1e-5).max_decimals(5).text(tr("Low"))).on_hover_text(tip);
+        room(ui, slider_w(ui, tr("High")) + 30.0);
         ui.add(egui::Slider::new(&mut v.high, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).max_decimals(5).text(tr("High"))).on_hover_text(tip);
         if v.low >= v.high {
             v.low = (v.high * 0.5).max(0.0);
@@ -159,6 +175,7 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
         }
     }
     if !as_processed && !v.plain() {
+        room(ui, text_w(ui, tr("view only")) + ui.spacing().item_spacing.x);
         ui.colored_label(Color32::from_rgb(230, 150, 30), tr("view only"));
     }
     (*v, processed.as_deref().copied()) != before
