@@ -5,8 +5,10 @@ Rust. Joins overlapping photos (JPEG, TIFF, PNG, camera RAW, FITS, XISF) into a
 panorama or mosaic, and stacks star images (aligned stars or star trails) with
 calibration frames and sky/ground separation.
 
-The Julia version is on the `main` branch. This branch (`v0.3`) is the Rust
-rewrite: one small native program, no runtime to install. Downloads for Linux
+It is one small native program written in Rust, with no runtime to install.
+The `main` branch holds the latest release; development happens on the
+branch of the next version (e.g. `v0.5`). The first version, written in
+Julia, is kept on the `julia` branch. Downloads for Linux
 and Windows are on the Releases page (on macOS, build from source as below); `CHANGELOG.md` lists what changed.
 
 ## Running
