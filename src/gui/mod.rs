@@ -215,6 +215,23 @@ pub fn save_kind_ui(ui: &mut egui::Ui, linear: bool, ext: &str) -> Option<bool> 
     pick
 }
 
+/// The file name and its folder under a path field, which shows only the
+/// start of a long path (its whole on hover).
+pub fn path_note(ui: &mut egui::Ui, path: &str) {
+    let path = path.trim();
+    if path.is_empty() {
+        return;
+    }
+    let p = std::path::Path::new(path);
+    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let dir = p.parent().map(|d| d.to_string_lossy().to_string()).filter(|d| !d.is_empty());
+    let text = match dir {
+        Some(d) => crate::trf!("→ {} in {}", name, d),
+        None => format!("→ {name}"),
+    };
+    ui.add(egui::Label::new(egui::RichText::new(text).weak().size(12.0)).wrap()).on_hover_text(path);
+}
+
 /// `x` kept within lo…hi; when the range is empty (lo > hi: points or frame
 /// edges closer than the margin), its middle. (`f64::clamp` stops the program then.)
 pub fn clamp_safe(x: f64, lo: f64, hi: f64) -> f64 {

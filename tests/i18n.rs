@@ -210,6 +210,8 @@ fn help_window_and_languages() {
     assert_eq!(tm("alignment failed: only 3 distinct stars match"), "zarovnání selhalo: shoduje se jen 3 různých hvězd");
     assert_eq!(tm("Loading, calibrating, aligning: 4/12"), "Načítání, kalibrace, zarovnání: 4/12");
     assert_eq!(tm("something new"), "something new");
+    // A value that is a name in the table (the kind of distortion correction).
+    assert_eq!(tm("Correcting distortion (Lens)…"), format!("Oprava zkreslení ({})…", i18n::tr("Lens")));
     i18n::set_lang(Lang::En);
     assert_eq!(tm("alignment failed: too few stars"), "alignment failed: too few stars");
 }

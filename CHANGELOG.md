@@ -1,5 +1,11 @@
 # Changes
 
+## v0.4.2 (in development)
+
+### Fixes
+- **Long file paths:** the output file fields (Post-processing, Timelapse, Star stacking) show only the start of a long path; the file name and its folder are now written under them (the whole path on hover).
+- **Star stacking:** the kind of distortion correction in the progress line is translated; the process log says it is technical and in English (its lines stay so).
+
 ## v0.4.1
 
 Released 2026-11-26. Fixes only: a crash in the curves, the empty hole at the zenith, an empty PowerShell window on Windows, small screens, portrait photos in Star stacking, and texts left in English.

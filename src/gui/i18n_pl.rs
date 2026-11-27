@@ -1016,4 +1016,6 @@ pub const T: &[(&str, &str)] = &[
     ("too few stars", "za mało gwiazd"),
     ("{} is {}×{}, not {}×{}.", "{} ma {}×{}, nie {}×{}."),
     ("{} is {}×{}, the base image {}×{}.", "{} ma {}×{}, klatka bazowa {}×{}."),
+    ("→ {} in {}", "→ {} w {}"),
+    ("Process log (time per step; technical, in English):", "Dziennik przetwarzania (czas kroków; techniczny, po angielsku):"),
 ];

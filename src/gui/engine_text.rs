@@ -3,7 +3,7 @@
 //! them translated. Each message is matched against the templates below ({}
 //! stands for a value); a value that is itself a message is translated too.
 
-use super::i18n::{fill, tr};
+use super::i18n::{fill, tr, tr_dyn};
 
 /// The engine's messages, as templates.
 const TEMPLATES: &[&str] = &[
@@ -80,7 +80,8 @@ pub fn tr_msg(msg: &str) -> String {
             return fill(tr(t), &args);
         }
     }
-    msg.to_string()
+    // A value of a message (a mode's name such as "Lens") may be in the table on its own.
+    tr_dyn(msg).map(str::to_string).unwrap_or_else(|| msg.to_string())
 }
 
 #[cfg(test)]

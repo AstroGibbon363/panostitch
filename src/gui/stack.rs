@@ -1371,6 +1371,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     7 => {
                         ui.label(tr("Saved as (edit the full path here, or use the Save as row on the left):"));
                         ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text(tr("output file (.tif / .png / .jpg / .fits / .xisf)")).desired_width(ui.available_width().min(420.0)));
+                        super::path_note(ui, &self.cfg.output);
                         if !self.cfg.output.is_empty() && std::path::Path::new(&self.cfg.output).exists() {
                             ui.colored_label(Color32::from_rgb(200, 120, 0), tr("This file exists and will be replaced."));
                         }
@@ -2024,7 +2025,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 ui.weak(crate::trf!("{} more light frames were not in the quick preview (it uses up to {}).", skipped, PREVIEW_FRAMES));
             }
             ui.add_space(8.0);
-            ui.label(tr("Process log (time per step):"));
+            ui.label(tr("Process log (time per step; technical, in English):"));
             for l in &r.log {
                 ui.monospace(l);
             }

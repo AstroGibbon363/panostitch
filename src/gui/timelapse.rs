@@ -836,6 +836,7 @@ impl TimelapseTab {
                 self.dialog = Some((dialogs::pick_save(tr("Save video"), &self.s.out), Dlg::VideoFile));
             }
         });
+        super::path_note(ui, &self.s.out);
         if self.s.format == Format::Sequence {
             let stem = std::path::Path::new(&self.s.out).with_extension("");
             ui.label(egui::RichText::new(crate::trf!("Writes {}_0001.{}, _0002 … in that folder.", basename(&stem.to_string_lossy()), io::ext_of(&self.s.out))).weak().size(12.0));

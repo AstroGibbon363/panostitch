@@ -388,7 +388,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
             let med = median_f64(frames_idx.iter().filter(|&&(_, i)| i != base_i).map(|&(_, i)| infos[i].matched as f64));
             kind = if med >= 80.0 { Distortion::Complex } else { Distortion::Lens };
         }
-        progress(&format!("Correcting distortion ({})…", kind.name().to_lowercase()))?;
+        progress(&format!("Correcting distortion ({})…", kind.name()))?;
         let mut sub: Vec<FrameInfo> = frames_idx.iter().map(|&(_, i)| infos[i].clone()).collect();
         let bpos = frames_idx.iter().position(|&(_, i)| i == base_i).unwrap_or(0);
         let k1 = correct_distortion(&mut sub, bpos, kind == Distortion::Complex, h, w);

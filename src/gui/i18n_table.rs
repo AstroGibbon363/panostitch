@@ -1016,4 +1016,6 @@ pub const T: &[(&str, &str, &str)] = &[
     ("too few stars", "příliš málo hvězd", "zu wenige Sterne"),
     ("{} is {}×{}, not {}×{}.", "{} má {}×{}, ne {}×{}.", "{} ist {}×{}, nicht {}×{}."),
     ("{} is {}×{}, the base image {}×{}.", "{} má {}×{}, základní snímek {}×{}.", "{} ist {}×{}, das Basisbild {}×{}."),
+    ("→ {} in {}", "→ {} ve složce {}", "→ {} in {}"),
+    ("Process log (time per step; technical, in English):", "Protokol (čas jednotlivých kroků; technický, anglicky):", "Protokoll (Zeit pro Schritt; technisch, auf Englisch):"),
 ];

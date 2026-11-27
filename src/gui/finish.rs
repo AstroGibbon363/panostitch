@@ -976,6 +976,7 @@ impl FinishTab {
                 }
             });
         });
+        super::path_note(ui, &self.out);
         if io::is_astro(&self.out) {
             ui.label(egui::RichText::new(tr("FITS / XISF get the finished (stretched) image here, as 32-bit float.")).weak().size(12.0));
         }
