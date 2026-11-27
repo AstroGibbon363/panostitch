@@ -31,6 +31,29 @@ Also contains every fix of v0.4.1 (curves crash, portrait photos upright in Star
 - **Normalisation** of the frames before they are combined, as in Siril: *Additive*, *Multiplicative* (the former *Unify exposure*) or *Additive with scaling* (Siril's default for stacking with rejection).
 - **Remove each frame's gradient:** a plane (a gradient of the first order, as Siril's *subsky 1*) fitted to the sky of every frame and taken out before stacking, for light pollution that changes from frame to frame. Stars and objects are left out of the fit; on landscapes only the sky region is corrected.
 
+## v0.4.2 (in development)
+
+### Fixes
+- **Long file paths:** the output file fields (Post-processing, Timelapse, Star stacking) show only the start of a long path; the file name and its folder are now written under them (the whole path on hover).
+- **Star stacking:** the kind of distortion correction in the progress line is translated; the process log says it is technical and in English (its lines stay so).
+
+## v0.4.1
+
+Released 2026-11-26. Fixes only: a crash in the curves, the empty hole at the zenith, an empty PowerShell window on Windows, small screens, portrait photos in Star stacking, and texts left in English.
+
+### Fixes
+- **Crash in the curves (Post-processing):** a point added right next to another (closer than 2 % of the width) and then dragged stopped the program. Points are no longer added on top of each other, and dragging can no longer fail; the same for dragging a very small crop frame (Post-processing and Panorama). Found by a new test that drives the window with thousands of random clicks, drags, wheel turns and keys.
+- **No empty blue window on Windows:** the file dialogs (drawn with PowerShell) and the external RAW decoders opened a console window of their own next to them. They run without one now.
+- **Portrait photos upright in Star stacking:** frames shot with the camera turned were shown and stacked lying on their side, so the sky region had to be drawn on a sideways picture. They are now turned upright by the base frame's orientation, after the calibration (which needs the sensor's own orientation): the preview, the sky region and the saved stack are upright. Projects and settings saved before with a sky region drawn by hand keep the old orientation, so the drawn line still fits.
+- **Star stacking in your language:** the progress, the errors and the reasons why a frame was left out (*alignment failed: star patterns do not agree*, *few stars – clouds?* …) and the columns of the frame report came in English; they are translated now (the command line keeps English).
+- **No empty hole at the zenith (or nadir):** in a spherical, cylindrical, Mercator, Hammer or Mollweide panorama, a photo that has the zenith in it had the cap between its edge and the pole left out (its outline goes round the pole, and only what the outline spans was rendered), so the top showed an empty patch, and the canvas stopped short of the pole. The outline is now closed over the pole; the last row at the pole is no longer black.
+- **No crash on bad values:** sorting for a median or a quantile (stretch, sky detection, star lists, the matching) could stop a background job with *"comparison function does not correctly implement a total order"* when a value was not a number (NaN), e.g. at the edge of an extreme panorama view. Such values now sort last.
+- **Presets no longer change the exposure:** *astro / night landscape* added +1 EV on top of the Exposure slider; a preset now sets only how to match and project. Brightness stays with **Exposure (EV)** and **Auto exposure**.
+- **Smaller screens (1280 × 720, 1366 × 768):** in the Panorama tab the memory estimate under *Output size* wraps instead of widening the right panel until the preview covered its left edge (cut-off labels, Czech and Spanish especially). A new test renders every tab in every language at these sizes and fails on any text cut off or panel overlap.
+- **Untranslated texts translated:** the line above the panorama (projection, typical error, colour legend), the pair menu (inliers, rejected, none), *full* output size, *automatic* format, the model name in pair messages, the Post-processing summary (*In use: …*), its preset menu, the stacking result line and base frame label, the Timelapse *RAW via* tip. The stacking note under the post-processing options now follows a change of language.
+- **Clearer controls:** *Save linear / stretched* are radio buttons (a highlighted label next to a plain one did not read as a choice); **Low** and **High** stand before their sliders; the *Simple* switch lost its ✓ (it looked ticked when off); zoom is **+** / **−** in the Panorama toolbar, so it takes fewer lines; the pair message is readable size; Post-processing's output size reads *full size* instead of *0 px*, and the output file field shows the whole path on hover.
+- **Display modes:** the *Display* menu with **Low** / **High** above the preview (Panorama, Stacking and Post-processing tabs) no longer runs under the panel on the right when the window is narrow: it moves to the next line.
+
 ## v0.4.0
 
 Released 2026-11-25. New since v0.3.2: the Post-processing and Timelapse tabs, night panoramas up to the zenith, star stacking with RBF background extraction and new stretches, wavelet noise reduction, six languages and in-app help.
