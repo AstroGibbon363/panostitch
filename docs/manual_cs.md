@@ -114,7 +114,7 @@ Poznámky:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  nabídka projekce   │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  nabídka projekce   │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  pole pro cestu      │                                      │  Roll               │
 │  seznam snímků       │                                      │ 4 · Compose         │
@@ -191,7 +191,7 @@ dál měnit.
 | Předvolba | Pro | Hlavní nastavení |
 |---|---|---|
 | **denní krajina** | denní panoramy, fotoaparát otáčený na místě | slabé odšumění, homografie, cylindrická projekce |
-| **astro / noční krajina** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, +1 EV (pak **Automatická expozice**), vyšší práh rohů (méně falešných rohů v šumu) |
+| **astro / noční krajina** | noční obloha, Mléčná dráha nad krajinou | silné odšumění, volnější párování, sférická projekce, vyšší práh rohů (méně falešných rohů v šumu). Jas: **Automatická expozice** nebo **Expozice (EV)**; předvolby ho nemění |
 | **deep-sky mozaika** | mozaiky hvězdných polí z dalekohledu, např. FITS | málo odšumění (hvězdy jsou malé), model podobnosti (posun + rotace pole), bez zpřesnění, přímočará projekce; použijte **Automatické roztažení** |
 | **makro / mikroskop** | preparát nebo stolek posouvaný pod pevným fotoaparátem | model posunu (snímky se jen posouvají), bez zpřesnění, přímočará projekce |
 | **sken / plochý dokument** | mapy, obrazy, dokumenty fotografované po částech | afinní model, bez zpřesnění, přímočará projekce |
@@ -264,6 +264,9 @@ bodů, které odpovídají jednomu geometrickému modelu (tzv. *inliery*).
 | **Min. inlierů** | 20 | Nejmenší počet inlierů, aby se dvojice počítala jako skutečný překryv. |
 | **Model** | homography | Jak se jeden snímek zobrazí na druhý, viz níže. |
 | **zpřesnit** | zapnuto | Globální zpřesnění, viz níže. |
+| **plate solving snímků oblohy** | zapnuto | Najde snímky oblohy ve hvězdném katalogu, viz níže. |
+| **Zkreslení objektivu** | Soudek / poduška (k1) | Co ze zkreslení objektivu zpřesnění hledá, viz níže. |
+| **každý snímek vlastní zkreslení** | vypnuto | Každá fotka dostane vlastní zkreslení objektivu, viz níže. |
 
 **Kdy se dvojice počítá jako skutečný překryv:** potřebuje alespoň *Min.
 inliers* inlierů, jasná většina jejích shod musí souhlasit a transformace musí
@@ -290,6 +293,19 @@ vykreslení se opraví. Dvojice, které do společného řešení nezapadají, s
 pohnulo. Stavový řádek ukáže, kolik jich bylo vyřazeno, a **typickou chybu
 dvojic** (1–3 px je dobré).
 
+**Zkreslení objektivu.** **Zkreslení objektivu** určuje, co zpřesnění
+hledá kromě natočení: **Vypnuto (jen natočení)** pro objektivy bez zkreslení
+(nebo už opravené fotky); **Soudek / poduška (k1)**, výchozí, pro prosté
+prohnutí rovných čar; **Polynomické, vlnité (k1, k2)** pro vlnité zkreslení
+mnoha širokoúhlých objektivů („moustache“), kdy se čáry uprostřed prohýbají
+na jednu stranu a v rozích na druhou (k1·r² + k2·r⁴, jako v Huginu a PTGui).
+Se zapnutým **každý snímek vlastní zkreslení** dostane každá fotka vlastní
+hodnoty, které se drží blízko společných tam, kde toho její body moc neřeknou:
+pro zoom, který se mezi snímky posunul, nebo fotky ze dvou objektivů. Natočení
+každé fotky se zpřesňuje vždy samostatně. Stavový řádek ukáže nalezené
+hodnoty. Když typická chyba dvojic zřetelně klesne, bohatší model se vyplatí;
+jinak nechte jednodušší.
+
 **Noční obloha: párování podle hvězd.** Rohové body jen zřídka spárují snímky,
 na kterých je jen obloha: každá hvězda vypadá jako každá jiná. Když body
 dvojice selžou, porovnají se proto její **hvězdy**: trojúhelníky sousedních
@@ -300,6 +316,28 @@ jen dvojice s dostatkem hvězd v překryvu, z nichž se velká část shoduje.
 U fotoaparátů mířících daleko od sebe (řada nahoru a řada dolů) leží vzdálené
 rohy snímku za druhým fotoaparátem; tam se posuzuje jen část, kterou pokrývají
 shody.
+
+**Noční obloha: plate solving.** Snímky, na kterých je (téměř) jen obloha
+(95 % a víc, jak to program změří), se najdou ve hvězdném katalogu, který je
+součástí programu (Hipparcos a Tycho-2, asi 42 000 hvězd do 8. magnitudy):
+jejich hvězdy se identifikují, bez jakékoli nápovědy, kam fotoaparát mířil. Dva
+takové snímky, které se překrývají, se pak propojí hvězdami identifikovanými
+v obou, i když je překryv malý nebo párování selhalo, a pár, který párování
+spojilo špatně, se opraví. Katalog také přesně změří ohnisko každého snímku,
+takže se zohlední i zoom, který se mezi snímky se stejným ohniskem v EXIFu
+posunul. Seznam snímků označí nalezené snímky ★; pohled na snímek ukáže střed
+(rektascenze, deklinace), počet identifikovaných hvězd a pole a zakroužkuje
+tyto hvězdy modře. Snímky s krajinou zůstávají na ostatním párování. Trvá to
+méně než sekundu na snímek; vypíná se volbou **plate solving snímků oblohy**.
+
+**Mřížka oblohy.** Když jsou snímky nalezené ve hvězdném katalogu, nakreslí
+**⊕ Mřížka oblohy** nad náhledem do panoramatu souřadnice oblohy, jako mřížka v
+Sirilu: čáry rektascenze a deklinace s čísly a kroužky se jmény nejjasnějších
+hvězd, Messierových a dalších jasných objektů (při přiblížení přibývají; jen
+tam, kde fotky ukazují oblohu). Vychází ze všech hvězd identifikovaných na
+snímcích, takže sleduje projekci, sklon i naklonění panoramy; kde se obloha
+mezi snímky pootočila, je jen přibližná (roh náhledu uvádí, jak přesně sedí).
+Kreslí se jen v náhledu, do uložené panoramy se nedostane.
 
 **Zoom, který se posunul.** Při míření nahoru nebo dolů se kroužek zoomu může
 mezi snímky pootočit vlastní vahou. U souborů RAW je ohnisková vzdálenost
@@ -369,12 +407,39 @@ Jak jednotlivé projekce vypadají, popisuje kapitola [Projekce](#7-projekce).
 | **Sklon (°)** | Nakloní celou panoramu nahoru nebo dolů. Slouží k **narovnání prohnutého horizontu** (například když fotoaparát mířil dolů). |
 | **Naklonění (°)** | Otočí celou panoramu. Slouží k vyrovnání šikmého horizontu. |
 | *Jemné nastavení* | Yaw, pitch a roll mají posuvník, číselné pole a **◀ ▶**. Posuvníky pitch a roll jsou jemné u 0° (kde bývají opravy) a dál hrubší. Pomalým tažením číselného pole je to 0,02° na pixel, dvojklikem do něj můžete hodnotu napsat. **◀ ▶** krokují po 0,1° (se Shiftem po 1°). |
+| **⟷ Auto obzor** | Najde obzor v náhledu a nastaví sklon a naklonění tak, aby byl rovný (natočení zůstane). Viz níže. |
+| **✎ Obzor ručně** | Klikněte body podél obzoru sami, pak **✔ Srovnat obzor**. Viz níže. |
 | **Vynulovat ohnisko / natočení / sklon / naklonění** | Vrátí tyto čtyři posuvníky na výchozí hodnoty. |
 
 Titulek náhledu ukazuje velikost panoramy, ohniskovou vzdálenost v pixelech,
 zorný úhel referenčního snímku a typickou chybu zarovnání.
 
 Tyto prvky mění náhled okamžitě (jakmile náhled existuje).
+
+**Automatické srovnání obzoru.** Panorama málokdy vyjde s rovným obzorem:
+když referenční snímek mířil trochu nahoru nebo dolů, obzor se prohne do vlny
+nebo do „U“, a nevyrovnaný stativ ho nakloní. **⟷ Auto obzor** najde v náhledu
+okraj oblohy (kde se obloha potkává se zemí, sloupec po sloupci), vyhladí ho
+křivkou 4. řádu (jednotlivé stromy, kopce a lampy se počítají méně) a natočí
+pohled (**sklon** a **naklonění**; **natočení** zůstane) tak, aby byl každý jeho
+bod ve stejné výšce. Na kouli je to přesné: vodorovný obzor je přímka přes
+válcovou, sférickou, Mercatorovu, Hammerovu i Mollweideovu panoramu; u přímočaré
+projekce se obzor dostane na středovou čáru, jediné místo, kde je tam rovný.
+Nalezený obzor se vykreslí zelenou čarou (se zapnutými **překryvy**), takže je
+vidět, jak se narovná; stavový řádek uvede, o kolik byl mimo. Zpět (Ctrl+Z)
+vrátí původní úhly. Okraj oblohy je silueta krajiny, ne vždy skutečný obzor:
+v panoramatu užším než 90° by svah vypadal jako náklon, proto se tam naklonění
+větší než 8° nepoužije.
+
+**Ruční označení obzoru.** Kde silueta není obzor (kopce, město, mlha),
+**✎ Obzor ručně** ho dovolí označit: klikněte na panoramatu 4 nebo více bodů
+podél obzoru, rozložených po jeho délce (pravé tlačítko odebere nejbližší).
+Body se proloží křivka (4. řádu; přes 4 body 3. řádu); **✔ Srovnat obzor**
+(nebo Enter) ho srovná jako výše, Esc zruší.
+
+Obojí je k dispozici jen tam, kde může být vodorovný obzor rovný: přímočará,
+válcová, sférická, Mercatorova, Hammerova a Mollweideova projekce, ne little
+planet, tunel, rybí oko, stereografická ani příčné projekce.
 
 ### 5.5 Krok 4: Skládání (Compose)
 
@@ -392,7 +457,9 @@ Tyto prvky mění náhled okamžitě (jakmile náhled existuje).
 | **Zrušit ořez** | Zruší ořez. Ořez se zruší i automaticky, když změníte cokoli, co snímky posune (projekci, ohnisko, yaw, pitch, roll, ruční posuny, párování). |
 | **✂ Ořez** (nad náhledem) | Vyznačte na panoramatu část, která zůstane: natáhněte rámeček, jeho hrany a rohy ho upraví, tažením uvnitř ho posunete. Potvrďte **✂ Ořez: hotovo** (Esc zruší). Vykreslí a uloží se jen tato část, takže velké panorama potřebuje méně paměti a kvůli samotnému ořezu nemusíte do záložky Dodatečné úpravy. **Zrušit ořez** ho odstraní; stejně jako automatický ořez zmizí při změně geometrie. |
 | **⬇ Uložit a upravit…** (nad náhledem) | Uloží panorama a pak ho otevře v záložce Dodatečné úpravy. |
+| **◧ Doplnit prázdná místa** (nad náhledem) | Vyplní prázdné rohy a okraje vymyšlenou oblohou a zemí (automatické doplnění), viz níže. |
 | **Nudge ← ↑ ↓ →** | Posune aktuální snímek o jeden pixel náhledu (viz níže). |
+| **Opravit vybraný snímek** | Ručně pootočí vybraný snímek kolem jeho středu a přidá k jeho zkreslení objektivu (k1, k2), viz níže. |
 
 V pohledu **Panorama** je obrys každého snímku vykreslen a očíslován:
 
@@ -411,6 +478,16 @@ Přepínačem **překryvy** v liště je vypnete a uvidíte samotnou panoramu.
 němu připojené dál od reference (podél žlutých vazeb). Referenční snímek se
 nehýbe; celou panoramu posunete pomocí Pitch a Roll.
 
+**Oprava jednoho snímku.** **Opravit vybraný snímek** (pod tlačítky Nudge)
+pootočí vybraný snímek kolem jeho vlastního středu (**Pootočení (°)**), pro
+fotku, která je proti sousedním trochu pootočená, a přidá k jeho zkreslení
+objektivu: **Zkreslení k1 +** ohýbá rovné čáry (− soudek, + poduška),
+**Zkreslení k2 +** působí hlavně v rozích; s opačným znaménkem než k1 opraví
+vlnité zkreslení („moustache“). Pod tím jsou hodnoty, které našlo zpřesnění.
+Opravy platí pro všechny vybrané snímky; **Zkreslení na všechny snímky** dá
+všem snímkům stejné k1 a k2 (jeden objektiv), **Vynulovat** je odstraní. Dají
+se vrátit zpět, ukládají se do projektu a nové zpřesnění je zachová.
+
 **Masky snímků.** Kde spojení vybere špatnou fotku (strom nebo člověk, který se
 pohnul, auto, duch), řekněte mu, kterou použít: **✐ Masky snímků** nad
 náhledem. Shift+kliknutí do panoramatu vybere snímek pod kurzorem (další
@@ -422,6 +499,18 @@ odstraní). Masky jsou zobrazené barevně a očíslované, náhled se po každ�
 obnoví a okraj je měkký, takže změna nemá šev. Masky patří ke snímku (zůstanou
 na místě i při změně projekce nebo ořezu), jdou vrátit přes Zpět a ukládají se
 do projektu.
+
+**Doplnění prázdných míst (autocomplete).** **◧ Doplnit prázdná místa** nad
+náhledem vyplní části obdélníku, které nepokrývá žádná fotka (prázdné rohy a
+okraje; uvnitř ořezového rámečku, pokud je), vymyšleným obsahem, který navazuje
+na okolí, jako to dělá Microsoft ICE: obloha pokračuje svým jasem a barvou,
+s hvězdami a zrnem zkopírovanými z fotek, země svou trávou. Každá malá část
+prázdného místa si vezme nejpodobnější kousek z fotek, od hrubého k jemnému, a
+v plném rozlišení se dokopíruje vyfocený detail. Náhled to ukazuje a ukládání
+to provede v plném rozlišení (hlášení řekne, jaký podíl byl doplněn). Hodí se
+na oblohu, které je nahoře trochu málo, nebo na zubatý okraj; velké prázdné
+místo se stane věrohodnou, ale vymyšlenou oblohou. Je to vymyšlené: před
+zveřejněním to zkontrolujte a tam, kde na tom záleží (soutěže, věda), to uveďte.
 
 ### 5.6 Krok 5: Roztažení histogramu (Stretch)
 
@@ -497,8 +586,8 @@ shodné body: asi 50 kB na snímek.
 | Akce | Myš | Klávesnice | Tlačítko |
 |---|---|---|---|
 | Posun | tažení **levým** tlačítkem | šipky (pohledy Image a Pair) | |
-| Přiblížení | kolečko nahoru | `+` | **Přiblížit +** |
-| Oddálení | kolečko dolů | `-` | **Oddálit -** |
+| Přiblížení | kolečko nahoru | `+` | **+** |
+| Oddálení | kolečko dolů | `-` | **−** |
 | Zpět na celek | | `F`, `0` nebo `Home` | **Přizpůsobit** |
 | Výběr snímku (pohled Panorama) | klik do jeho obrysu | | |
 | Zobrazit / skrýt obrysy, čísla, vazby | | | přepínač **překryvy** |
@@ -800,7 +889,7 @@ uložený soubor s jeho velikostí, nebo co se pokazilo. × ho zavře.
 
 | Položka | Co nafotit |
 |---|---|
-| **Snímky oblohy** (*Snímky hvězd* v jednoduchém režimu) | Snímky oblohy: stejná ohnisková vzdálenost, clona a expozice. Nejlepší je RAW; TIFF, FITS nebo XISF jen pokud jsou data stále lineární (neupravená). **Sjednotit expozici** vyrovná snímky pořízené za různých podmínek. |
+| **Snímky oblohy** (*Snímky hvězd* v jednoduchém režimu) | Snímky oblohy: stejná ohnisková vzdálenost, clona a expozice. Nejlepší je RAW; TIFF, FITS nebo XISF jen pokud jsou data stále lineární (neupravená). **Normalizace** a **Odstranit gradient každého snímku**: viz pod tabulkou. |
 | **Základní snímek** (*Základní snímek* v jednoduchém režimu) | Snímek, ke kterému se ostatní zarovnají. Prázdné = prostřední světlý snímek. Jiný zvolíte v rozbalovacím seznamu vedle **Základní snímek**, nebo vyberte snímek v seznamu světlých snímků a klikněte na **Použít jako základní**. |
 | **Tmavé snímky** (*Tmavé snímky* v jednoduchém režimu) | Tmavé snímky (darky): krytka na objektivu, stejné ISO a čas, pořízené těsně před snímky oblohy nebo po nich. Odstraní tepelný šum a horké pixely. |
 | **Bias snímky** (*Bias snímky* v jednoduchém režimu) | Nejkratší čas, krytka na objektivu, stejné ISO. |
@@ -809,8 +898,27 @@ uložený soubor s jeho velikostí, nebo co se pokazilo. × ho zavře.
 | **Snímek popředí** | Nepovinné: jeden snímek země ze stejného místa stativu – za modré hodinky, s dlouhou expozicí nebo nízkým ISO. Pod oblastí oblohy nahradí (zašuměné, tmavé) složené popředí. **Přizpůsobit jas** ho přizpůsobí jasu složeného popředí; **Expozice (EV)** ho odtud zesvětlí nebo ztmaví. Potřebuje oblast oblohy. |
 | **Výstup** | Nastavuje se v řádku **Uložit jako**: název, typ a složka. `.tif` / `.png` (16 bitů), `.jpg` (8 bitů) nebo `.fits` / `.xisf` (32bitová čísla s plovoucí čárkou, lineární, k dalšímu zpracování v Siril, PixInsight apod.). |
 
+**Snímky na výšku** (fotoaparát otočený na výšku) se skládají na výšku: po
+odečtení darků a flatů (ty potřebují orientaci senzoru) se každý snímek otočí
+podle záznamu fotoaparátu u základního snímku. Náhled, hranice oblohy, kterou
+kreslíte, i uložený výsledek jsou na výšku. Projekt nebo nastavení uložené před
+verzí 0.4.1 s ručně nakreslenou oblastí oblohy si ponechá starou (otočenou na
+bok) orientaci, aby nakreslená čára dál seděla.
+
 Všechny kalibrační snímky jsou nepovinné. Při vysokém ISO hodně pomůže i
 několik tmavých snímků.
+
+**Normalizace** srovná oblohu každého snímku se základním snímkem, než se
+snímky složí: *Aditivní* posune úroveň každého snímku (pro pozadí, které se
+mění: světelné znečištění, Měsíc, soumrak), *Multiplikativní* ji vynásobí (pro
+jiné expozice nebo noci; dřívější *Sjednotit expozici*), *Aditivní se
+škálováním* ji posune a přeškáluje na rozptyl základního snímku, jako to Siril
+dělá ve výchozím nastavení pro skládání s odmítáním. **Odstranit gradient
+každého snímku** před skládáním proloží obloze každého snímku rovinu (gradient
+1. řádu, jako *subsky 1* v Sirilu) a odečte ji, úroveň zůstane: pro světelné
+znečištění, které se mění snímek od snímku a které by už složený obraz
+neztratil. Hvězdy a objekty se do proložení nepočítají; u krajinek se opravuje
+jen oblast oblohy.
 
 **Seznamy souborů:** každá skupina má své soubory v rozbalovacím seznamu
 vedle svého názvu, takže ani stovky světlých snímků není třeba procházet.

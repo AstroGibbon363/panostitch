@@ -118,7 +118,7 @@ Hinweise:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  Projektionsmenü    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  Projektionsmenü    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  Pfadfeld            │                                      │  Roll               │
 │  Bildliste           │                                      │ 4 · Compose         │
@@ -200,7 +200,7 @@ sich danach weiter ändern.
 | Voreinstellung | Für | Wichtigste Einstellungen |
 |---|---|---|
 | **Tageslandschaft** | Tageslicht-Panoramen, Kamera auf der Stelle gedreht | leichtes Entrauschen, Homographie, zylindrische Projektion |
-| **Astro / Nachtlandschaft** | Nachthimmel, Milchstraße über einer Landschaft | starkes Entrauschen, lockerere Zuordnung, sphärische Projektion, +1 EV (dann **Automatische Belichtung**), höhere Eckenschwelle (weniger falsche Ecken im Rauschen) |
+| **Astro / Nachtlandschaft** | Nachthimmel, Milchstraße über einer Landschaft | starkes Entrauschen, lockerere Zuordnung, sphärische Projektion, höhere Eckenschwelle (weniger falsche Ecken im Rauschen). Helligkeit: **Automatische Belichtung** oder **Belichtung (EV)**; Vorgaben ändern sie nicht |
 | **Deep-Sky-Mosaik** | Teleskop-Mosaike von Sternfeldern, z. B. FITS | wenig Entrauschen (Sterne sind klein), Ähnlichkeitsmodell (Verschiebung + Bildfeldrotation), keine Verfeinerung, geradlinige Projektion; **Automatisch strecken** verwenden |
 | **Makro / Mikroskop** | Objektträger oder Tisch unter einer festen Kamera verschoben | Verschiebungsmodell (Bilder verschieben sich nur), keine Verfeinerung, geradlinige Projektion |
 | **Scan / flaches Dokument** | Karten, Gemälde, Dokumente in Teilen fotografiert | affines Modell, keine Verfeinerung, geradlinige Projektion |
@@ -275,6 +275,9 @@ nur die Zuordnungen, die zu einem gemeinsamen geometrischen Modell passen (die
 | **Min. Inlier** | 20 | Mindestanzahl an Inliern, damit ein Paar als echte Überlappung gilt. |
 | **Modell** | homography | Wie ein Bild auf ein anderes abgebildet wird, siehe unten. |
 | **verfeinern** | an | Globale Verfeinerung, siehe unten. |
+| **Plate-Solving der Himmelsfotos** | an | Findet die Himmelsfotos in einem Sternkatalog, siehe unten. |
+| **Objektivverzeichnung** | Tonne / Kissen (k1) | Was die Verfeinerung von der Objektivverzeichnung anpasst, siehe unten. |
+| **jedes Bild eigene Verzeichnung** | aus | Jedes Foto bekommt seine eigene Objektivverzeichnung, siehe unten. |
 
 **Wann ein Paar als echte Überlappung gilt:** Es braucht mindestens *Min.
 inliers* Inlier, eine klare Mehrheit seiner Zuordnungen muss übereinstimmen,
@@ -303,6 +306,20 @@ beim Rendern korrigiert. Paare, die nicht zur gemeinsamen Lösung passen, werden
 sind. Die Statuszeile meldet, wie viele verworfen wurden, und den **typischen
 Paarfehler** (1–3 px ist gut).
 
+**Objektivverzeichnung.** **Objektivverzeichnung** legt fest, was die
+Verfeinerung außer den Drehungen anpasst: **Aus (nur Drehungen)** für
+Objektive ohne Verzeichnung (oder schon korrigierte Fotos); **Tonne / Kissen
+(k1)**, die Voreinstellung, für das einfache Durchbiegen gerader Linien;
+**Polynom, wellenförmig (k1, k2)** für die wellenförmige Verzeichnung vieler
+Weitwinkel („Schnurrbart“), bei der sich Linien in der Mitte in die eine und in
+den Ecken in die andere Richtung biegen (k1·r² + k2·r⁴, wie in Hugin und
+PTGui). Mit **jedes Bild eigene Verzeichnung** bekommt jedes Foto eigene Werte,
+nahe an den gemeinsamen gehalten, wo seine Punkte wenig aussagen: für einen
+Zoom, der sich zwischen den Aufnahmen verstellt hat, oder Fotos von zwei
+Objektiven. Die Drehung jedes Fotos wird immer einzeln verfeinert. Die
+Statuszeile zeigt die gefundenen Werte. Sinkt der typische Paarfehler deutlich,
+lohnt sich das reichere Modell; sonst bleiben Sie beim einfacheren.
+
 **Nachthimmel: Zuordnung über die Sterne.** Eckpunkte ordnen Bilder, die nur
 Himmel zeigen, selten zu: Jeder Stern sieht aus wie jeder andere. Scheitern die
 Punkte eines Paares, werden deshalb seine **Sterne** verglichen: Dreiecke
@@ -314,6 +331,31 @@ werden nur Paare mit genug Sternen in der Überlappung, von denen ein guter Teil
 passt. Zeigen die Kameras weit auseinander (eine Reihe nach oben, eine nach
 unten), liegen die fernen Ecken eines Bildes hinter der anderen Kamera; dort
 wird nur der Teil beurteilt, den die Zuordnungen abdecken.
+
+**Nachthimmel: Plate-Solving.** Fotos, die (fast) nur Himmel zeigen (95 % oder
+mehr, wie das Programm es misst), werden in einem mitgelieferten Sternkatalog
+gefunden (Hipparcos und Tycho-2, etwa 42 000 Sterne bis Größenklasse 8): ihre
+Sterne werden identifiziert, ohne jeden Hinweis, wohin die Kamera zeigte. Zwei
+solche Fotos, die sich überlappen, werden dann über die in beiden
+identifizierten Sterne verbunden, auch wenn die Überlappung klein ist oder die
+Zuordnung scheiterte, und ein falsch zugeordnetes Paar wird korrigiert. Der
+Katalog misst auch die Brennweite jedes Fotos genau, sodass auch ein Zoom
+berücksichtigt wird, der zwischen Aufnahmen mit gleicher EXIF-Brennweite
+gewandert ist. Die Bildliste markiert gefundene Fotos mit ★; die Bildansicht
+zeigt die Mitte (Rektaszension, Deklination), die Zahl der identifizierten
+Sterne und das Feld und kreist diese Sterne blau ein. Fotos mit Landschaft
+bleiben der übrigen Zuordnung überlassen. Dauert unter einer Sekunde pro Foto;
+**Plate-Solving der Himmelsfotos** schaltet es aus.
+
+**Himmelsgitter.** Mit im Sternkatalog gefundenen Fotos zeichnet
+**⊕ Himmelsgitter** über der Ansicht die Himmelskoordinaten ins Panorama, wie
+Sirils Himmelsgitter: Linien der Rektaszension und Deklination mit Zahlen und
+Kreise mit den Namen der hellsten Sterne, der Messier- und anderer heller
+Deep-Sky-Objekte (beim Hineinzoomen mehr; nur wo ein Foto den Himmel zeigt).
+Es beruht auf allen auf den Fotos identifizierten Sternen und folgt daher
+Projektion, Neigung und Rollen des Panoramas; wo sich der Himmel zwischen den
+Aufnahmen gedreht hat, ist es ungefähr (die Ecke der Ansicht nennt die
+Genauigkeit). Es wird nur in der Ansicht gezeichnet, nicht gespeichert.
 
 **Ein Zoom, der sich verstellt hat.** Nach oben oder unten gerichtet, kann sich
 ein Zoomring zwischen den Aufnahmen durch sein eigenes Gewicht drehen. Bei
@@ -391,6 +433,8 @@ Wie die einzelnen Projektionen aussehen, beschreibt das Kapitel
 | **Neigung (°)** | Neigt das ganze Panorama nach oben oder unten. Damit **begradigen Sie einen gebogenen Horizont** (etwa wenn die Kamera nach unten zeigte). |
 | **Rollen (°)** | Dreht das ganze Panorama. Damit richten Sie einen schiefen Horizont aus. |
 | *Feineinstellung* | Yaw, Pitch und Roll haben je einen Regler, ein Zahlenfeld und **◀ ▶**. Die Regler für Pitch und Roll sind nahe 0° fein (wo Korrekturen meist liegen) und weiter außen grob. Langsames Ziehen am Zahlenfeld ergibt 0,02° pro Pixel; per Doppelklick lässt sich der Wert eintippen. **◀ ▶** gehen in Schritten von 0,1° (mit Umschalt 1°). |
+| **⟷ Auto-Horizont** | Findet den Horizont in der Vorschau und stellt Neigung und Rollen so ein, dass er gerade ist (Gieren bleibt). Siehe unten. |
+| **✎ Horizont von Hand** | Klicken Sie selbst Punkte entlang des Horizonts, dann **✔ Horizont ausrichten**. Siehe unten. |
 | **Brennweite / Gieren / Neigen / Rollen zurücksetzen** | Setzt diese vier Regler zurück. |
 
 Der Titel der Ansicht zeigt Panoramagröße, Brennweite in Pixeln, Bildwinkel des
@@ -398,6 +442,34 @@ Referenzbilds und den typischen Ausrichtungsfehler.
 
 Diese Elemente aktualisieren die Vorschau sofort (sobald eine Vorschau
 existiert).
+
+**Den Horizont automatisch geraderichten.** Ein Panorama hat selten einen
+geraden Horizont: zeigte das Referenzfoto etwas nach oben oder unten, biegt sich
+der Horizont zu einer Welle oder einem U, und ein schiefes Stativ neigt ihn.
+**⟷ Auto-Horizont** findet in der Vorschau den Himmelsrand (wo Himmel und Boden
+sich treffen, Spalte für Spalte), glättet ihn mit einer Kurve 4. Ordnung
+(einzelne Bäume, Hügel und Lampen zählen weniger) und dreht die Ansicht
+(**Neigung** und **Rollen**; **Gieren** bleibt), bis jeder seiner Punkte gleich
+hoch liegt. Auf der Kugel ist das exakt: ein waagerechter Horizont ist eine
+Gerade quer durch ein zylindrisches, sphärisches, Mercator-, Hammer- oder
+Mollweide-Panorama; geradlinig legt ihn auf die Mittellinie, die einzige
+Stelle, an der er dort gerade ist. Der gefundene Horizont wird als grüne Linie
+gezeichnet (mit **Überlagerungen** an), so sieht man ihn gerade werden; die
+Statuszeile sagt, wie weit er daneben lag. Rückgängig (Strg+Z) holt die alten
+Winkel zurück. Der Himmelsrand ist die Silhouette, nicht immer der echte
+Horizont: in einem Panorama schmaler als 90° sähe ein Hang wie eine Neigung
+aus, daher wird dort ein Rollen über 8° nicht angewendet.
+
+**Den Horizont von Hand markieren.** Wo die Silhouette nicht der Horizont ist
+(Hügel, eine Stadt, Nebel), markieren Sie ihn mit **✎ Horizont von Hand**:
+klicken Sie 4 oder mehr Punkte entlang des Horizonts im Panorama, über seine
+Länge verteilt (Rechtsklick entfernt den nächsten). Eine Kurve wird durch sie
+gelegt (4. Ordnung; durch 4 Punkte 3. Ordnung); **✔ Horizont ausrichten** (oder
+Eingabe) richtet ihn wie oben aus, Esc bricht ab.
+
+Beides gibt es nur, wo ein waagerechter Horizont gerade sein kann: geradlinig,
+zylindrisch, sphärisch, Mercator, Hammer und Mollweide, nicht für Little
+Planet, Tunnel, Fischauge, stereografisch oder die transversalen Projektionen.
 
 ### 5.5 Schritt 4: Zusammensetzen (Compose)
 
@@ -415,7 +487,9 @@ existiert).
 | **Zuschnitt aufheben** | Hebt den Beschnitt auf. Der Beschnitt wird auch automatisch aufgehoben, wenn Sie etwas ändern, das die Bilder verschiebt (Projektion, Brennweite, Yaw, Pitch, Roll, Verschiebungen, Zuordnung). |
 | **✂ Zuschnitt** (über der Ansicht) | Den Teil des Panoramas markieren, der bleibt: einen Rahmen aufziehen, an Kanten oder Ecken anpassen, innen ziehen zum Verschieben, dann **✂ Zuschnitt: fertig** (Esc bricht ab). Nur dieser Teil wird berechnet und gespeichert: ein großes Panorama braucht weniger Speicher, und zum bloßen Zuschneiden ist der Tab Nachbearbeitung nicht nötig. Aufheben wie beim automatischen Zuschnitt; er entfällt, wenn sich die Geometrie ändert. |
 | **⬇ Speichern und nachbearbeiten…** (über der Ansicht) | Speichert das Panorama und öffnet es dann im Tab Nachbearbeitung. |
+| **◧ Leere Bereiche füllen** (über der Ansicht) | Füllt leere Ecken und Ränder mit erfundenem Himmel und Boden (automatisch ergänzen), siehe unten. |
 | **Nudge ← ↑ ↓ →** | Verschiebt das aktuelle Bild um ein Vorschau-Pixel (siehe unten). |
+| **Ausgewähltes Bild korrigieren** | Dreht das ausgewählte Bild von Hand um seine eigene Mitte und ergänzt seine Objektivverzeichnung (k1, k2), siehe unten. |
 
 In der Ansicht **Panorama** wird der Umriss jedes Bildes gezeichnet und
 nummeriert:
@@ -438,6 +512,18 @@ bewegt sich zusammen mit den Bildern, die weiter vom Referenzbild entfernt an
 ihm hängen (entlang der gelben Verbindungen). Das Referenzbild bewegt sich
 nicht; das ganze Panorama verschieben Sie mit Pitch und Roll.
 
+**Ein Bild korrigieren.** **Ausgewähltes Bild korrigieren** (unter den
+Nudge-Knöpfen) dreht das ausgewählte Bild um seine eigene Mitte (**Drehung
+(°)**), für ein Foto, das gegen seine Nachbarn etwas verdreht ist, und ergänzt
+seine Objektivverzeichnung: **Verzeichnung k1 +** biegt gerade Linien (− Tonne,
++ Kissen), **Verzeichnung k2 +** wirkt vor allem in den Ecken; mit dem
+umgekehrten Vorzeichen von k1 korrigiert es die wellenförmige Verzeichnung.
+Darunter stehen die Werte, die die Verfeinerung gefunden hat. Die Korrekturen
+gelten für alle ausgewählten Bilder; **Verzeichnung auf alle Bilder** gibt
+jedem Bild dieselben k1 und k2 (ein Objektiv), **Zurücksetzen** entfernt sie.
+Sie lassen sich rückgängig machen, werden im Projekt gespeichert, und eine neue
+Verfeinerung behält sie.
+
 **Quellbild-Masken.** Wo die Überblendung das falsche Foto wählt (ein Baum oder
 eine Person, die sich bewegt haben, ein Auto, ein Geist), sagen Sie ihr, welches
 sie nehmen soll: **✐ Quellbild-Masken** über der Ansicht. Umschalt+Klick ins
@@ -451,6 +537,20 @@ erneuert sich nach jedem Strich, und der Rand ist weich, sodass der Wechsel
 nahtlos ist. Masken gehören zum Bild (sie bleiben an ihrem Platz, wenn Sie die
 Projektion oder den Zuschnitt ändern), lassen sich rückgängig machen und werden
 im Projekt gespeichert.
+
+**Leere Bereiche füllen (Auto-Complete).** **◧ Leere Bereiche füllen** über der
+Ansicht füllt die Teile des Rechtecks, die kein Foto abdeckt (leere Ecken und
+Ränder; innerhalb des Zuschnittrahmens, falls vorhanden), mit erfundenem
+Inhalt, der an die Umgebung anschließt, wie Microsoft ICE es tut: der Himmel
+setzt sich mit seiner Helligkeit und Farbe fort, mit Sternen und Korn aus den
+Fotos, der Boden mit seinem Gras. Jeder kleine Teil des leeren Bereichs nimmt
+das ähnlichste Stück der Fotos, von grob zu fein, und in voller Größe wird das
+fotografierte Detail hineinkopiert. Die Vorschau zeigt es, das Speichern macht
+es in voller Größe (die Meldung sagt, welcher Anteil ergänzt wurde). Es passt
+für einen Himmel, der oben etwas knapp ist, oder einen ausgefransten Rand; ein
+großer leerer Bereich wird ein plausibler, aber erfundener Himmel. Es ist
+erfunden: vor dem Veröffentlichen prüfen und, wo es darauf ankommt
+(Wettbewerbe, Wissenschaft), angeben.
 
 ### 5.6 Schritt 5: Histogramm-Streckung (Stretch)
 
@@ -532,8 +632,8 @@ den gespeicherten Zuordnungspunkten: etwa 50 kB pro Bild.
 | Aktion | Maus | Tastatur | Schaltfläche |
 |---|---|---|---|
 | Verschieben | mit der **linken** Taste ziehen | Pfeiltasten (Ansichten Image und Pair) | |
-| Hineinzoomen | Mausrad nach oben | `+` | **Zoom +** |
-| Herauszoomen | Mausrad nach unten | `-` | **Zoom -** |
+| Hineinzoomen | Mausrad nach oben | `+` | **+** |
+| Herauszoomen | Mausrad nach unten | `-` | **−** |
 | Zoom zurücksetzen | | `F`, `0` oder `Pos1` | **Einpassen** |
 | Bild auswählen (Ansicht Panorama) | in seinen Umriss klicken | | |
 | Umrisse, Nummern, Verbindungen ein/aus | | | Schalter **Überlagerungen** |
@@ -854,7 +954,7 @@ gespeicherte Datei mit ihrer Größe, oder was schiefging. × schließt ihn.
 
 | Eintrag | Was aufnehmen |
 |---|---|
-| **Lights** (*Sternbilder* im einfachen Modus) | Die Himmelsaufnahmen: gleiche Brennweite, Blende und Belichtung. RAW ist am besten; TIFF, FITS oder XISF nur, wenn die Daten noch linear (unbearbeitet) sind. **Belichtung vereinheitlichen** gleicht Aufnahmen unter verschiedenen Bedingungen an. |
+| **Lights** (*Sternbilder* im einfachen Modus) | Die Himmelsaufnahmen: gleiche Brennweite, Blende und Belichtung. RAW ist am besten; TIFF, FITS oder XISF nur, wenn die Daten noch linear (unbearbeitet) sind. **Normalisierung** und **Gradient jedes Bildes entfernen**: siehe unter der Tabelle. |
 | **Basisbild** (*Basisbild* im einfachen Modus) | Das Bild, an dem die anderen ausgerichtet werden. Leer = das mittlere Light-Bild. Ein anderes wählen Sie in der Auswahlliste neben **Basisbild**, oder wählen Sie ein Light-Bild in dessen Liste und klicken Sie auf **Als Basis verwenden**. |
 | **Darks** (*Rauschbilder* im einfachen Modus) | Dunkelbilder (Darks): Objektivdeckel drauf, gleiche ISO und Belichtungszeit, direkt vor oder nach den Himmelsaufnahmen. Entfernen thermisches Rauschen und Hotpixel. |
 | **Bias-Bilder** (*Bias-Bilder* im einfachen Modus) | Kürzeste Belichtung, Objektivdeckel drauf, gleiche ISO. |
@@ -863,8 +963,29 @@ gespeicherte Datei mit ihrer Größe, oder was schiefging. × schließt ihn.
 | **Vordergrundbild** | Freiwillig: eine Aufnahme des Bodens vom selben Stativstandort – zur blauen Stunde, lang belichtet oder mit niedriger ISO. Sie ersetzt unterhalb der Himmelsregion den (verrauschten, dunklen) gestackten Vordergrund. **Helligkeit angleichen** passt sie an die Helligkeit des gestackten Vordergrunds an; **Belichtung (EV)** macht sie von dort aus heller oder dunkler. Braucht eine Himmelsregion. |
 | **Ausgabe** | Wird in der Zeile **Speichern als** gesetzt: Name, Typ und Ordner. `.tif` / `.png` (16 Bit), `.jpg` (8 Bit) oder `.fits` / `.xisf` (32-Bit-Gleitkomma, linear, zur Weiterverarbeitung in Siril, PixInsight usw.). |
 
+**Hochformatfotos** (Kamera hochkant gedreht) werden aufrecht gestackt: nach
+dem Abziehen der Darks und Flats (die brauchen die Ausrichtung des Sensors) wird
+jedes Bild so gedreht, wie die Kamera es beim Basisbild vermerkt hat. Vorschau,
+die gezeichnete Himmelsregion und der gespeicherte Stack sind aufrecht. Ein vor
+Version 0.4.1 gespeichertes Projekt oder eine Einstellung mit von Hand
+gezeichneter Himmelsregion behält die alte (seitliche) Ausrichtung, damit die
+gezeichnete Linie weiter passt.
+
 Alle Kalibrierungsbilder sind freiwillig. Bei hoher ISO helfen schon wenige
 Dunkelbilder viel.
+
+**Normalisierung** bringt den Himmel jedes Bildes auf den des Basisbildes,
+bevor die Bilder kombiniert werden: *Additiv* verschiebt das Niveau jedes
+Bildes (für einen Hintergrund, der sich ändert: Lichtverschmutzung, der Mond,
+Dämmerung), *Multiplikativ* skaliert es (für andere Belichtungen oder Nächte;
+das frühere *Belichtung vereinheitlichen*), *Additiv mit Skalierung* verschiebt
+es und skaliert es auf die Streuung des Basisbildes, wie Siril es
+standardmäßig beim Stacken mit Ausreißerverwerfung tut. **Gradient jedes
+Bildes entfernen** passt vor dem Stacken an den Himmel jedes Bildes eine Ebene
+an (einen Gradienten erster Ordnung, wie *subsky 1* in Siril) und zieht sie ab,
+das Niveau bleibt: für Lichtverschmutzung, die sich von Bild zu Bild ändert und
+die das gestackte Bild nicht mehr loswürde. Sterne und Objekte bleiben bei der
+Anpassung außen vor; bei Landschaften wird nur der Himmelsbereich korrigiert.
 
 **Die Dateilisten:** Jede Gruppe zeigt ihre Dateien in einer Auswahlliste
 neben ihrem Namen, sodass auch Hunderte von Light-Bildern kein Scrollen

@@ -21,6 +21,12 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 const DISP_MAX: usize = 1600;
+/// In a panorama narrower than `AUTO_HORIZON_NARROW` (°), Auto horizon turns
+/// the roll by at most `AUTO_HORIZON_MAX` (°): there the edge of the sky shows
+/// a tilt only by its slope, and a hillside or a forest on a slope slopes too.
+/// A wide one shows the tilt as the bow of its horizon, which a slope does not make.
+const AUTO_HORIZON_MAX: f64 = 8.0;
+const AUTO_HORIZON_NARROW: f64 = 90.0;
 /// Marks images left out because the memory was almost full.
 const LOWMEM: &str = "\u{1}lowmem:";
 
@@ -44,6 +50,53 @@ pub struct Item {
     pub sky_map: Option<Arc<SkyMap>>,
     /// Source mask: where this image must be used (painted on the panorama).
     pub mask: Arc<Vec<MaskDab>>,
+    /// Plate solving (photos of the sky only); None = not tried yet.
+    pub solved: Option<Solved>,
+    /// This photo's own corrections, set by hand.
+    pub corr: Correction,
+}
+
+/// Corrections of one photo set by hand, on top of what the refinement found.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Correction {
+    /// Turn about the photo's own centre (°, clockwise).
+    pub roll: f64,
+    /// Added to the lens distortion found for it (k1·r² + k2·r⁴).
+    pub k1: f64,
+    pub k2: f64,
+}
+
+impl Correction {
+    pub fn is_none(&self) -> bool {
+        *self == Correction::default()
+    }
+}
+
+/// What plate solving made of a photo.
+#[derive(Clone, Debug)]
+pub enum Solved {
+    /// Too much landscape in it.
+    NotSky,
+    Failed(String),
+    Found(Arc<solve::Solution>),
+}
+
+impl Item {
+    /// The camera's record of the shot, with the focal length measured by plate solving.
+    pub fn shot_info(&self) -> ShotInfo {
+        let mut s = self.shot;
+        s.focal_px = self.solved.as_ref().and_then(|s| s.found()).map(|s| s.f);
+        s
+    }
+}
+
+impl Solved {
+    fn found(&self) -> Option<&Arc<solve::Solution>> {
+        match self {
+            Solved::Found(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 pub type FeatKey = (usize, usize, u64, u64);
@@ -77,7 +130,8 @@ pub struct Placement {
     pub members: Vec<usize>,
     pub g: Vec<M3>,
     pub f: f64,
-    pub lens: Lens,
+    /// Each image's lens distortion as the refinement found it.
+    pub lenses: Vec<Lens>,
     pub typical: Option<f64>,
     /// Turning of the sky found from the star pairs (°/hour), if any.
     pub sky_rate: Option<f64>,
@@ -124,6 +178,16 @@ struct Preview {
     scale: f64,
     outlines: Vec<Vec<Pt>>,
     covered: Option<Bits>,
+    /// The view it was rendered with: projection, focal length (px), yaw / pitch / roll (°).
+    view: (Projection, f64, [f64; 3]),
+}
+
+/// The horizon found or marked, as directions in the reference camera's frame
+/// (so it follows the view when pitch and roll change): the curve and its points.
+struct HorizonLine {
+    curve: Vec<nalgebra::Vector3<f64>>,
+    points: Vec<nalgebra::Vector3<f64>>,
+    ref_: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -141,6 +205,10 @@ pub struct Params {
     pub mininl: usize,
     pub model: Model,
     pub refine: bool,
+    /// What of the lens distortion the refinement fits.
+    pub lens_fit: LensFit,
+    /// Each image gets its own lens distortion in the refinement.
+    pub lens_own: bool,
     pub proj: Projection,
     pub blend: Blend,
     pub focal: f64,
@@ -155,6 +223,10 @@ pub struct Params {
     pub decoder: RawDecoder,
     pub half: bool,
     pub unlinked: bool,
+    /// Find the photos of the sky on the star catalogue (plate solving) and link them by their stars.
+    pub solve: bool,
+    /// Fill the empty areas of the panorama with made-up content (auto-complete).
+    pub autofill: bool,
     /// Size of the saved panorama in % of the photos' full (camera) resolution.
     pub out_pct: f64,
 }
@@ -163,24 +235,26 @@ impl Default for Params {
     fn default() -> Self {
         Self {
             det_px: 2000, nkp: 5000, thr: 0.001, denoise: 1.5, layout: Layout::All, cols: 5, snake: false, ratio: 0.8, maxd: 0.35,
-            tol: 5.0, mininl: 20, model: Model::Homography, refine: true, proj: Projection::Cylindrical, blend: Blend::Smart, focal: 1.0,
+            tol: 5.0, mininl: 20, model: Model::Homography, refine: true, lens_fit: LensFit::Radial, lens_own: false, proj: Projection::Cylindrical, blend: Blend::Smart, focal: 1.0,
             yaw: 0.0, pitch: 0.0, roll: 0.0, prev_px: 1800, ev: 0.0, black: 0.0, mid: 0.5, white: 1.0, decoder: RawDecoder::Auto, half: true,
-            unlinked: false, out_pct: 100.0,
+            unlinked: false, solve: true, autofill: false, out_pct: 100.0,
         }
     }
 }
 
 impl Params {
     fn preset(&mut self, name: &str) -> &'static str {
-        let (det, nkp, thr, den, ratio, maxd, tol, mininl, model, refine, proj, ev, note) = match name {
-            "day landscape" => (2000, 5000, 0.001, 0.5, 0.8, 0.35, 4.0, 20, Model::Homography, true, Projection::Cylindrical, 0.0, tr("Daylight panorama, camera rotated in place.")),
-            "astro / night landscape" => (2000, 6000, 0.0035, 2.0, 0.85, 0.38, 5.0, 16, Model::Homography, true, Projection::Spherical, 1.0, tr("Night or Milky Way panorama: more denoising, looser matching, spherical projection.")),
-            "deep-sky mosaic" => (3000, 4000, 0.002, 0.75, 0.75, 0.3, 3.0, 12, Model::Similarity, false, Projection::Rectilinear, 0.0, tr("Telescope mosaic: frames only shift and rotate. Use Auto stretch to see faint detail.")),
-            "macro / microscope" => (2000, 5000, 0.001, 1.0, 0.8, 0.35, 3.0, 15, Model::Translation, false, Projection::Rectilinear, 0.0, tr("Stage moved under a fixed camera: frames only shift.")),
-            _ => (2500, 5000, 0.001, 0.5, 0.8, 0.35, 3.0, 20, Model::Affine, false, Projection::Rectilinear, 0.0, tr("Flat object scanned or photographed in parts.")),
+        let (det, nkp, thr, den, ratio, maxd, tol, mininl, model, refine, proj, note) = match name {
+            "day landscape" => (2000, 5000, 0.001, 0.5, 0.8, 0.35, 4.0, 20, Model::Homography, true, Projection::Cylindrical, tr("Daylight panorama, camera rotated in place.")),
+            "astro / night landscape" => (2000, 6000, 0.0035, 2.0, 0.85, 0.38, 5.0, 16, Model::Homography, true, Projection::Spherical, tr("Night or Milky Way panorama: more denoising, looser matching, spherical projection.")),
+            "deep-sky mosaic" => (3000, 4000, 0.002, 0.75, 0.75, 0.3, 3.0, 12, Model::Similarity, false, Projection::Rectilinear, tr("Telescope mosaic: frames only shift and rotate. Use Auto stretch to see faint detail.")),
+            "macro / microscope" => (2000, 5000, 0.001, 1.0, 0.8, 0.35, 3.0, 15, Model::Translation, false, Projection::Rectilinear, tr("Stage moved under a fixed camera: frames only shift.")),
+            _ => (2500, 5000, 0.001, 0.5, 0.8, 0.35, 3.0, 20, Model::Affine, false, Projection::Rectilinear, tr("Flat object scanned or photographed in parts.")),
         };
         (self.det_px, self.nkp, self.thr, self.denoise, self.ratio, self.maxd, self.tol, self.mininl) = (det, nkp, thr, den, ratio, maxd, tol, mininl);
-        (self.model, self.refine, self.proj, self.ev, self.layout, self.blend) = (model, refine, proj, ev, Layout::All, Blend::Smart);
+        // The exposure is left alone: a preset sets how to match and project, not
+        // how bright the panorama is (that is the Exposure slider's, or Auto exposure's).
+        (self.model, self.refine, self.proj, self.layout, self.blend) = (model, refine, proj, Layout::All, Blend::Smart);
         note
     }
     fn stretched(&self) -> bool {
@@ -194,7 +268,7 @@ impl Params {
     /// another zoom resized so that every frame's pixels cover the same angle
     /// (otherwise their features do not compare).
     fn det_scales(&self, items: &[Item]) -> Vec<f64> {
-        let rho = zoom(&items.iter().map(|it| it.shot).collect::<Vec<_>>()).1;
+        let rho = zoom(&items.iter().map(|it| it.shot_info()).collect::<Vec<_>>()).1;
         items.iter().zip(rho).map(|(it, r)| ((self.det_px as f64 / it.img.w.max(it.img.h) as f64).min(1.0) / r).min(2.0)).collect()
     }
 }
@@ -214,7 +288,7 @@ enum Msg {
     Detail(u64, Img, (f64, f64, f64, f64), f64),
     DetailFailed,
     Detected(Vec<(usize, Arc<Features>, FeatKey)>),
-    Matched { feats: Vec<(usize, Arc<Features>, FeatKey)>, stars: Vec<(usize, Arc<Vec<Pt>>)>, pairs: Vec<PairRes>, layout: Option<Placement>, msg: String },
+    Matched { feats: Vec<(usize, Arc<Features>, FeatKey)>, stars: Vec<(usize, Arc<Vec<Pt>>)>, solved: Vec<(usize, Solved)>, pairs: Vec<PairRes>, layout: Option<Placement>, msg: String },
     Preview(Img, (f64, f64, f64, f64), f64, Vec<Vec<Pt>>, Option<Bits>),
     SkyMaps(Vec<(usize, Arc<SkyMap>)>),
     Done(String),
@@ -246,6 +320,47 @@ enum OutBuf {
     U8(Vec<u8>),
     U16(Vec<u16>),
     F32(Img),
+}
+
+/// Working size (longest side) of filling the empty areas: when saving, in the preview.
+const FILL_WORK: usize = 1600;
+const FILL_WORK_PREVIEW: usize = 800;
+
+/// The panorama being saved, as the fill of its empty areas sees it.
+struct BufCanvas<'a> {
+    buf: &'a mut OutBuf,
+    w: usize,
+    h: usize,
+}
+
+impl crate::fill::Canvas for BufCanvas<'_> {
+    fn size(&self) -> (usize, usize) {
+        (self.h, self.w)
+    }
+    fn get(&self, y: usize, x: usize) -> [f32; 3] {
+        let k = (y * self.w + x) * 3;
+        match &*self.buf {
+            OutBuf::U8(v) => [v[k] as f32 / 255.0, v[k + 1] as f32 / 255.0, v[k + 2] as f32 / 255.0],
+            OutBuf::U16(v) => [v[k] as f32 / 65535.0, v[k + 1] as f32 / 65535.0, v[k + 2] as f32 / 65535.0],
+            OutBuf::F32(img) => img.px[y * self.w + x],
+        }
+    }
+    fn set(&mut self, y: usize, x: usize, c: [f32; 3]) {
+        let k = (y * self.w + x) * 3;
+        match self.buf {
+            OutBuf::U8(v) => {
+                for i in 0..3 {
+                    v[k + i] = (c[i].clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+            }
+            OutBuf::U16(v) => {
+                for i in 0..3 {
+                    v[k + i] = (c[i].clamp(0.0, 1.0) * 65535.0).round() as u16;
+                }
+            }
+            OutBuf::F32(img) => img.px[y * self.w + x] = c,
+        }
+    }
 }
 
 /// What saving the panorama needs (bytes), for the estimate and the check before saving.
@@ -390,6 +505,14 @@ pub struct StitchTab {
     detail: Option<Detail>,
     detail_req: Option<(u64, std::time::Instant)>,
     detail_busy: bool,
+    /// The view of the preview being rendered (see `Preview::view`).
+    rendering_view: (Projection, f64, [f64; 3]),
+    /// The horizon found by Auto horizon or marked by hand, drawn on the panorama.
+    horizon: Option<HorizonLine>,
+    /// Points of the horizon being marked by hand (output coordinates).
+    horizon_edit: Option<Vec<Pt>>,
+    /// Show the sky's coordinates (RA / Dec grid and names) on the panorama.
+    sky_grid: bool,
 }
 
 struct Detail {
@@ -416,6 +539,7 @@ struct Snap {
 struct ProjData {
     path: String,
     offsets: Vec<([f64; 2], f64)>,
+    corrs: Vec<Correction>,
     masks: Vec<Vec<MaskDab>>,
     missing: Vec<String>,
     pairs: Vec<PairRes>,
@@ -475,6 +599,12 @@ fn describe(a: &Snap, b: &Snap) -> String {
     if a.items.iter().zip(&b.items).any(|(x, y)| x.gain != y.gain) {
         return tr("brightness").into();
     }
+    if a.items.iter().zip(&b.items).any(|(x, y)| x.corr.roll != y.corr.roll) {
+        return tr("turn an image").into();
+    }
+    if a.items.iter().zip(&b.items).any(|(x, y)| x.corr != y.corr) {
+        return tr("an image's lens distortion").into();
+    }
     if a.items.iter().zip(&b.items).any(|(x, y)| x.mask != y.mask) {
         return tr("source mask").into();
     }
@@ -487,6 +617,7 @@ fn describe(a: &Snap, b: &Snap) -> String {
     let menus = [
         (tr("Pairs"), layout_name(a.p.layout), layout_name(b.p.layout)),
         (tr("Model"), a.p.model.name(), b.p.model.name()),
+        (tr("Lens distortion"), a.p.lens_fit.name(), b.p.lens_fit.name()),
         (tr("Projection"), a.p.proj.name(), b.p.proj.name()),
         (tr("Blend"), a.p.blend.name(), b.p.blend.name()),
     ];
@@ -495,7 +626,7 @@ fn describe(a: &Snap, b: &Snap) -> String {
             return format!("{n} → {}", tr(y));
         }
     }
-    for (n, x, y) in [(tr("snake"), a.p.snake, b.p.snake), (tr("refine"), a.p.refine, b.p.refine), (tr("show unlinked images"), a.p.unlinked, b.p.unlinked)] {
+    for (n, x, y) in [(tr("snake"), a.p.snake, b.p.snake), (tr("refine"), a.p.refine, b.p.refine), (tr("distortion per image"), a.p.lens_own, b.p.lens_own), (tr("plate solving"), a.p.solve, b.p.solve), (tr("fill empty areas"), a.p.autofill, b.p.autofill), (tr("show unlinked images"), a.p.unlinked, b.p.unlinked)] {
         if x != y {
             return format!("{n} {}", if y { tr("on") } else { tr("off") });
         }
@@ -518,6 +649,7 @@ impl Default for StitchTab {
             status: tr("Add images to begin (any order).").into(), pathbox: String::new(), tx, rx, busy: false, preview_pending: false,
             dialog: None, tex_cache: HashMap::new(), drag: None, simple: false, save_format: None, selected: Default::default(), note_after: None, undo: vec![], redo: vec![], committed: None, pending: None, saved_fp: None, to_finish: vec![], disp_view: Default::default(), disp_processed: true, save_linear: None, post_after: false, crop_edit: None, cp: None, mask_edit: None, mask_tex: None, saving_to: None, last_pano: None, job_t0: None, job_is_save: false, work_secs: 0.0, save_meta: (0, 0, false), report: None,
             project: None, pending_project: None, pano_version: 0, detail: None, detail_req: None, detail_busy: false,
+            rendering_view: (Projection::Cylindrical, 1.0, [0.0; 3]), horizon: None, horizon_edit: None, sky_grid: false,
         }
     }
 }
@@ -531,15 +663,63 @@ pub fn zoom(shots: &[ShotInfo]) -> (Vec<usize>, Vec<f64>) {
     for k in shots.iter().filter_map(key) {
         *count.entry(k).or_insert(0) += 1;
     }
-    let Some(mode) = count.iter().max_by_key(|(k, c)| (**c, -**k)).map(|(k, _)| *k) else { return (vec![0; shots.len()], vec![1.0; shots.len()]) };
+    let Some(mode) = count.iter().max_by_key(|(k, c)| (**c, -**k)).map(|(k, _)| *k) else {
+        let (mut grp, mut rho) = (vec![0; shots.len()], vec![1.0; shots.len()]);
+        solved_focal(shots, &mut grp, &mut rho);
+        return (grp, rho);
+    };
     let mut keys: Vec<i64> = count.keys().copied().filter(|&k| k != mode).collect();
     keys.sort_unstable();
     let grp = shots.iter().map(|s| key(s).filter(|&k| k != mode).map(|k| 1 + keys.iter().position(|&x| x == k).unwrap()).unwrap_or(0)).collect();
-    let rho = shots.iter().map(|s| key(s).map(|k| k as f64 / mode as f64).unwrap_or(1.0)).collect();
+    let mut rho: Vec<f64> = shots.iter().map(|s| key(s).map(|k| k as f64 / mode as f64).unwrap_or(1.0)).collect();
+    let mut grp: Vec<usize> = grp;
+    solved_focal(shots, &mut grp, &mut rho);
     (grp, rho)
 }
 
+/// Photos found on the star catalogue: their focal lengths are measured (a
+/// zoom lens that crept between them, all tagged "16 mm"), so they form one
+/// group of their own with those exact ratios.
+fn solved_focal(shots: &[ShotInfo], grp: &mut [usize], rho: &mut [f64]) {
+    let solved: Vec<usize> = (0..shots.len()).filter(|&i| shots[i].focal_px.is_some()).collect();
+    if solved.is_empty() {
+        return;
+    }
+    // Their scale in units of group 0's focal length (as the EXIF ratios have it).
+    let base = |set: Vec<usize>| crate::image::median_f64(set.iter().map(|&i| shots[i].focal_px.unwrap() / rho[i]));
+    let in0: Vec<usize> = solved.iter().copied().filter(|&i| grp[i] == 0).collect();
+    let f0 = if in0.is_empty() { base(solved.clone()) } else { base(in0) };
+    let sg = grp.iter().copied().max().unwrap_or(0) + 1;
+    for &i in &solved {
+        rho[i] = shots[i].focal_px.unwrap() / f0;
+        grp[i] = sg;
+    }
+}
+
 /// Focal length (px) of zoom group 0, from accepted pairs within one zoom group.
+/// Pairs of photos of the sky from their plate solutions: every two solved
+/// photos that share enough identified stars, linked by them.
+fn catalogue_pairs(sols: &[Option<Arc<solve::Solution>>], sizes: &[(usize, usize)], f0: f64, rho: &[f64]) -> Vec<PairRes> {
+    let n = sols.len();
+    let mut out = Vec::new();
+    for i in 0..n {
+        let Some(a) = &sols[i] else { continue };
+        for j in i + 1..n {
+            let Some(b) = &sols[j] else { continue };
+            let (p1, p2) = solve::common_stars(a, b);
+            if p1.len() < stars::MIN_STARS {
+                continue;
+            }
+            let Some(h) = stars::rotation_from_points(&p1, &p2, sizes[i], sizes[j], f0 * rho[i], f0 * rho[j]) else { continue };
+            let nm = p1.len();
+            let err = p1.iter().zip(&p2).map(|(x, y)| reproj_err(&h, *y, *x)).sum::<f64>() / nm as f64;
+            let msg = crate::trf!("Pair {}–{} (star catalogue): {} stars identified in both, mean error {} px", i + 1, j + 1, nm, format!("{err:.2}"));
+            out.push(PairRes { i, j, p1: Arc::new(p1), p2: Arc::new(p2), h, inl: Arc::new((0..nm).collect()), ok: true, listed: true, msg, stars: true, manual: false });
+        }
+    }
+    out
+}
+
 fn group_focal(pairs: &[PairRes], sizes: &[(usize, usize)], grp: &[usize], rho: &[f64]) -> Option<f64> {
     let cs = |i: usize| [(sizes[i].1 as f64 + 1.0) / 2.0, (sizes[i].0 as f64 + 1.0) / 2.0];
     let est: Vec<f64> = pairs
@@ -579,7 +759,8 @@ pub fn relayout(sizes: &[(usize, usize)], shots: &[ShotInfo], pairs: &mut [PairR
             .or_else(|| estimate_focal(&e.iter().map(|&k| (pairs[k].h, cs[pairs[k].i], cs[pairs[k].j])).collect::<Vec<_>>()))
             .unwrap_or(sizes[ref_].0.max(sizes[ref_].1) as f64);
         let mut g = place(&hd, &parent, &order, ref_, &sizes.iter().map(|s| s.1).collect::<Vec<_>>());
-        let (mut f, mut k1, mut typical, mut sky_rate, mut sky) = (f, 0.0, None, None, None);
+        let (mut f, mut typical, mut sky_rate, mut sky) = (f, None, None, None);
+        let mut lenses: Vec<Lens> = (0..n).map(|i| Lens::new(0.0, 0.0, f * rho[i] / rho[ref_])).collect();
         if p.refine && p.model == Model::Homography && members.len() > 1 {
             let m: Vec<MatchSet> = e.iter().map(|&k| { let pr = &pairs[k]; (pr.i, pr.j, pr.inl.iter().map(|&q| pr.p1[q]).collect(), pr.inl.iter().map(|&q| pr.p2[q]).collect()) }).collect();
             let opts = BundleOpts {
@@ -587,8 +768,10 @@ pub fn relayout(sizes: &[(usize, usize)], shots: &[ShotInfo], pairs: &mut [PairR
                 focal: rho.iter().map(|r| r / rho[ref_]).collect(),
                 time: shots.iter().map(|s| s.time.unwrap_or(f64::NAN)).collect(),
                 sky: e.iter().map(|&k| pairs[k].stars).collect(),
+                poly: p.lens_fit == LensFit::Poly,
+                per_image: p.lens_own,
             };
-            let b = bundle_adjust_with(&g, &cs, ref_, f, &members, &m, 40, p.tol, 60, true, &opts);
+            let b = bundle_adjust_with(&g, &cs, ref_, f, &members, &m, 40, p.tol, 60, p.lens_fit != LensFit::Off, &opts);
             let fin: Vec<f64> = b.med.iter().copied().filter(|v| v.is_finite()).collect();
             let typ = if fin.is_empty() { 0.0 } else { crate::image::median_f64(fin) };
             typical = Some(typ);
@@ -608,7 +791,7 @@ pub fn relayout(sizes: &[(usize, usize)], shots: &[ShotInfo], pairs: &mut [PairR
             }
             g = b.g;
             f = b.f;
-            k1 = b.k1;
+            lenses = b.lens;
             // The sky turns 15.04°/hour; far from that, the fit did not find it (too few loops of star and ground pairs).
             let rate = |w: &[f64; 3]| nalgebra::Vector3::new(w[0], w[1], w[2]).norm().to_degrees() * 3600.0;
             let found = b.sky.filter(|w| (10.0..20.0).contains(&rate(w)));
@@ -640,7 +823,7 @@ pub fn relayout(sizes: &[(usize, usize)], shots: &[ShotInfo], pairs: &mut [PairR
         if let Some(r) = sky_rate {
             note += &crate::trf!(" Star pairs used; the sky turned {}°/hour between the shots.", format!("{r:.1}"));
         }
-        return (Some(Placement { parent, order, comp, ref_, members, g, f, lens: (k1, f), typical, sky_rate, sky }), note);
+        return (Some(Placement { parent, order, comp, ref_, members, g, f, lenses, typical, sky_rate, sky }), note);
     }
     (None, String::new())
 }
@@ -758,7 +941,7 @@ impl StitchTab {
                     let r = io::load_any(p, &opt).map(|img| {
                         let f = (DISP_MAX as f64 / img.w.max(img.h) as f64).min(1.0);
                         let disp = if f < 1.0 { resize(&img, f) } else { img.clone() };
-                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native, shot: io::shot_info(p), stars: None, sky_map: None, mask: Arc::new(vec![]) }
+                        Item { path: p.clone(), img: Arc::new(img), disp: Arc::new(disp), f, feats: None, featkey: None, gain: 1.0, offset: [0.0; 2], native, shot: io::shot_info(p), stars: None, sky_map: None, mask: Arc::new(vec![]), solved: None, corr: Correction::default() }
                     });
                     if available_memory() < reserve {
                         full.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -903,11 +1086,12 @@ impl StitchTab {
             return;
         }
         let p = self.p.clone();
-        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot).collect();
+        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot_info()).collect();
         let dets = p.det_scales(&self.items);
         let imgs: Vec<(Arc<Img>, Option<Arc<Features>>)> =
             self.items.iter().enumerate().map(|(i, it)| (it.img.clone(), if it.featkey == Some(p.featkey_at(dets[i])) { it.feats.clone() } else { None })).collect();
         let known_stars: Vec<Option<Arc<Vec<Pt>>>> = self.items.iter().map(|it| it.stars.clone()).collect();
+        let known_solved: Vec<Option<Solved>> = self.items.iter().map(|it| it.solved.clone()).collect();
         let n = imgs.len();
         let given = ij.is_some();
         let mut ij = ij.unwrap_or_else(|| candidate_pairs(n, p.layout, p.cols, p.snake));
@@ -925,6 +1109,7 @@ impl StitchTab {
         self.preview_pending = then_preview;
         let listed = given || p.layout != Layout::All;
         self.spawn(tr("Detecting features…"), move |tx| {
+            let mut shots = shots;
             let feats: Vec<Arc<Features>> = imgs
                 .par_iter()
                 .enumerate()
@@ -938,7 +1123,7 @@ impl StitchTab {
                 .par_iter()
                 .map(|&(i, j)| {
                     let (p1, p2) = match_pair(&feats[i], &feats[j], p.ratio, p.maxd);
-                    let name = crate::trf!("Pair {}–{} ({})", i + 1, j + 1, p.model.name());
+                    let name = crate::trf!("Pair {}–{} ({})", i + 1, j + 1, tr(p.model.name()));
                     match ransac(&p2, &p1, p.model, 2000, p.tol) {
                         Ok((h, inl)) => {
                             let (ok, why) = accept_pair(p1.len(), inl.len(), &h, sizes[j].0, sizes[j].1, p.mininl, &inl.iter().map(|&k| p2[k]).collect::<Vec<_>>());
@@ -992,6 +1177,71 @@ impl StitchTab {
             let ntried = res.len();
             res.extend(old);
             res.sort_by_key(|r| (r.i, r.j));
+            // Photos of the sky: found on the star catalogue, two that overlap
+            // share identified stars, which link them even where the matching
+            // failed or took a wrong match.
+            let mut solved_now: Vec<(usize, Solved)> = Vec::new();
+            let mut cat_note = String::new();
+            if p.solve {
+                let todo: Vec<usize> = (0..n).filter(|&i| known_solved[i].is_none()).collect();
+                if !todo.is_empty() {
+                    let _ = tx.send(Msg::Status(tr("Finding the photos of the sky on the star catalogue…").into()));
+                }
+                let f0 = group_focal(&res, &sizes, &grp, &rho).unwrap_or(sizes[0].0.max(sizes[0].1) as f64);
+                solved_now = todo
+                    .par_iter()
+                    .map(|&i| {
+                        let img = &imgs[i].0;
+                        let sol = if solve::sky_share(img) < solve::SKY_SHARE {
+                            Solved::NotSky
+                        } else {
+                            match solve::solve_photo(img, f0 * rho[i]) {
+                                Ok(s) => Solved::Found(Arc::new(s)),
+                                Err(e) => Solved::Failed(e),
+                            }
+                        };
+                        (i, sol)
+                    })
+                    .collect();
+                let mut state: Vec<Option<Solved>> = known_solved.clone();
+                for (i, s) in &solved_now {
+                    state[*i] = Some(s.clone());
+                }
+                let sols: Vec<Option<Arc<solve::Solution>>> = state.iter().map(|s| s.as_ref().and_then(|s| s.found().cloned())).collect();
+                let nsky = state.iter().filter(|s| matches!(s, Some(Solved::Found(_) | Solved::Failed(_)))).count();
+                let nsolved = sols.iter().filter(|s| s.is_some()).count();
+                let cat_pairs = catalogue_pairs(&sols, &sizes, f0, &rho);
+                let (mut linked, mut corrected, mut added) = (0usize, 0usize, 0usize);
+                for pr in cat_pairs {
+                    match res.iter().position(|q| (q.i, q.j) == (pr.i, pr.j)) {
+                        None => {
+                            res.push(pr);
+                            added += 1;
+                        }
+                        Some(k) if res[k].manual => {}
+                        Some(k) if !res[k].ok => {
+                            res[k] = pr;
+                            linked += 1;
+                        }
+                        Some(k) => {
+                            // A match the catalogue's stars disagree with is wrong.
+                            let q = &res[k];
+                            let e = pr.p1.iter().zip(pr.p2.iter()).map(|(a, b)| reproj_err(&q.h, *b, *a)).sum::<f64>() / pr.p1.len() as f64;
+                            if e > (4.0 * p.tol).max(15.0) {
+                                res[k] = pr;
+                                corrected += 1;
+                            }
+                        }
+                    }
+                }
+                res.sort_by_key(|r| (r.i, r.j));
+                for (i, s) in state.iter().enumerate() {
+                    shots[i].focal_px = s.as_ref().and_then(|s| s.found()).map(|s| s.f);
+                }
+                if nsky > 0 {
+                    cat_note = crate::trf!(" Star catalogue: {} of {} photos of the sky found, {} pairs linked, {} corrected, {} added.", nsolved, nsky, linked, corrected, added);
+                }
+            }
             let _ = tx.send(Msg::Status(crate::trf!("Placing images{}", if p.refine { tr(" and refining globally…") } else { "…" })));
             let nstars = res.iter().filter(|r| r.ok && r.stars).count();
             let (layout, note) = relayout(&sizes, &shots, &mut res, ref_choice, &p);
@@ -999,6 +1249,7 @@ impl StitchTab {
             if nstars > 0 {
                 msg = crate::trf!("{} of {} pairs accepted ({} of them by their stars).{}", nacc, ntried, nstars, note);
             }
+            msg += &cat_note;
             if let Some(l) = &layout {
                 if let Some(t) = l.typical {
                     msg += &crate::trf!(" Typical pair error after refinement: {} px.", format!("{t:.1}"));
@@ -1020,13 +1271,13 @@ impl StitchTab {
                     }
                 }
             }
-            Ok(Msg::Matched { feats: feats.into_iter().enumerate().map(|(i, f)| (i, f, p.featkey_at(dets[i]))).collect(), stars: found_stars, pairs: res, layout, msg })
+            Ok(Msg::Matched { feats: feats.into_iter().enumerate().map(|(i, f)| (i, f, p.featkey_at(dets[i]))).collect(), stars: found_stars, solved: solved_now, pairs: res, layout, msg })
         });
     }
 
     fn relayout_now(&mut self) -> String {
         let sizes: Vec<(usize, usize)> = self.items.iter().map(|it| (it.img.h, it.img.w)).collect();
-        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot).collect();
+        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot_info()).collect();
         let (l, note) = relayout(&sizes, &shots, &mut self.pairs, self.ref_choice, &self.p);
         self.layout = l;
         note
@@ -1049,14 +1300,37 @@ impl StitchTab {
             nm[v] = match l.parent[v] { None => nud(v), Some(p) => nm[p] * nud(v) };
         }
         let vrot = rotation_h(self.p.yaw.to_radians(), self.p.pitch.to_radians(), f, c, self.p.roll.to_radians());
-        (0..self.items.len()).map(|i| vrot * nm[i] * l.g[i]).collect()
+        (0..self.items.len()).map(|i| vrot * nm[i] * l.g[i] * self.spin(i)).collect()
     }
 
-    fn geometry(&self) -> Option<(f64, Pt, Vec<M3>, Vec<usize>, Lens)> {
+    /// Image i turned about its own centre by its roll correction (in its own pixels).
+    fn spin(&self, i: usize) -> M3 {
+        let r = self.items[i].corr.roll.to_radians();
+        if r == 0.0 {
+            return M3::identity();
+        }
+        let c = center(&self.items[i].img);
+        let (s, k) = r.sin_cos();
+        translation(c[0], c[1]) * M3::new(k, -s, 0.0, s, k, 0.0, 0.0, 0.0, 1.0) * translation(-c[0], -c[1])
+    }
+
+    /// Lens distortion of every image: the refinement's, plus its own correction.
+    fn lenses(&self) -> Vec<Lens> {
+        let l = self.layout.as_ref();
+        (0..self.items.len())
+            .map(|i| {
+                let base = l.and_then(|l| l.lenses.get(i).copied()).unwrap_or_else(|| Lens::new(0.0, 0.0, l.map(|l| l.f).unwrap_or(1.0)));
+                let c = self.items[i].corr;
+                Lens::new(base.k1 + c.k1, base.k2 + c.k2, base.fc)
+            })
+            .collect()
+    }
+
+    fn geometry(&self) -> Option<(f64, Pt, Vec<M3>, Vec<usize>, Vec<Lens>)> {
         let l = self.layout.as_ref()?;
         let f = l.f * self.p.focal;
         let c = center(&self.items[l.ref_].img);
-        Some((f, c, self.placements(f, c), self.visible(), l.lens))
+        Some((f, c, self.placements(f, c), self.visible(), self.lenses()))
     }
 
     fn request_preview(&mut self) {
@@ -1068,8 +1342,10 @@ impl StitchTab {
             self.status = tr("Match the images first.").into();
             return;
         };
+        self.rendering_view = (self.p.proj, f, [self.p.yaw, self.p.pitch, self.p.roll]);
         let p = self.p.clone();
-        let outlines: Vec<Vec<Pt>> = (0..self.items.len()).map(|i| if vis.contains(&i) { outline(&g[i], self.items[i].img.h, self.items[i].img.w, p.proj, f, c, lens, 24) } else { vec![] }).collect();
+        let outlines: Vec<Vec<Pt>> = (0..self.items.len()).map(|i| if vis.contains(&i) { outline(&g[i], self.items[i].img.h, self.items[i].img.w, p.proj, f, c, lens[i], 24) } else { vec![] }).collect();
+        let lenses: Vec<Lens> = vis.iter().map(|&i| lens[i]).collect();
         let full = bounds(&vis.iter().map(|&i| outlines[i].clone()).collect::<Vec<_>>());
         // While the crop frame is drawn, the whole panorama is shown.
         let crop = if self.crop_edit.is_some() { None } else { self.crop };
@@ -1083,9 +1359,15 @@ impl StitchTab {
         self.spawn(tr("Rendering preview…"), move |tx| {
             let sky = sky.map(|j| j.finish(tx));
             let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
-            let (img, cov) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, uncropped);
-            Ok(Msg::Preview(img, box_, scale, outlines, cov))
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lenses, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
+            let (mut img, cov) = compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, uncropped || p.autofill);
+            if p.autofill {
+                if let Some(c) = &cov {
+                    let _ = tx.send(Msg::Status(tr("Filling the empty areas…").into()));
+                    crate::fill::complete_img(&mut img, &crate::fill::Cover::from_bits(c), FILL_WORK_PREVIEW);
+                }
+            }
+            Ok(Msg::Preview(img, box_, scale, outlines, if uncropped { cov } else { None }))
         });
     }
 
@@ -1112,7 +1394,8 @@ impl StitchTab {
             let Some(&dt) = sm.dt.get(i).filter(|d| d.is_finite()) else { continue };
             // Back in time by dt: the reference plane turned with the sky, then the image's own placement.
             let turn = k * rodrigues(&(w * -dt)) * inv(&k);
-            job.g[kk] = Some(g[i] * inv(&l.g[i]) * turn * l.g[i]);
+            let spin = self.spin(i);
+            job.g[kk] = Some(g[i] * inv(&spin) * inv(&l.g[i]) * turn * l.g[i] * spin);
             match &self.items[i].sky_map {
                 Some(m) => job.maps[kk] = Some(m.clone()),
                 None => job.todo.push((kk, i, self.items[i].img.clone())),
@@ -1127,13 +1410,14 @@ impl StitchTab {
         let (imgs, scales, sizes, gains, gv) = self.compose_inputs(&vis, &g, scale);
         let sky = self.sky_job(&vis, &g);
         let force = self.force_job(&vis);
+        let lenses: Vec<Lens> = vis.iter().map(|&i| lens[i]).collect();
         let (proj, blend, tx) = (self.p.proj, self.p.blend, self.tx.clone());
         self.detail_busy = true;
         crate::sys::background(move || {
             let r = std::panic::catch_unwind(|| {
                 let sky = sky.map(|j| j.finish(&tx));
                 let refs: Vec<&Img> = imgs.iter().map(|a| a.as_ref()).collect();
-                let cp = ComposeParams { scale, projection: proj, f, c, blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
+                let cp = ComposeParams { scale, projection: proj, f, c, blend, lenses, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
                 compose(&refs, &gv, box_, &cp, &gains, &scales, &sizes, false).0
             });
             let _ = tx.send(match r {
@@ -1148,7 +1432,7 @@ impl StitchTab {
     }
 
     fn fingerprint(&self) -> u64 {
-        let items: Vec<(&str, [f64; 2], f64, usize, f64)> = self.items.iter().map(|i| (i.path.as_str(), i.offset, i.gain, i.mask.len(), i.mask.iter().map(|d| d.x + d.y + d.r).sum::<f64>())).collect();
+        let items: Vec<(&str, [f64; 2], f64, usize, f64, Correction)> = self.items.iter().map(|i| (i.path.as_str(), i.offset, i.gain, i.mask.len(), i.mask.iter().map(|d| d.x + d.y + d.r).sum::<f64>(), i.corr)).collect();
         let pairs: Vec<(usize, usize, bool, usize)> = self.pairs.iter().map(|q| (q.i, q.j, q.ok, q.inl.len())).collect();
         hash_of(&format!("{items:?}{pairs:?}{:?}{:?}{:?}{}", self.ref_choice, self.crop, self.p, self.layout.is_some()))
     }
@@ -1260,6 +1544,12 @@ impl StitchTab {
                 t.insert("relative".into(), super::relpath(&ap, &dir).into());
                 t.insert("offset".into(), Value::Array(vec![it.offset[0].into(), it.offset[1].into()]));
                 t.insert("gain".into(), it.gain.into());
+                if !it.corr.is_none() {
+                    // Corrections by hand: turn (°, clockwise) and lens distortion added (k1, k2).
+                    t.insert("turn".into(), it.corr.roll.into());
+                    t.insert("lens_k1".into(), it.corr.k1.into());
+                    t.insert("lens_k2".into(), it.corr.k2.into());
+                }
                 if !it.mask.is_empty() {
                     // Source mask: dabs [x, y, radius, erase (0/1)] in the image's pixels.
                     t.insert("mask".into(), Value::Array(it.mask.iter().map(|d| Value::Array([d.x, d.y, d.r, if d.erase { 1.0 } else { 0.0 }].into_iter().map(Value::from).collect())).collect()));
@@ -1277,12 +1567,16 @@ impl StitchTab {
         let mut m = Table::new();
         m.insert("pairs".into(), layout_name(self.p.layout).into());
         m.insert("model".into(), self.p.model.name().into());
+        m.insert("lens distortion".into(), self.p.lens_fit.name().into());
         m.insert("projection".into(), self.p.proj.name().into());
         m.insert("blend".into(), self.p.blend.name().into());
         d.insert("menus".into(), Value::Table(m));
         let mut t = Table::new();
         t.insert("snake".into(), self.p.snake.into());
         t.insert("refine".into(), self.p.refine.into());
+        t.insert("distortion per image".into(), self.p.lens_own.into());
+        t.insert("plate_solve".into(), self.p.solve.into());
+        t.insert("fill_empty".into(), self.p.autofill.into());
         t.insert("show unlinked images".into(), self.p.unlinked.into());
         t.insert("overlays".into(), self.overlays.into());
         d.insert("toggles".into(), Value::Table(t));
@@ -1373,6 +1667,9 @@ impl StitchTab {
         if let Some(v) = Model::from_name(&ms("model")) {
             self.p.model = v;
         }
+        if let Some(v) = LensFit::from_name(&ms("lens distortion")) {
+            self.p.lens_fit = v;
+        }
         if let Some(v) = Projection::from_name(&ms("projection")) {
             self.p.proj = v;
         }
@@ -1383,12 +1680,16 @@ impl StitchTab {
         let tb = |k: &str| t.get(k).and_then(|v| v.as_bool());
         self.p.snake = tb("snake").unwrap_or(self.p.snake);
         self.p.refine = tb("refine").unwrap_or(self.p.refine);
+        self.p.lens_own = tb("distortion per image").unwrap_or(self.p.lens_own);
+        self.p.solve = tb("plate_solve").unwrap_or(self.p.solve);
+        self.p.autofill = tb("fill_empty").unwrap_or(self.p.autofill);
         self.p.unlinked = tb("show unlinked images").unwrap_or(self.p.unlinked);
         self.overlays = tb("overlays").unwrap_or(self.overlays);
         // Find the images: stored absolute path, else relative to the project file.
         let recs = d.get("images").and_then(|v| v.as_array()).cloned().unwrap_or_default();
         let mut paths = Vec::new();
         let mut offsets = Vec::new();
+        let mut corrs = Vec::new();
         let mut masks = Vec::new();
         let mut missing = Vec::new();
         for r in &recs {
@@ -1397,6 +1698,8 @@ impl StitchTab {
             let found = if std::path::Path::new(ap).is_file() { Some(ap.to_string()) } else if rel.is_file() { Some(rel.to_string_lossy().to_string()) } else { None };
             let off = r.get("offset").and_then(|v| v.as_array()).map(|a| [a.first().and_then(num).unwrap_or(0.0), a.get(1).and_then(num).unwrap_or(0.0)]).unwrap_or([0.0; 2]);
             offsets.push((off, r.get("gain").and_then(num).unwrap_or(1.0)));
+            let rn = |k: &str| r.get(k).and_then(num).filter(|v| v.is_finite()).unwrap_or(0.0);
+            corrs.push(Correction { roll: rn("turn"), k1: rn("lens_k1"), k2: rn("lens_k2") });
             masks.push(
                 r.get("mask")
                     .and_then(|v| v.as_array())
@@ -1439,7 +1742,7 @@ impl StitchTab {
         }
         let reference = d.get("reference").and_then(|v| v.as_integer()).filter(|&r| r > 0).map(|r| r as usize - 1);
         let crop = d.get("crop").map(|v| fv(Some(v))).filter(|c| c.len() == 4).map(|c| (c[0], c[1], c[2], c[3]));
-        Ok((paths, ProjData { path: path.to_string(), offsets, masks, missing, pairs, reference, crop }))
+        Ok((paths, ProjData { path: path.to_string(), offsets, corrs, masks, missing, pairs, reference, crop }))
     }
 
     /// Images of an opened project, placed as saved. `items[k]` belongs to record k.
@@ -1449,6 +1752,7 @@ impl StitchTab {
         for (k, it) in items.into_iter().enumerate() {
             if let Some(mut it) = it {
                 (it.offset, it.gain) = pd.offsets[k];
+                it.corr = pd.corrs.get(k).copied().unwrap_or_default();
                 it.mask = Arc::new(pd.masks.get(k).cloned().unwrap_or_default());
                 newidx[k] = Some(self.items.len());
                 self.items.push(it);
@@ -1522,7 +1826,8 @@ impl StitchTab {
     fn save_full(&mut self, out: String) {
         let Some((f, c, g, vis, lens)) = self.geometry() else { return };
         let p = self.p.clone();
-        let o: Vec<Vec<Pt>> = vis.iter().map(|&i| outline(&g[i], self.items[i].img.h, self.items[i].img.w, p.proj, f, c, lens, 24)).collect();
+        let o: Vec<Vec<Pt>> = vis.iter().map(|&i| outline(&g[i], self.items[i].img.h, self.items[i].img.w, p.proj, f, c, lens[i], 24)).collect();
+        let lenses: Vec<Lens> = vis.iter().map(|&i| lens[i]).collect();
         let box_ = self.crop.unwrap_or_else(|| bounds(&o));
         let scale = self.out_scale();
         let (w, h) = (((box_.1 - box_.0 + 1.0) * scale).round().max(1.0), ((box_.3 - box_.2 + 1.0) * scale).round().max(1.0));
@@ -1569,7 +1874,7 @@ impl StitchTab {
             }
             let refs: Vec<&Source> = srcs.iter().collect();
             let sky = sky.map(|j| j.finish(tx));
-            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lens, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
+            let cp = ComposeParams { scale, projection: p.proj, f, c, blend: p.blend, lenses, sharpness: 3.0, deghost: 0.12, levels: None, sky, force };
             let (wu, hu) = (w as usize, h as usize);
             let astro = io::is_astro(&out);
             // The panorama in the file's own format, filled band by band.
@@ -1584,7 +1889,11 @@ impl StitchTab {
             let band_rows = ((0.5 * free / (work * wu as f64)) as usize).max(BAND_MIN as usize);
             let bands = hu.div_ceil(band_rows.min(hu).max(1));
             let mut done_rows = 0usize;
-            let (wc, hc) = compose_bands(&refs, &gv, box_, &cp, &gains, &scales, &sizes, band_rows, &mut |y0, img| {
+            let mut cover = p.autofill.then(|| crate::fill::Cover::new(hu, wu));
+            let (wc, hc) = compose_bands(&refs, &gv, box_, &cp, &gains, &scales, &sizes, band_rows, p.autofill, &mut |y0, img, cov| {
+                if let (Some(all), Some(c)) = (cover.as_mut(), cov) {
+                    all.set_rows(y0, &c.v);
+                }
                 let img = if linear { img } else { look(&img, 1.0, &p) };
                 if img.w != wu || y0 + img.h > hu {
                     return Err(crate::trf!("internal error: band {}×{} at row {} of {}×{}", img.w, img.h, y0, wu, hu));
@@ -1604,13 +1913,22 @@ impl StitchTab {
             if (wc, hc) != (wu, hu) {
                 return Err(crate::trf!("internal error: rendered {}×{} px, expected {}×{}", wc, hc, wu, hu));
             }
+            let mut filled = 0usize;
+            if let Some(cover) = &cover {
+                let status = |_: &str| {
+                    let _ = tx.send(Msg::Status(tr("Filling the empty areas…").into()));
+                };
+                let mut canvas = BufCanvas { buf: &mut buf, w: wu, h: hu };
+                filled = crate::fill::complete(&mut canvas, cover, FILL_WORK, &status);
+            }
             let _ = tx.send(Msg::Status(crate::trf!("Writing {}…", basename(&out))));
             match buf {
                 OutBuf::U8(v) => io::save_rgb8(&out, wu, hu, v, 95)?,
                 OutBuf::U16(v) => io::save_rgb16(&out, wu, hu, v)?,
                 OutBuf::F32(img) => io::save_panorama(&out, &img)?,
             }
-            Ok(Msg::Done(crate::trf!("Saved {} ({}×{} px, {} images{}{}).", out, wu, hu, refs.len(), if cropped { tr(", cropped") } else { "" }, if linear { if astro { tr(", linear 32-bit") } else { tr(", linear") } } else if p.stretched() { ", stretched as shown" } else { "" })))
+            let fill_note = if filled > 0 { crate::trf!(", {} % made up to fill the empty areas", format!("{:.1}", 100.0 * filled as f64 / (wu * hu) as f64)) } else { String::new() };
+            Ok(Msg::Done(crate::trf!("Saved {} ({}×{} px, {} images{}{}{}).", out, wu, hu, refs.len(), if cropped { tr(", cropped") } else { "" }, if linear { if astro { tr(", linear 32-bit") } else { tr(", linear") } } else if p.stretched() { ", stretched as shown" } else { "" }, fill_note)))
         });
         if started {
             self.job_is_save = true;
@@ -1754,7 +2072,7 @@ impl StitchTab {
                     self.view = ViewKind::Image;
                     self.status = tr("Features detected. Look for keypoints spread over the overlap areas; if too few, lower the corner threshold or raise Denoise. Then match.").into();
                 }
-                Msg::Matched { feats, stars, pairs, layout, msg } => {
+                Msg::Matched { feats, stars, solved, pairs, layout, msg } => {
                     self.busy = false;
                     for (i, f, key) in feats {
                         if let Some(it) = self.items.get_mut(i) {
@@ -1765,6 +2083,11 @@ impl StitchTab {
                     for (i, s) in stars {
                         if let Some(it) = self.items.get_mut(i) {
                             it.stars = Some(s);
+                        }
+                    }
+                    for (i, s) in solved {
+                        if let Some(it) = self.items.get_mut(i) {
+                            it.solved = Some(s);
                         }
                     }
                     self.pairs = pairs;
@@ -1784,7 +2107,7 @@ impl StitchTab {
                     let fit = self.view != ViewKind::Pano || self.pano.is_none();
                     self.pano_version += 1;
                     self.detail = None;
-                    self.pano = Some(Preview { img, tex: None, tex_key: (0, 0, 0, 0), box_, scale, outlines, covered });
+                    self.pano = Some(Preview { img, tex: None, tex_key: (0, 0, 0, 0), box_, scale, outlines, covered, view: self.rendering_view });
                     self.view = ViewKind::Pano;
                     if fit {
                         self.vstate.fit = true;
@@ -1831,6 +2154,66 @@ impl StitchTab {
         let t = texture(ctx, &key.0, &self.shown_img(&self.items[i].disp, 2f64.powf(self.p.ev), None));
         self.tex_cache.insert(key, t.clone());
         t
+    }
+
+    /// The lens distortion the refinement found, in words.
+    fn lens_summary(&self) -> String {
+        let Some(l) = &self.layout else { return String::new() };
+        if !self.p.refine || self.p.lens_fit == LensFit::Off {
+            return tr("Lens distortion not fitted.").into();
+        }
+        let ks: Vec<(f64, f64)> = l.members.iter().filter_map(|&i| l.lenses.get(i)).map(|x| (x.k1, x.k2)).collect();
+        let range = |v: Vec<f64>| {
+            let (lo, hi) = (v.iter().copied().fold(f64::MAX, f64::min), v.iter().copied().fold(f64::MIN, f64::max));
+            if hi - lo < 5e-4 { format!("{lo:.3}") } else { format!("{lo:.3} … {hi:.3}") }
+        };
+        let k1 = range(ks.iter().map(|k| k.0).collect());
+        if self.p.lens_fit == LensFit::Poly {
+            crate::trf!("Lens distortion: k1 = {}, k2 = {}.", k1, range(ks.iter().map(|k| k.1).collect()))
+        } else {
+            crate::trf!("Lens distortion: k1 = {}.", k1)
+        }
+    }
+
+    /// Turn and lens distortion of the selected images, by hand. True when changed.
+    fn correction_ui(&mut self, ui: &mut egui::Ui) -> bool {
+        let Some(it) = self.items.get(self.sel) else {
+            ui.label(tr("Add images first."));
+            return false;
+        };
+        let mut c = it.corr;
+        let found = self.layout.as_ref().and_then(|l| l.lenses.get(self.sel).copied());
+        let mut ch = false;
+        egui::Grid::new("corr_grid").num_columns(2).show(ui, |ui| {
+            ch |= angle(ui, tr("Turn (°)"), &mut c.roll, 20.0, true);
+            ch |= slider(ui, tr("Distortion k1 +"), &mut c.k1, -0.3..=0.3, 0.0005);
+            ch |= slider(ui, tr("Distortion k2 +"), &mut c.k2, -0.3..=0.3, 0.0005);
+        });
+        if let Some(fl) = found {
+            ui.label(egui::RichText::new(crate::trf!("Found by the refinement: k1 = {}, k2 = {}; with the correction k1 = {}, k2 = {}.", format!("{:.4}", fl.k1), format!("{:.4}", fl.k2), format!("{:.4}", fl.k1 + c.k1), format!("{:.4}", fl.k2 + c.k2))).weak().size(12.0));
+        }
+        ui.label(egui::RichText::new(tr("Turn: for a photo that sits a little rotated against its neighbours (about its own centre). k1 bends straight lines: − barrel, + pincushion. k2 acts mostly in the corners: with the opposite sign of k1 it corrects the wavy \"moustache\" distortion. Both are added to what the refinement found; they apply to all selected images.")).weak().size(12.0));
+        let targets = self.targets();
+        if ch {
+            for &i in &targets {
+                self.items[i].corr = c;
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(tr("Reset")).on_hover_text(tr("No turn, distortion as found (the selected images)")).clicked() {
+                for &i in &targets {
+                    self.items[i].corr = Correction::default();
+                }
+                ch = true;
+            }
+            if ui.button(tr("Distortion to all images")).on_hover_text(tr("The same k1 and k2 correction for every image (one lens)")).clicked() {
+                for it in self.items.iter_mut() {
+                    (it.corr.k1, it.corr.k2) = (c.k1, c.k2);
+                }
+                ch = true;
+            }
+        });
+        ch
     }
 
     fn nudge(&mut self, dx: f64, dy: f64) {
@@ -1909,7 +2292,8 @@ impl StitchTab {
             for (i, it) in self.items.iter().enumerate() {
                 let kp = it.feats.as_ref().map(|f| format!(" {}kp", f.pts.len())).unwrap_or_default();
                 let unl = self.layout.as_ref().is_some_and(|l| self.pairs.iter().any(|p| p.ok) && l.comp[i] != l.comp[l.ref_]);
-                let txt = format!("{}{:>3} {}{kp}{}", if Some(i) == refi { "R" } else { " " }, i + 1, basename(&it.path), if unl { "  UNLINKED" } else { "" });
+                let star = if it.solved.as_ref().and_then(|s| s.found()).is_some() { " ★" } else { "" };
+                let txt = format!("{}{:>3} {}{kp}{star}{}", if Some(i) == refi { "R" } else { " " }, i + 1, basename(&it.path), if unl { "  UNLINKED" } else { "" });
                 let on = self.selected.contains(&i) || i == self.sel;
                 let mut rt = egui::RichText::new(txt).monospace();
                 if i == self.sel {
@@ -2030,6 +2414,22 @@ impl StitchTab {
                 self.status = crate::trf!("Global refinement {}.{}", if self.p.refine { tr("on") } else { tr("off") }, note);
             }
             ui.end_row();
+            if self.p.refine && self.p.model == Model::Homography {
+                let before = (self.p.lens_fit, self.p.lens_own);
+                combo(ui, tr("Lens distortion"), &mut self.p.lens_fit, &LensFit::ALL, |m| m.name());
+                if self.p.lens_fit != LensFit::Off {
+                    ui.label("");
+                    ui.checkbox(&mut self.p.lens_own, tr("each image its own distortion")).on_hover_text(tr("Off: one distortion for all photos (one lens at one focal length). On: each photo gets its own, kept close to the common one where its points say little: for a zoom that changed between the shots, or photos from different lenses. Each photo's rotation is always refined on its own."));
+                    ui.end_row();
+                }
+                if (self.p.lens_fit, self.p.lens_own) != before && !self.pairs.is_empty() {
+                    let note = self.relayout_now();
+                    self.status = format!("{}{note}", self.lens_summary());
+                }
+            }
+            ui.label("");
+            ui.checkbox(&mut self.p.solve, tr("plate solve photos of the sky")).on_hover_text(tr("Photos that are (nearly) all sky are found on a star catalogue (Hipparcos and Tycho-2, to magnitude 8). Two that overlap are linked by the stars identified in both: pairs the matching missed are linked, and a wrong match is corrected. Photos with landscape are left to the other matching. Takes under a second per photo."));
+            ui.end_row();
         });
         ui.horizontal_wrapped(|ui| {
             if ui.button(tr("Match")).clicked() {
@@ -2059,8 +2459,8 @@ impl StitchTab {
         });
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Pair"));
-            let label = |q: &PairRes| format!("{}–{}  {}", q.i + 1, q.j + 1, if q.ok { format!("{} inl", q.inl.len()) } else { "rejected".into() });
-            let cur = self.pairs.get(self.pairsel).filter(|q| q.listed).map(label).unwrap_or_else(|| "(none)".into());
+            let label = |q: &PairRes| format!("{}–{}  {}", q.i + 1, q.j + 1, if q.ok { crate::trf!("{} inliers", q.inl.len()) } else { tr("rejected").into() });
+            let cur = self.pairs.get(self.pairsel).filter(|q| q.listed).map(label).unwrap_or_else(|| tr("(none)").into());
             egui::ComboBox::from_id_salt("pair").selected_text(cur).width(150.0).show_ui(ui, |ui| {
                 for (k, q) in self.pairs.iter().enumerate().filter(|(_, q)| q.listed) {
                     if ui.selectable_label(k == self.pairsel, label(q)).clicked() {
@@ -2073,7 +2473,7 @@ impl StitchTab {
             ui.checkbox(&mut self.show_outliers, tr("outliers"));
         });
         if let Some(q) = self.pairs.get(self.pairsel) {
-            ui.label(egui::RichText::new(&q.msg).small());
+            ui.label(egui::RichText::new(&q.msg).size(12.5));
         }
     }
 
@@ -2091,6 +2491,16 @@ impl StitchTab {
             redo |= angle(ui, tr("Yaw (°)"), &mut self.p.yaw, 180.0, false);
             redo |= angle(ui, tr("Pitch (°)"), &mut self.p.pitch, 90.0, true);
             redo |= angle(ui, tr("Roll (°)"), &mut self.p.roll, 45.0, true);
+        });
+        ui.horizontal_wrapped(|ui| {
+            let ok = horizon::supported(self.p.proj);
+            let off = tr("Not for this projection: it bends every level line. For rectilinear, cylindrical, spherical, Mercator, Hammer and Mollweide.");
+            if ui.add_enabled(ok, egui::Button::new(tr("⟷ Auto horizon"))).on_hover_text(tr("Find the horizon in the preview, smooth it with a curve of the 4th order (trees and hills count less) and set pitch and roll so that it is straight; yaw stays. The green line shows the horizon found.")).on_disabled_hover_text(off).clicked() {
+                redo |= self.auto_horizon();
+            }
+            if ui.add_enabled(ok, egui::Button::selectable(self.horizon_edit.is_some(), tr("✎ Horizon by hand"))).on_hover_text(tr("Click 4 or more points along the horizon on the panorama; a curve is drawn through them. Then ✔ Level horizon sets pitch and roll so that it is straight.")).on_disabled_hover_text(off).clicked() {
+                self.toggle_horizon_edit();
+            }
         });
         if ui.button(tr("Reset focal / yaw / pitch / roll")).clicked() {
             (self.p.focal, self.p.yaw, self.p.pitch, self.p.roll) = (1.0, 0.0, 0.0, 0.0);
@@ -2186,6 +2596,7 @@ impl StitchTab {
                 }
             }
         });
+        egui::CollapsingHeader::new(tr("Correct selected image")).id_salt("corr").show(ui, |ui| redo |= self.correction_ui(ui));
         ui.separator();
         ui.heading(tr("5 · Stretch"));
         // The histogram of what is shown, without copying it (the Auto stretch button copies once).
@@ -2219,7 +2630,7 @@ impl StitchTab {
         }
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Format"));
-            let cur = self.save_format.and_then(|e| io::OUTPUT_FORMATS.iter().find(|f| f.0 == e)).map(|f| f.1).unwrap_or("automatic");
+            let cur = self.save_format.and_then(|e| io::OUTPUT_FORMATS.iter().find(|f| f.0 == e)).map(|f| f.1).unwrap_or(tr("automatic"));
             egui::ComboBox::from_id_salt("savefmt").selected_text(cur).width(240.0).show_ui(ui, |ui| {
                 ui.selectable_value(&mut self.save_format, None, tr("automatic")).on_hover_text(tr("TIFF; FITS or XISF when all images are"));
                 for (e, d) in io::OUTPUT_FORMATS {
@@ -2238,23 +2649,24 @@ impl StitchTab {
                 None => ui.weak(tr("(preview to see the size in pixels)")),
             };
             ui.end_row();
-            // Live estimate of what saving needs, against what is free.
+        });
+        // Live estimate of what saving needs, against what is free (wrapped:
+        // a long line would widen the panel over the preview).
+        {
             if let (Some(pv), Some(first)) = (&self.pano, self.items.first()) {
                 let auto = if self.items.iter().all(|it| io::is_fits(&it.path)) { "fits" } else if self.items.iter().all(|it| io::is_astro(&it.path)) { "xisf" } else { "tif" };
                 let nd = self.save_needs(pv.box_, self.save_format.unwrap_or(auto));
                 let dir = std::path::Path::new(&first.path).parent().filter(|d| !d.as_os_str().is_empty()).map(|d| d.to_path_buf()).unwrap_or_else(|| ".".into());
                 let (mem, disk) = crate::sys::free_cached(&dir);
                 let text = crate::trf!("needs ≈ {} memory ({} free), file ≤ {}{}", gb(nd.mem), gb((mem - memory_reserve()).max(0.0)), gb(nd.file), disk.map(|d| crate::trf!(" ({} free here)", gb(d as f64))).unwrap_or_default());
-                ui.label("");
                 match nd.check(&dir, false) {
-                    Ok(()) => ui.weak(text),
-                    Err(e) => ui.colored_label(Color32::from_rgb(220, 120, 0), format!("⚠ {text}")).on_hover_text(e),
+                    Ok(()) => ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap()),
+                    Err(e) => ui.add(egui::Label::new(egui::RichText::new(format!("⚠ {text}")).color(Color32::from_rgb(220, 120, 0))).wrap()).on_hover_text(e),
                 };
-                ui.end_row();
             }
-        });
+        }
         ui.horizontal_wrapped(|ui| {
-            for (t, pct) in [("¼", 25.0), ("½", 50.0), ("full", 100.0), ("2×", 200.0)] {
+            for (t, pct) in [("¼", 25.0), ("½", 50.0), (tr("full"), 100.0), ("2×", 200.0)] {
                 if ui.selectable_label(self.p.out_pct == pct, t).clicked() {
                     self.p.out_pct = pct;
                 }
@@ -2399,7 +2811,7 @@ impl StitchTab {
 
     /// Focal length (px) of image `i`: from the placement, else from the pairs, else a guess.
     fn focal_guess(&self, i: usize) -> f64 {
-        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot).collect();
+        let shots: Vec<ShotInfo> = self.items.iter().map(|it| it.shot_info()).collect();
         let (grp, rho) = zoom(&shots);
         if let Some(l) = &self.layout {
             return l.f * rho[i] / rho[l.ref_];
@@ -2610,6 +3022,378 @@ impl StitchTab {
     }
 
     /// Start or stop painting source masks on the panorama.
+    /// Why the horizon cannot be levelled now, if it cannot.
+    fn horizon_blocked(&self) -> Option<&'static str> {
+        if !horizon::supported(self.p.proj) {
+            Some(tr("Not for this projection: it bends every level line. For rectilinear, cylindrical, spherical, Mercator, Hammer and Mollweide."))
+        } else if self.pano.is_none() || self.layout.is_none() {
+            Some(tr("Preview the panorama first."))
+        } else {
+            None
+        }
+    }
+
+    /// Find the horizon in the preview and level it. True when pitch / roll changed.
+    fn auto_horizon(&mut self) -> bool {
+        if let Some(why) = self.horizon_blocked() {
+            self.status = why.into();
+            return false;
+        }
+        let pv = self.pano.as_ref().unwrap();
+        let pts = horizon::find_horizon(&pv.img, pv.covered.as_ref());
+        let fitted = horizon::fit_curve(&pts, 4);
+        let kept: Vec<Pt> = match &fitted {
+            Some((_, _, w)) => pts.iter().zip(w).filter(|(_, &w)| w > 0.5).map(|(p, _)| *p).collect(),
+            None => vec![],
+        };
+        let span = kept.iter().map(|p| p[0]).fold(f64::MIN, f64::max) - kept.iter().map(|p| p[0]).fold(f64::MAX, f64::min);
+        if kept.len() < 8 || span < 0.15 * pv.img.w as f64 {
+            self.status = tr("No horizon found in the preview (it needs sky above ground across a good part of the width). Mark it yourself: ✎ Horizon by hand.").into();
+            return false;
+        }
+        let (curve, _, _) = fitted.unwrap();
+        let (x0, x1) = (kept.iter().map(|p| p[0]).fold(f64::MAX, f64::min), kept.iter().map(|p| p[0]).fold(f64::MIN, f64::max));
+        let to_uv = |q: Pt| [(q[0] + 0.5) / pv.scale + pv.box_.0 - 0.5, (q[1] + 0.5) / pv.scale + pv.box_.2 - 0.5];
+        let line: Vec<Pt> = (0..=160).map(|k| x0 + (x1 - x0) * k as f64 / 160.0).map(|x| to_uv([x, curve.at(x)])).collect();
+        let uv: Vec<Pt> = kept.iter().map(|&q| to_uv(q)).collect();
+        let share = span / pv.img.w as f64 * 100.0;
+        self.level_horizon(&uv, &line, &uv, crate::trf!(" Found across {} % of the width.", format!("{share:.0}")), Some(AUTO_HORIZON_MAX))
+    }
+
+    /// Set pitch and roll so that the horizon through `level_pts` (output
+    /// coordinates of the preview) is straight; `line` and `marks` are shown.
+    /// `limit`: largest change of pitch or roll accepted (°), None for any.
+    fn level_horizon(&mut self, level_pts: &[Pt], line: &[Pt], marks: &[Pt], note: String, limit: Option<f64>) -> bool {
+        let Some(pv) = &self.pano else { return false };
+        let (proj, f, [y, p, r]) = pv.view;
+        let dirs = horizon::directions(level_pts, proj, f, y, p, r);
+        let Some((np, nr, before, after)) = horizon::level(&dirs, self.p.proj, self.p.yaw, self.p.pitch, self.p.roll) else {
+            self.status = tr("Too few points on the horizon to level it.").into();
+            return false;
+        };
+        let span = horizon::azimuth_span(&dirs, self.p.yaw, np, nr);
+        if limit.is_some_and(|lim| span < AUTO_HORIZON_NARROW && (nr - self.p.roll).abs() > lim) {
+            // The edge of the sky is the skyline, not the horizon: in a narrow
+            // panorama a hillside would be "levelled" into a tilted picture.
+            self.status = crate::trf!("The edge of the sky found would need roll {}° in a panorama only {}° wide: it is probably a slope of the landscape, not a tilt, so nothing was changed. Mark the true horizon yourself: ✎ Horizon by hand.", format!("{nr:.1}"), format!("{span:.0}"));
+            return false;
+        }
+        // Not straighter after all (pitch and roll can be large: a reference photo
+        // pointing near the zenith needs a pitch of 60–80°).
+        if !(after < 0.7 * before || after < 0.5) || np.abs() > 89.5 {
+            self.status = crate::trf!("The horizon found would need pitch {}° and roll {}°: that does not look right, so nothing was changed. Mark it yourself: ✎ Horizon by hand.", format!("{np:.1}"), format!("{nr:.1}"));
+            return false;
+        }
+        self.horizon = Some(HorizonLine { curve: horizon::directions(line, proj, f, y, p, r), points: horizon::directions(marks, proj, f, y, p, r), ref_: self.layout.as_ref().map(|l| l.ref_).unwrap_or(0) });
+        let (p0, r0) = (self.p.pitch, self.p.roll);
+        (self.p.pitch, self.p.roll) = ((np * 100.0).round() / 100.0, (nr * 100.0).round() / 100.0);
+        self.crop = None;
+        self.status = crate::trf!("Horizon levelled: pitch {}° → {}°, roll {}° → {}°; its height varies {}° → {}°.{}", format!("{p0:.2}"), format!("{:.2}", self.p.pitch), format!("{r0:.2}"), format!("{:.2}", self.p.roll), format!("{before:.2}"), format!("{after:.2}"), note);
+        // Kept when the new preview arrives.
+        self.note_after = Some(self.status.clone());
+        true
+    }
+
+    fn toggle_horizon_edit(&mut self) {
+        if self.horizon_edit.take().is_some() {
+            return;
+        }
+        if let Some(why) = self.horizon_blocked() {
+            self.status = why.into();
+            return;
+        }
+        if self.crop_edit.is_some() {
+            self.toggle_crop();
+        }
+        self.mask_edit = None;
+        self.horizon_edit = Some(vec![]);
+        self.view = ViewKind::Pano;
+        self.status = tr("Click 4 or more points along the horizon, spread over its length (right click removes the nearest). Then ✔ Level horizon (Enter); Esc cancels.").into();
+    }
+
+    /// The row under the view's buttons while the horizon is marked by hand.
+    fn horizon_tools(&mut self, ui: &mut egui::Ui) {
+        let n = self.horizon_edit.as_ref().map(|v| v.len()).unwrap_or(0);
+        let mut go = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(Color32::from_rgb(120, 230, 120), crate::trf!("Horizon by hand: {} point(s)", n));
+            go = ui.add_enabled(n >= 2, egui::Button::new(tr("✔ Level horizon"))).on_hover_text(tr("Enter")).on_disabled_hover_text(tr("Click at least 2 points (4 or more is better)")).clicked();
+            if ui.add_enabled(n > 0, egui::Button::new(tr("Clear points"))).clicked() {
+                self.horizon_edit = Some(vec![]);
+            }
+            if ui.button(tr("Cancel")).on_hover_text(tr("Esc")).clicked() {
+                self.horizon_edit = None;
+            }
+        });
+        if !ui.ctx().egui_wants_keyboard_input() && n >= 2 && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            go = true;
+        }
+        if go {
+            self.level_by_hand();
+        }
+    }
+
+    /// Level the horizon through the points marked by hand.
+    fn level_by_hand(&mut self) {
+        let Some(mut pts) = self.horizon_edit.clone() else { return };
+        if pts.len() < 2 {
+            return;
+        }
+        pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        let Some(curve) = horizon::curve_through(&pts, 4) else { return };
+        let (u0, u1) = (pts[0][0], pts[pts.len() - 1][0]);
+        let line: Vec<Pt> = (0..=160).map(|k| u0 + (u1 - u0) * k as f64 / 160.0).map(|u| [u, curve.at(u)]).collect();
+        let n = pts.len();
+        if self.level_horizon(&line, &line, &pts, crate::trf!(" Through {} point(s) marked by hand.", n), None) {
+            self.horizon_edit = None;
+            self.request_preview();
+        }
+    }
+
+    /// Clicks on the panorama while the horizon is marked by hand.
+    fn horizon_input(&mut self, ui: &egui::Ui, s: &super::Shown) {
+        if !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.horizon_edit = None;
+            self.status = tr("Horizon by hand cancelled.").into();
+            return;
+        }
+        if let Some(pos) = s.resp.hover_pos() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+            let _ = pos;
+        }
+        let Some(pts) = self.horizon_edit.as_mut() else { return };
+        if s.resp.clicked() {
+            if let Some(pos) = s.resp.interact_pointer_pos() {
+                let (u, v) = s.to_image(pos);
+                pts.push([u, v]);
+            }
+        }
+        if s.resp.secondary_clicked() {
+            if let Some(pos) = s.resp.interact_pointer_pos() {
+                let (u, v) = s.to_image(pos);
+                if let Some(k) = (0..pts.len()).min_by(|&a, &b| (pts[a][0] - u).hypot(pts[a][1] - v).total_cmp(&(pts[b][0] - u).hypot(pts[b][1] - v))) {
+                    pts.remove(k);
+                }
+            }
+        }
+    }
+
+    /// The horizon: the curve through the points being marked, or the one found
+    /// (turned with the current view, so a levelled horizon shows straight).
+    fn draw_horizon(&self, p: &egui::Painter, s: &super::Shown) {
+        let green = Color32::from_rgb(90, 230, 90);
+        let poly = |pts: &[Pt], width: f32| {
+            // Break the line where it jumps (across the ±180° seam): a step far
+            // longer than the typical one.
+            let steps: Vec<f64> = pts.windows(2).map(|w| (w[1][0] - w[0][0]).abs()).collect();
+            let typical = if steps.is_empty() { 0.0 } else { crate::image::median_f64(steps.iter().copied()) };
+            let mut seg: Vec<Pos2> = Vec::new();
+            for w in pts.windows(2) {
+                if (w[1][0] - w[0][0]).abs() > 10.0 * typical + 1.0 {
+                    if seg.len() > 1 {
+                        p.line(std::mem::take(&mut seg), Stroke::new(width, green));
+                    }
+                    seg.clear();
+                    continue;
+                }
+                if seg.is_empty() {
+                    seg.push(s.to_screen(w[0][0], w[0][1]));
+                }
+                seg.push(s.to_screen(w[1][0], w[1][1]));
+            }
+            if seg.len() > 1 {
+                p.line(seg, Stroke::new(width, green));
+            }
+        };
+        if let Some(pts) = &self.horizon_edit {
+            let mut sorted = pts.clone();
+            sorted.sort_by(|a, b| a[0].total_cmp(&b[0]));
+            if sorted.len() >= 2 {
+                if let Some(c) = horizon::curve_through(&sorted, 4) {
+                    let (u0, u1) = (sorted[0][0], sorted[sorted.len() - 1][0]);
+                    poly(&(0..=160).map(|k| u0 + (u1 - u0) * k as f64 / 160.0).map(|u| [u, c.at(u)]).collect::<Vec<_>>(), 2.5);
+                }
+            }
+            for q in pts {
+                p.circle_stroke(s.to_screen(q[0], q[1]), 6.0, Stroke::new(2.0, green));
+            }
+            return;
+        }
+        let (Some(h), Some(l)) = (&self.horizon, &self.layout) else { return };
+        if h.ref_ != l.ref_ || !horizon::supported(self.p.proj) {
+            return;
+        }
+        let f = l.f * self.p.focal;
+        let out = |d: &nalgebra::Vector3<f64>| horizon::to_output(d, self.p.proj, f, self.p.yaw, self.p.pitch, self.p.roll);
+        poly(&h.curve.iter().filter_map(out).collect::<Vec<_>>(), 2.0);
+        for q in h.points.iter().filter_map(out) {
+            p.circle_filled(s.to_screen(q[0], q[1]), 2.0, green);
+        }
+    }
+
+    /// The sky's rotation into the shown panorama (see `sky_grid::fit`), its
+    /// spread (degrees) and the number of photos it comes from.
+    fn sky_mapping(&self) -> Option<(M3, f64, usize)> {
+        let (f, c, g, vis, lens) = self.geometry()?;
+        // Where the panorama shows each photo's stars (turned to one moment, if it does).
+        let turned = self.sky_job(&vis, &g);
+        let cat = solve::catalog();
+        let mut pairs = Vec::new();
+        let mut n = 0;
+        for (k, &i) in vis.iter().enumerate() {
+            let Some(sol) = self.items[i].solved.as_ref().and_then(|s| s.found()) else { continue };
+            let gi = turned.as_ref().and_then(|j| j.g[k]).unwrap_or(g[i]);
+            let ci = center(&self.items[i].img);
+            n += 1;
+            for &(idx, px) in &sol.stars {
+                let (ux, uy) = undistort(px[0], px[1], ci, lens[i]);
+                let q = gi * nalgebra::Vector3::new(ux, uy, 1.0);
+                let d = nalgebra::Vector3::new((q[0] - c[0] * q[2]) / f, (q[1] - c[1] * q[2]) / f, q[2]);
+                if let Some(sky) = cat.dir.get(idx as usize) {
+                    pairs.push((*sky, d));
+                }
+            }
+        }
+        let (r, spread) = sky_grid::fit(&pairs)?;
+        Some((r, spread, n))
+    }
+
+    /// The RA / Dec grid with numbers and the names of bright objects, over the panorama.
+    fn draw_sky_grid(&self, p: &egui::Painter, s: &super::Shown) {
+        let (Some((r, spread, n)), Some(l), Some(pv)) = (self.sky_mapping(), &self.layout, &self.pano) else { return };
+        let (proj, f) = (self.p.proj, l.f * self.p.focal);
+        // Only over the panorama itself; names only where a photo shows the sky.
+        let b = pv.box_;
+        let (u1, v1) = (pv.img.w as f64 / pv.scale + b.0 - 0.5, pv.img.h as f64 / pv.scale + b.2 - 0.5);
+        let pano_rect = egui::Rect::from_min_max(s.to_screen(b.0 - 0.5, b.2 - 0.5), s.to_screen(u1, v1));
+        let p = &p.with_clip_rect(s.rect.intersect(pano_rect));
+        let shown = |uv: Pt| -> bool {
+            let (x, y) = (((uv[0] - b.0 + 0.5) * pv.scale).floor(), ((uv[1] - b.2 + 0.5) * pv.scale).floor());
+            if x < 0.0 || y < 0.0 || x >= pv.img.w as f64 || y >= pv.img.h as f64 {
+                return false;
+            }
+            match &pv.covered {
+                Some(c) if c.w == pv.img.w && c.h == pv.img.h => c.v[y as usize * c.w + x as usize],
+                _ => true,
+            }
+        };
+        let to_uv = |d: &nalgebra::Vector3<f64>| -> Option<Pt> {
+            let q = r * d;
+            let (a, b) = proj_forward(proj, q[0], q[1], q[2]);
+            (a.is_finite() && b.is_finite()).then_some([a * f, b * f])
+        };
+        let rect = s.rect.intersect(pano_rect);
+        let px_per_deg = s.zoom as f64 * f * std::f64::consts::PI / 180.0;
+        // The part of the sky in view: RA / Dec of a grid of points over it.
+        let (x0, x1, y0, y1) = s.visible();
+        let (mut dmin, mut dmax, mut ras) = (90.0f64, -90.0f64, Vec::new());
+        for a in 0..=16 {
+            for b in 0..=16 {
+                let (u, v) = (x0 + (x1 - x0) * a as f64 / 16.0, y0 + (y1 - y0) * b as f64 / 16.0);
+                let Some((x, y, z)) = proj_inverse(proj, u / f, v / f) else { continue };
+                let (ra, dec) = solve::radec(&(r.transpose() * nalgebra::Vector3::new(x, y, z).normalize()));
+                dmin = dmin.min(dec);
+                dmax = dmax.max(dec);
+                ras.push(ra);
+            }
+        }
+        if ras.is_empty() {
+            return;
+        }
+        ras.sort_by(f64::total_cmp);
+        // RA range: the circle minus its largest gap (all of it around a pole).
+        let mut gap = (ras[0] + 360.0 - ras[ras.len() - 1], ras[ras.len() - 1]);
+        for w in ras.windows(2) {
+            if w[1] - w[0] > gap.0 {
+                gap = (w[1] - w[0], w[0]);
+            }
+        }
+        let pole = dmax > 80.0 || dmin < -80.0;
+        let (ra0, ra_span) = if pole || gap.0 < 30.0 { (0.0, 360.0) } else { (gap.1 + gap.0, 360.0 - gap.0) };
+        let (dmin, dmax) = ((dmin - 1.0).max(-89.9), (dmax + 1.0).min(89.9));
+        let dstep = sky_grid::grid_step(90.0 / px_per_deg);
+        let rstep = sky_grid::ra_step(90.0 / px_per_deg / dmin.abs().max(dmax.abs()).to_radians().cos().max(0.1));
+        let grid = Color32::from_rgba_unmultiplied(120, 190, 255, 150);
+        let text = Color32::from_rgb(150, 205, 255);
+        let font = egui::FontId::proportional(13.0);
+        let seam = 0.5 * std::f64::consts::PI * f;
+        // A line through sky points: drawn in pieces (broken at the seam or where not shown);
+        // returns its point in view nearest the left or top edge, for the number.
+        let line = |pts: Vec<nalgebra::Vector3<f64>>, left: bool| -> Option<Pos2> {
+            let mut best: Option<Pos2> = None;
+            let mut seg: Vec<Pos2> = Vec::new();
+            let mut prev: Option<Pt> = None;
+            for d in &pts {
+                let q = to_uv(d);
+                if let (Some(a), Some(b)) = (prev, q) {
+                    if (a[0] - b[0]).abs() > seam || (a[1] - b[1]).abs() > seam {
+                        if seg.len() > 1 {
+                            p.line(std::mem::take(&mut seg), Stroke::new(1.0, grid));
+                        }
+                        seg.clear();
+                    }
+                }
+                match q {
+                    Some(uv) => {
+                        let sp = s.to_screen(uv[0], uv[1]);
+                        if rect.shrink(4.0).contains(sp) && best.is_none_or(|b| if left { sp.x < b.x } else { sp.y < b.y }) {
+                            best = Some(sp);
+                        }
+                        seg.push(sp);
+                    }
+                    None => {
+                        if seg.len() > 1 {
+                            p.line(std::mem::take(&mut seg), Stroke::new(1.0, grid));
+                        }
+                        seg.clear();
+                    }
+                }
+                prev = q;
+            }
+            if seg.len() > 1 {
+                p.line(seg, Stroke::new(1.0, grid));
+            }
+            best
+        };
+        // Declination lines (with their numbers at the left) …
+        let mut dec = (dmin / dstep).ceil() * dstep;
+        while dec <= dmax {
+            let pts = (0..=240).map(|k| solve::direction(ra0 + ra_span * k as f64 / 240.0, dec)).collect();
+            if let Some(at) = line(pts, true) {
+                p.text(at + egui::vec2(3.0, -2.0), egui::Align2::LEFT_BOTTOM, sky_grid::dec_text(dec), font.clone(), text);
+            }
+            dec += dstep;
+        }
+        // … and right ascension lines (numbers at the top).
+        let first = (ra0 / rstep).ceil() * rstep;
+        let mut ra = first;
+        while ra <= ra0 + ra_span + 1e-9 && ra < first + 360.0 - 1e-9 {
+            let pts = (0..=180).map(|k| solve::direction(ra, dmin + (dmax - dmin) * k as f64 / 180.0)).collect();
+            if let Some(at) = line(pts, false) {
+                p.text(at + egui::vec2(3.0, 2.0), egui::Align2::LEFT_TOP, sky_grid::ra_text(ra), font.clone(), text);
+            }
+            ra += rstep;
+        }
+        // Names: more of them as the view zooms in.
+        let star_mag = if px_per_deg < 4.0 { 1.5 } else if px_per_deg < 12.0 { 2.5 } else { 3.5 };
+        let dso_mag = if px_per_deg < 4.0 { 4.5 } else if px_per_deg < 12.0 { 6.0 } else { 99.0 };
+        for lb in sky_grid::labels() {
+            if lb.mag > if lb.star { star_mag } else { dso_mag } {
+                continue;
+            }
+            let Some(uv) = to_uv(&lb.dir) else { continue };
+            let sp = s.to_screen(uv[0], uv[1]);
+            if !rect.contains(sp) || !shown(uv) {
+                continue;
+            }
+            let col = if lb.star { Color32::from_rgb(255, 215, 90) } else { Color32::from_rgb(130, 235, 150) };
+            let rad = (lb.size / 2.0 * px_per_deg).max(if lb.star { 9.0 } else { 11.0 }) as f32;
+            p.circle_stroke(sp, rad, Stroke::new(1.3, col));
+            p.text(sp + egui::vec2(rad * 0.75 + 3.0, -rad * 0.75), egui::Align2::LEFT_BOTTOM, &lb.name, font.clone(), col);
+        }
+        p.with_clip_rect(s.rect).text(s.rect.left_bottom() + egui::vec2(6.0, -6.0), egui::Align2::LEFT_BOTTOM, crate::trf!("Sky grid from {} photo(s) found on the star catalogue, within about {}°", n, format!("{:.1}", spread.max(0.05))), font, text);
+    }
+
     fn toggle_masks(&mut self) {
         if self.mask_edit.take().is_some() {
             self.mask_tex = None;
@@ -2682,7 +3466,7 @@ impl StitchTab {
             let force = self.force_job(&vis);
             let gv: Vec<M3> = vis.iter().map(|&i| g[i]).collect();
             let sizes: Vec<(usize, usize)> = vis.iter().map(|&i| (self.items[i].img.h, self.items[i].img.w)).collect();
-            let cp = ComposeParams { scale, projection: self.p.proj, f, c, lens, force, ..Default::default() };
+            let cp = ComposeParams { scale, projection: self.p.proj, f, c, lenses: vis.iter().map(|&i| lens[i]).collect(), force, ..Default::default() };
             let mut labels = Vec::new();
             let tex = source_map(&gv, &sizes, box_, &cp).filter(|m| m.0 == pw && m.1 == ph).map(|(w, h, fi, fm)| {
                 let mut rgba = vec![0u8; w * h * 4];
@@ -2725,7 +3509,7 @@ impl StitchTab {
         }
         let shift = ui.input(|i| i.modifiers.shift);
         let size = |i: usize| (self.items[i].img.h, self.items[i].img.w);
-        let to_px = |i: usize, u: f64, v: f64| uv_to_pixel(&g[i], size(i), self.p.proj, f, c, lens, u, v);
+        let to_px = |i: usize, u: f64, v: f64| uv_to_pixel(&g[i], size(i), self.p.proj, f, c, lens[i], u, v);
         if let Some(pos) = s.resp.hover_pos() {
             let col = if me.erase && !me.stroke.is_empty() { Color32::from_rgb(255, 90, 90) } else { Color32::WHITE };
             p.circle_stroke(pos, me.brush, Stroke::new(1.5, col));
@@ -2849,7 +3633,7 @@ impl StitchTab {
         let Some(e) = self.crop_edit.as_mut() else { return };
         let to_uv = |p: Pos2| {
             let (x, y) = s.to_image(p);
-            (x.clamp(full.0, full.1), y.clamp(full.2, full.3))
+            (super::clamp_safe(x, full.0, full.1), super::clamp_safe(y, full.2, full.3))
         };
         let screen = |f: &(f64, f64, f64, f64)| egui::Rect::from_min_max(s.to_screen(f.0, f.2), s.to_screen(f.1, f.3));
         let r = screen(&e.frame);
@@ -2889,8 +3673,8 @@ impl StitchTab {
             let f = match grip {
                 CropGrip::New => (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1)),
                 CropGrip::Move => {
-                    let dx = (b.0 - a.0).clamp(full.0 - f0.0, full.1 - f0.1);
-                    let dy = (b.1 - a.1).clamp(full.2 - f0.2, full.3 - f0.3);
+                    let dx = super::clamp_safe(b.0 - a.0, full.0 - f0.0, full.1 - f0.1);
+                    let dy = super::clamp_safe(b.1 - a.1, full.2 - f0.2, full.3 - f0.3);
                     (f0.0 + dx, f0.1 + dx, f0.2 + dy, f0.3 + dy)
                 }
                 CropGrip::Edges(g) => (
@@ -2938,16 +3722,27 @@ impl StitchTab {
                     self.vstate.fit = true;
                 }
             }
-            if ui.button(tr("Zoom +")).clicked() {
+            ui.separator();
+            // Short buttons: the toolbar wraps to fewer lines on small screens.
+            if ui.button(" + ").on_hover_text(tr("Zoom in (+ or the mouse wheel)")).clicked() {
                 super::zoom_by(&mut self.vstate, 1.5);
             }
-            if ui.button(tr("Zoom -")).clicked() {
+            if ui.button(" − ").on_hover_text(tr("Zoom out (− or the mouse wheel)")).clicked() {
                 super::zoom_by(&mut self.vstate, 1.0 / 1.5);
             }
             if ui.button(tr("Fit")).on_hover_text(tr("F (or 0, Home); + / − zoom")).clicked() {
                 self.vstate.fit = true;
             }
             ui.checkbox(&mut self.overlays, tr("overlays"));
+            let solved = self.items.iter().any(|it| matches!(it.solved, Some(Solved::Found(_))));
+            if ui
+                .add_enabled(solved, egui::Button::selectable(self.sky_grid && solved, tr("⊕ Sky grid")))
+                .on_hover_text(tr("The sky's coordinates on the panorama, as Siril's celestial grid: lines of right ascension and declination, and the names of the brightest stars and of the Messier and other bright objects. From the photos found on the star catalogue; approximate where the sky turned between the shots."))
+                .on_disabled_hover_text(tr("Needs photos of the sky found on the star catalogue: switch on “plate solve photos of the sky” (step 2) and match again."))
+                .clicked()
+            {
+                self.sky_grid = !self.sky_grid;
+            }
             ui.separator();
             super::view_stretch_ui(ui, "pano_disp", &mut self.disp_view, Some(&mut self.disp_processed));
             ui.separator();
@@ -2957,6 +3752,11 @@ impl StitchTab {
             }
             if ui.selectable_label(self.mask_edit.is_some(), tr("✐ Source masks")).on_hover_text(tr("Paint where a chosen image must be used, e.g. the one frame where a moving tree, person or car is sharp, or where the blend left a ghost. Each image has its own mask; paint as many as needed")).clicked() {
                 self.toggle_masks();
+            }
+            if ui.selectable_label(self.p.autofill, tr("◧ Fill empty areas")).on_hover_text(tr("Auto-complete, as in Microsoft ICE: the parts of the frame no photo covers (the empty corners and edges, inside the crop frame if there is one) are filled with made-up sky and ground that continue what is around them, with stars and grain copied from the photos. In the preview and when saving. Made up: check it before you publish, and say so where it matters.")).clicked() {
+                self.p.autofill = !self.p.autofill;
+                self.status = if self.p.autofill { tr("The empty areas are filled (in the preview and when saving).") } else { tr("The empty areas are left empty.") }.into();
+                self.request_preview();
             }
             if ui.button(tr("⬇ Save & post-process…")).on_hover_text(tr("Save the panorama, then open it in the Post-processing tab")).clicked() {
                 self.ask_save_pano();
@@ -2969,6 +3769,9 @@ impl StitchTab {
                 self.step(true);
             }
         });
+        if self.horizon_edit.is_some() {
+            self.horizon_tools(ui);
+        }
         if self.mask_edit.is_some() {
             self.mask_tools(ui);
         }
@@ -3055,12 +3858,32 @@ impl StitchTab {
         let (w, h) = (it.img.w as f64, it.img.h as f64);
         let kp = it.feats.as_ref().map(|f| crate::trf!("{} keypoints", f.pts.len())).unwrap_or_else(|| tr("no features yet").into());
         ui.label(crate::trf!("Image {}: {}  ({}×{}, {})", i + 1, basename(&it.path), w, h, kp));
+        match &it.solved {
+            Some(Solved::Found(sol)) => {
+                let (ra, de) = sol.centre();
+                let (fw, fh) = sol.fov();
+                let ra_h = ra / 15.0;
+                let pos = format!("{}h {:02}m, {}{:.1}°", ra_h.floor(), ((ra_h - ra_h.floor()) * 60.0).floor(), if de >= 0.0 { "+" } else { "−" }, de.abs());
+                ui.weak(crate::trf!("★ Star catalogue: centre at RA {}, {} stars identified (mean error {} px), field {}° × {}°.", pos, sol.stars.len(), format!("{:.1}", sol.rms), format!("{fw:.0}"), format!("{fh:.0}")));
+            }
+            Some(Solved::Failed(e)) => {
+                ui.weak(crate::trf!("Star catalogue: not found ({}).", e));
+            }
+            _ => {}
+        }
         let s = image_view(ui, &mut self.vstate, (w, h), &[(&tex, [0.5, w + 0.5, 0.5, h + 0.5])], true);
         if self.overlays {
             if let Some(f) = &it.feats {
                 let p = ui.painter().with_clip_rect(s.rect);
                 for q in &f.pts {
                     p.circle_stroke(s.to_screen(q[0], q[1]), 4.0, Stroke::new(1.2, Color32::YELLOW));
+                }
+            }
+            // Stars identified on the catalogue.
+            if let Some(sol) = it.solved.as_ref().and_then(|s| s.found()) {
+                let p = ui.painter().with_clip_rect(s.rect);
+                for (_, q) in &sol.stars {
+                    p.circle_stroke(s.to_screen(q[0], q[1]), 7.0, Stroke::new(1.2, Color32::from_rgb(90, 200, 255)));
                 }
             }
         }
@@ -3112,7 +3935,7 @@ impl StitchTab {
         if let Some(l) = &self.layout {
             let w = self.items[l.ref_].img.w as f64;
             let fov = 2.0 * (w / 2.0 / (l.f * self.p.focal)).atan().to_degrees();
-            ui.label(crate::trf!("{}: {}×{} px · focal {} px (ref. FOV {}°){}{}", self.p.proj.name(), b.1 - b.0 + 1.0, b.3 - b.2 + 1.0, format!("{:.0}", l.f * self.p.focal), format!("{fov:.1}"), l.typical.map(|t| format!(" · typical error {t:.1} px")).unwrap_or_default(), if self.overlays { " · orange = selected, cyan = reference, yellow = links" } else { "" }));
+            ui.label(crate::trf!("{}: {}×{} px · focal {} px (ref. FOV {}°){}{}", tr(self.p.proj.name()), b.1 - b.0 + 1.0, b.3 - b.2 + 1.0, format!("{:.0}", l.f * self.p.focal), format!("{fov:.1}"), l.typical.map(|t| crate::trf!(" · typical error {} px", format!("{t:.1}"))).unwrap_or_default(), if self.overlays { tr(" · orange = selected, cyan = reference, yellow = links") } else { "" }));
         }
         // Image coordinates of this view = output (u, v) coordinates.
         let mut vs = self.vstate;
@@ -3191,12 +4014,22 @@ impl StitchTab {
                 }
             }
         }
+        if self.overlays || self.horizon_edit.is_some() {
+            self.draw_horizon(&p, &s);
+        }
+        if self.sky_grid {
+            self.draw_sky_grid(&p, &s);
+        }
         if self.crop_edit.is_some() {
             self.crop_input(ui, &s, bounds(&outlines));
             return;
         }
         if self.mask_edit.is_some() {
             self.mask_input(ui, &s);
+            return;
+        }
+        if self.horizon_edit.is_some() {
+            self.horizon_input(ui, &s);
             return;
         }
         // Click selects; Ctrl + drag moves an image (with the images attached beyond it).
@@ -3342,6 +4175,10 @@ impl StitchTab {
     pub fn t_report(&self) -> Option<&super::JobReport> {
         self.report.as_ref()
     }
+    /// Show the preview in a display mode of its own (not "As processed").
+    pub fn t_set_display(&mut self, v: crate::finish::ViewStretch) {
+        (self.disp_view, self.disp_processed) = (v, false);
+    }
     pub fn t_status(&self) -> &str {
         &self.status
     }
@@ -3356,6 +4193,22 @@ impl StitchTab {
     }
     pub fn t_run_all(&mut self) {
         self.match_pairs(None, true);
+    }
+    pub fn t_pair_msgs(&self) -> Vec<String> {
+        self.pairs.iter().map(|q| q.msg.clone()).collect()
+    }
+    pub fn t_set_autofill(&mut self, on: bool) {
+        self.p.autofill = on;
+    }
+    pub fn t_set_out_pct(&mut self, pct: f64) {
+        self.p.out_pct = pct;
+    }
+    pub fn t_set_solve(&mut self, on: bool) {
+        self.p.solve = on;
+    }
+    /// Images found on the star catalogue.
+    pub fn t_solved(&self) -> Vec<usize> {
+        (0..self.items.len()).filter(|&i| self.items[i].solved.as_ref().and_then(|s| s.found()).is_some()).collect()
     }
     pub fn t_pano_size(&self) -> Option<(usize, usize)> {
         self.pano.as_ref().map(|p| (p.img.w, p.img.h))
@@ -3380,6 +4233,62 @@ impl StitchTab {
     }
     pub fn t_undo_len(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())
+    }
+    pub fn t_set_corr(&mut self, i: usize, c: Correction) {
+        self.items[i].corr = c;
+        self.request_preview();
+    }
+    pub fn t_corr(&self) -> Vec<Correction> {
+        self.items.iter().map(|i| i.corr).collect()
+    }
+    /// The outline of image i in the preview (output coordinates).
+    pub fn t_outline(&self, i: usize) -> Vec<Pt> {
+        self.pano.as_ref().and_then(|p| p.outlines.get(i).cloned()).unwrap_or_default()
+    }
+    /// Auto horizon, as the button (the preview follows).
+    pub fn t_set_overlays(&mut self, on: bool) {
+        self.overlays = on;
+    }
+    pub fn t_set_sky_grid(&mut self, on: bool) {
+        self.sky_grid = on;
+    }
+    pub fn t_sky_mapping(&self) -> Option<(M3, f64, usize)> {
+        self.sky_mapping()
+    }
+    pub fn t_auto_horizon(&mut self) -> bool {
+        let ok = self.auto_horizon();
+        if ok {
+            self.request_preview();
+        }
+        ok
+    }
+    /// Level the horizon through points (output coordinates), as marked by hand.
+    pub fn t_horizon_by_hand(&mut self, pts: &[Pt]) {
+        self.horizon_edit = Some(pts.to_vec());
+        self.level_by_hand();
+    }
+    pub fn t_angles(&self) -> (f64, f64, f64) {
+        (self.p.yaw, self.p.pitch, self.p.roll)
+    }
+    pub fn t_set_angles(&mut self, yaw: f64, pitch: f64, roll: f64) {
+        (self.p.yaw, self.p.pitch, self.p.roll) = (yaw, pitch, roll);
+        self.request_preview();
+    }
+    /// The preview's box and scale (output coordinates of its pixels).
+    pub fn t_preview_box(&self) -> Option<((f64, f64, f64, f64), f64)> {
+        self.pano.as_ref().map(|p| (p.box_, p.scale))
+    }
+    pub fn t_set_lens_fit(&mut self, fit: LensFit, own: bool) {
+        (self.p.lens_fit, self.p.lens_own) = (fit, own);
+        let note = self.relayout_now();
+        self.status = format!("{}{note}", self.lens_summary());
+    }
+    /// Typical pair error after the refinement (px).
+    pub fn t_typical(&self) -> Option<f64> {
+        self.layout.as_ref().and_then(|l| l.typical)
+    }
+    pub fn t_lenses(&self) -> Vec<Lens> {
+        self.lenses()
     }
     pub fn t_nudge(&mut self, sel: usize, dx: f64) {
         self.sel = sel;

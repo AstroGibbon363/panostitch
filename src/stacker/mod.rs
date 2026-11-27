@@ -63,6 +63,7 @@ named_enum!(ColorSpace { Srgb => "sRGB", AdobeRgb => "Adobe RGB" });
 named_enum!(Tone { SrgbCurve => "sRGB curve", Stretch => "MTF stretch", Asinh => "Arcsinh stretch", Ghs => "GHS stretch", Linear => "Linear" });
 named_enum!(BgModel { Rbf => "RBF", Polynomial => "Polynomial" });
 named_enum!(ColorCal { Auto => "Auto", Manual => "Manual" });
+named_enum!(Normalize { Off => "Off", Additive => "Additive", Multiplicative => "Multiplicative", AdditiveScaling => "Additive with scaling" });
 named_enum!(Fade { Off => "Off", In => "Fade in", Out => "Fade out", Both => "Both ends" });
 
 #[derive(Clone, Debug)]
@@ -148,7 +149,10 @@ pub struct StackConfig {
     pub output: String,
     pub excluded: Vec<String>,
     pub raw: RawOpts,
-    pub unify_exposure: bool,
+    /// Frames brought to the base frame's sky level (and spread) before they are combined.
+    pub normalize: Normalize,
+    /// Each frame's own gradient (a plane) taken out before stacking.
+    pub frame_gradient: bool,
     pub homogenize_vignetting: bool,
     pub composition: Composition,
     pub align_mode: AlignMode,
@@ -186,6 +190,11 @@ pub struct StackConfig {
     pub timelapse: (bool, usize),
     pub trails: (Fade, bool),
     pub foreground: Foreground,
+    /// Turn the frames upright by the base frame's orientation (a camera held
+    /// upright for a portrait frame), after the calibration, which needs the
+    /// sensor's own orientation. The sky region is drawn on the upright frame.
+    /// Off for setups saved before (their sky region was drawn on the sensor's).
+    pub upright: bool,
 }
 
 impl StackConfig {
@@ -207,7 +216,8 @@ impl Default for StackConfig {
             output: String::new(),
             excluded: vec![],
             raw: RawOpts { wb: WhiteBalance::Camera, quality: 3, half: false, decoder: RawDecoder::Auto },
-            unify_exposure: false,
+            normalize: Normalize::Off,
+            frame_gradient: false,
             homogenize_vignetting: false,
             composition: Composition::AlignStars,
             align_mode: AlignMode::Best,
@@ -241,6 +251,7 @@ impl Default for StackConfig {
             timelapse: (false, 10),
             trails: (Fade::Off, false),
             foreground: Foreground { path: String::new(), match_brightness: true, ev: 0.0 },
+            upright: true,
         }
     }
 }
@@ -392,7 +403,9 @@ pub struct FrameInfo {
     pub t: M3,       // base pixel → frame pixel (homography)
     pub warp: Warp,  // … with the distortion correction
     pub level: Rgb,  // median sky level per channel
-    pub gain: Rgb,   // exposure unification
+    pub spread: Rgb, // spread of the sky per channel (MAD σ)
+    pub gain: Rgb,   // normalisation: value × gain + offset
+    pub offset: Rgb,
     pub detected: Vec<Star>,
 }
 
@@ -412,7 +425,9 @@ impl FrameInfo {
             t: M3::identity(),
             warp: Warp::identity(),
             level: [0.0; 3],
+            spread: [0.0; 3],
             gain: [1.0; 3],
+            offset: [0.0; 3],
             detected: vec![],
         }
     }
@@ -1160,6 +1175,89 @@ pub fn detect_sky(img: &Img, cols: usize, rows: Option<usize>, margin: f64) -> (
 // Stars
 // --------------------------------------------------------------------------
 
+/// Take out a frame's own gradient, as Siril's `subsky 1`: per colour, a plane
+/// fitted to the sky background (medians of tiles, stars and objects clipped
+/// by an iterated fit) is subtracted, keeping the mean level. Only the sky
+/// region (weight `wt`) is corrected; across its soft edge the correction fades.
+/// Returns the plane's slopes per colour (change across the frame).
+pub fn remove_frame_gradient(img: &mut Img, wt: &Gray) -> [[f64; 2]; 3] {
+    let (h, w) = (img.h, img.w);
+    let tile = (h.max(w) / 32).max(8);
+    let (ny, nx) = (h.div_ceil(tile), w.div_ceil(tile));
+    // (u, v, median per colour) of tiles mostly in the sky; u, v in -0.5…0.5.
+    let tiles: Vec<(f64, f64, [f64; 3])> = (0..ny * nx)
+        .into_par_iter()
+        .filter_map(|k| {
+            let (ty, tx) = (k / nx, k % nx);
+            let mut v: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+            let mut n = 0usize;
+            for y in (ty * tile..((ty + 1) * tile).min(h)).step_by(2) {
+                for x in (tx * tile..((tx + 1) * tile).min(w)).step_by(2) {
+                    n += 1;
+                    if wt.at(y, x) >= 0.99 {
+                        let p = img.at(y, x);
+                        for c in 0..3 {
+                            v[c].push(p[c]);
+                        }
+                    }
+                }
+            }
+            if v[0].len() * 2 < n || v[0].len() < 8 {
+                return None;
+            }
+            let m = [median(&mut v[0]) as f64, median(&mut v[1]) as f64, median(&mut v[2]) as f64];
+            let u = ((tx * tile) as f64 + 0.5 * ((((tx + 1) * tile).min(w) - tx * tile) as f64)) / w as f64 - 0.5;
+            let vv = ((ty * tile) as f64 + 0.5 * ((((ty + 1) * tile).min(h) - ty * tile) as f64)) / h as f64 - 0.5;
+            Some((u, vv, m))
+        })
+        .collect();
+    let mut slopes = [[0.0; 2]; 3];
+    if tiles.len() < 6 {
+        return slopes;
+    }
+    for (c, sl) in slopes.iter_mut().enumerate() {
+        // Least squares a + b·u + c·v, then again without the tiles far off it (a galaxy, the Milky Way).
+        let mut keep = vec![true; tiles.len()];
+        let mut coef = [0.0f64; 3];
+        for _ in 0..4 {
+            let mut ata = nalgebra::Matrix3::<f64>::zeros();
+            let mut atb = nalgebra::Vector3::<f64>::zeros();
+            for (t, &(u, v, m)) in tiles.iter().enumerate() {
+                if keep[t] {
+                    let a = nalgebra::Vector3::new(1.0, u, v);
+                    ata += a * a.transpose();
+                    atb += a * m[c];
+                }
+            }
+            let Some(x) = ata.lu().solve(&atb) else { break };
+            coef = [x[0], x[1], x[2]];
+            let res: Vec<f64> = tiles.iter().map(|&(u, v, m)| m[c] - (coef[0] + coef[1] * u + coef[2] * v)).collect();
+            let kept: Vec<f64> = res.iter().zip(&keep).filter(|(_, k)| **k).map(|(r, _)| r.abs()).collect();
+            let sig = 1.4826 * crate::image::median_f64(kept) + 1e-9;
+            let next: Vec<bool> = res.iter().map(|r| *r < 2.5 * sig && *r > -4.0 * sig).collect();
+            if next.iter().filter(|k| **k).count() < 6 || next == keep {
+                break;
+            }
+            keep = next;
+        }
+        *sl = [coef[1], coef[2]];
+    }
+    img.px.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let v = (y as f64 + 0.5) / h as f64 - 0.5;
+        for (x, p) in row.iter_mut().enumerate() {
+            let m = wt.at(y, x);
+            if m <= 0.0 {
+                continue;
+            }
+            let u = (x as f64 + 0.5) / w as f64 - 0.5;
+            for c in 0..3 {
+                p[c] -= (m as f64 * (slopes[c][0] * u + slopes[c][1] * v)) as f32;
+            }
+        }
+    });
+    slopes
+}
+
 /// Median and noise (MAD σ) of `l` on a grid of `tile`-pixel tiles.
 pub fn background_grid(l: &Gray, tile: usize) -> (Gray, Gray) {
     let (h, w) = (l.h, l.w);
@@ -1283,7 +1381,7 @@ pub fn detect_stars(img: &Img, wt: &Gray) -> Vec<Star> {
         let mf = median_f64(stars.iter().map(|s| s.fwhm));
         stars.retain(|s| s.fwhm < 2.5 * mf);
     }
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap_or(std::cmp::Ordering::Equal));
+    stars.sort_by(|a, b| b.flux.total_cmp(&a.flux));
     stars.truncate(MAX_STARS);
     stars
 }
@@ -1640,6 +1738,7 @@ pub fn combine(d: &FrameStore, ks: &[usize], frames: &[&FrameInfo], wt: &Gray, c
     let warps: Vec<&Warp> = frames.iter().map(|f| &f.warp).collect();
     let lz = cfg.interpolation == Interpolation::Lanczos;
     let gains: Vec<Rgb> = frames.iter().map(|f| f.gain).collect();
+    let offs: Vec<Rgb> = frames.iter().map(|f| f.offset).collect();
     let fade = trail_fade(fade_kind(cfg), kn);
     let fill = mode == Mode::Trails && gaps.is_some() && steps > 0;
     let sel = cfg.selective;
@@ -1666,7 +1765,7 @@ pub fn combine(d: &FrameStore, ks: &[usize], frames: &[&FrameInfo], wt: &Gray, c
                         let s = if lz { d.sample_lanczos(ks[k], px, py) } else { d.sample(ks[k], px, py) };
                         let Some(s) = s else { continue };
                         for c in 0..3 {
-                            sky[c][ns] = s[c] * gains[k][c];
+                            sky[c][ns] = s[c] * gains[k][c] + offs[k][c];
                         }
                         ns += 1;
                     }
@@ -1675,7 +1774,7 @@ pub fn combine(d: &FrameStore, ks: &[usize], frames: &[&FrameInfo], wt: &Gray, c
                     for k in 0..kn {
                         let p = d.pixel(ks[k], x, y);
                         for c in 0..3 {
-                            gnd[c][ng] = p[c] * gains[k][c];
+                            gnd[c][ng] = p[c] * gains[k][c] + offs[k][c];
                         }
                         ng += 1;
                     }
@@ -1692,7 +1791,7 @@ pub fn combine(d: &FrameStore, ks: &[usize], frames: &[&FrameInfo], wt: &Gray, c
                             let Some(s) = d.sample(ks[k], x1 - t * dx, y1 - t * dy) else { continue };
                             let f = fade[k] + t as f32 * (fade[k + 1] - fade[k]);
                             for c in 0..3 {
-                                gap[c] = gap[c].max(f * s[c] * gains[k][c]);
+                                gap[c] = gap[c].max(f * (s[c] * gains[k][c] + offs[k][c]));
                             }
                         }
                     }

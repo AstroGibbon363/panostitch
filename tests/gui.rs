@@ -150,6 +150,22 @@ fn stitcher_tab_end_to_end() {
     w.idle("nudge");
     assert!(w.app.stitch.t_offsets()[other][0] != 0.0);
 
+    // Correct one image by hand: turned 3° about its centre, a little barrel distortion.
+    let before = w.app.stitch.t_outline(other);
+    let corr = panostitch::gui::stitch::Correction { roll: 3.0, k1: -0.02, k2: 0.0 };
+    w.app.stitch.t_set_corr(other, corr);
+    w.idle("correct an image");
+    let after = w.app.stitch.t_outline(other);
+    assert_eq!(before.len(), after.len());
+    let moved = before.iter().zip(&after).map(|(a, b)| (a[0] - b[0]).hypot(a[1] - b[1])).fold(0.0, f64::max);
+    assert!(moved > 2.0, "the turned image's outline moved {moved} px");
+    assert!((w.app.stitch.t_lenses()[other].k1 - w.app.stitch.t_lenses()[r].k1 + 0.02).abs() < 1e-9);
+    // The refinement fits the polynomial (moustache) distortion, one per image.
+    w.app.stitch.t_set_lens_fit(panostitch::stitcher::LensFit::Poly, true);
+    w.idle("polynomial distortion per image");
+    assert!(w.app.stitch.t_status().contains("k2"), "{}", w.app.stitch.t_status());
+    assert_eq!(w.app.stitch.t_pairs_ok(), 2, "{}", w.app.stitch.t_status());
+
     // Zoomed in, the visible part is re-rendered sharper after a pause.
     w.app.stitch.t_preview_px(500);
     w.idle("small preview");
@@ -185,6 +201,7 @@ fn stitcher_tab_end_to_end() {
     assert_eq!(w2.app.stitch.t_items(), 3, "{}", w2.app.stitch.t_status());
     assert_eq!(w2.app.stitch.t_pairs_ok(), 2);
     assert_eq!(w2.app.stitch.t_offsets(), w.app.stitch.t_offsets());
+    assert_eq!(w2.app.stitch.t_corr(), w.app.stitch.t_corr());
     assert!(w2.app.stitch.t_cropped());
     assert!(w2.app.stitch.t_pano_size().is_some(), "{}", w2.app.stitch.t_status());
     assert!(w2.app.stitch.t_status().starts_with("Opened"), "{}", w2.app.stitch.t_status());
@@ -208,6 +225,28 @@ fn stitcher_tab_end_to_end() {
     w2.idle("simple");
     w2.app.show_stack(true);
     w2.idle("simple stack tab");
+
+    // Horizon by hand: points along a line sloping down to the right are levelled
+    // by turning the view (roll).
+    w.app.stitch.t_set_projection(Projection::Cylindrical);
+    w.idle("cylindrical");
+    let (b, _) = w.app.stitch.t_preview_box().unwrap();
+    let (u0, u1, vm) = (b.0 + 0.2 * (b.1 - b.0), b.0 + 0.8 * (b.1 - b.0), (b.2 + b.3) / 2.0);
+    let slope = 0.05;
+    let pts: Vec<[f64; 2]> = (0..4).map(|k| { let u = u0 + (u1 - u0) * k as f64 / 3.0; [u, vm + slope * (u - (u0 + u1) / 2.0)] }).collect();
+    let before = w.app.stitch.t_angles();
+    w.app.stitch.t_horizon_by_hand(&pts);
+    w.idle("level by hand");
+    let after = w.app.stitch.t_angles();
+    assert!(w.app.stitch.t_status().starts_with("Horizon levelled"), "{}", w.app.stitch.t_status());
+    // Sloping down to the right: turned back anticlockwise (roll is clockwise).
+    assert!((after.2 - before.2 + slope.atan().to_degrees()).abs() < 0.3, "roll {} → {} for a slope of {:.2}°; {}", before.2, after.2, slope.atan().to_degrees(), w.app.stitch.t_status());
+    assert_eq!(after.0, before.0, "yaw stays");
+    // Not offered where every level line is bent.
+    w.app.stitch.t_set_projection(Projection::LittlePlanet);
+    w.idle("little planet");
+    assert!(!w.app.stitch.t_auto_horizon());
+    assert!(w.app.stitch.t_status().starts_with("Not for this projection"), "{}", w.app.stitch.t_status());
 }
 
 /// Star frames: a field turning around a pole above the frame, a dark ground below the middle.

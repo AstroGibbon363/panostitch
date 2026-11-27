@@ -111,6 +111,16 @@ pub fn tr(en: &'static str) -> &'static str {
     tr_in(lang(), en)
 }
 
+/// The translation of a text known only at run time (a value inside an engine
+/// message, e.g. a mode's name), if the table has it.
+pub fn tr_dyn(en: &str) -> Option<&'static str> {
+    let l = lang();
+    if l == Lang::En {
+        return None;
+    }
+    table(l).get(en).copied().filter(|t| !t.is_empty())
+}
+
 pub fn tr_in(l: Lang, en: &'static str) -> &'static str {
     if l == Lang::En {
         return en;

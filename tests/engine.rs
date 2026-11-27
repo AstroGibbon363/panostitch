@@ -334,7 +334,7 @@ fn stitch_three_crops() {
     let g = vec![st::M3::identity()];
     for proj in st::Projection::ALL {
         let cp = st::ComposeParams { projection: proj, f: 600.0, c: [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0], scale: 0.25, ..Default::default() };
-        let o = st::outline(&g[0], h, w, proj, 600.0, cp.c, (0.0, 600.0), 24);
+        let o = st::outline(&g[0], h, w, proj, 600.0, cp.c, st::Lens::new(0.0, 0.0, 600.0), 24);
         let (img, cov) = st::compose(&[&crops[0]], &g, st::bounds(&[o]), &cp, &[1.0], &[1.0], &[(h, w)], true);
         assert!(img.px.iter().all(|p| p.iter().all(|v| v.is_finite())), "{proj:?}");
         assert!(cov.unwrap().count() > 0, "{proj:?}");
@@ -356,7 +356,7 @@ fn panorama_in_bands_matches_one_piece() {
     let (h, w) = (700, 500);
     let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
     let g: Vec<st::M3> = (0..3).map(|k| st::M3::new(1.0, 0.0, 400.0 * k as f64, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)).collect();
-    let o: Vec<_> = g.iter().map(|gi| st::outline(gi, h, w, st::Projection::Cylindrical, 900.0, c, (0.0, 900.0), 24)).collect();
+    let o: Vec<_> = g.iter().map(|gi| st::outline(gi, h, w, st::Projection::Cylindrical, 900.0, c, st::Lens::new(0.0, 0.0, 900.0), 24)).collect();
     let box_ = st::bounds(&o);
     let refs: Vec<&Img> = crops.iter().collect();
     // The same photos kept in half precision.
@@ -368,7 +368,7 @@ fn panorama_in_bands_matches_one_piece() {
         let (whole, _) = st::compose(&refs, &g, box_, &cp, &[1.0; 3], &[1.0; 3], &sizes, false);
         let mut banded = Img::new(whole.h, whole.w);
         let mut nb = 0;
-        let (bw, bh) = st::compose_bands(&hrefs, &g, box_, &cp, &[1.0; 3], &[1.0; 3], &sizes, 128, &mut |y0, band| {
+        let (bw, bh) = st::compose_bands(&hrefs, &g, box_, &cp, &[1.0; 3], &[1.0; 3], &sizes, 128, false, &mut |y0, band, _| {
             banded.px[y0 * band.w..(y0 + band.h) * band.w].copy_from_slice(&band.px);
             nb += 1;
             Ok(())
@@ -538,7 +538,7 @@ fn refinement_finds_zoom_and_turning_sky() {
     // Start a little off: rotations disturbed, focal 5 % long, the zoom ratio from EXIF.
     let k = |f: f64| st::kmat(f, c);
     let g0: Vec<st::M3> = (0..4).map(|i| k(1000.0) * (rot([0.3, 0.5, 0.1], 0.4 * i as f64) * rs[i]).transpose() * st::inv(&k(fs[i]))).collect();
-    let opts = st::BundleOpts { group: vec![0, 0, 1, 1], focal: vec![1.0, 1.0, 0.9, 0.9], time: ts.to_vec(), sky: skyflags };
+    let opts = st::BundleOpts { group: vec![0, 0, 1, 1], focal: vec![1.0, 1.0, 0.9, 0.9], time: ts.to_vec(), sky: skyflags, ..Default::default() };
     let b = st::bundle_adjust_with(&g0, &[c; 4], 0, 1050.0, &[0, 1, 2, 3], &matches, 60, 5.0, 60, false, &opts);
     assert!(b.rms_after < 0.2, "rms {} → {}", b.rms_before, b.rms_after);
     assert!((b.f - 1000.0).abs() < 2.0, "focal {}", b.f);
@@ -590,7 +590,7 @@ fn sky_alignment_moves_only_the_stars() {
     }
     let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
     let cp = st::ComposeParams { projection: st::Projection::Rectilinear, f: 500.0, c, blend: st::Blend::Average, ..Default::default() };
-    let box_ = st::bounds(&[st::outline(&st::M3::identity(), h, w, cp.projection, cp.f, c, cp.lens, 24)]);
+    let box_ = st::bounds(&[st::outline(&st::M3::identity(), h, w, cp.projection, cp.f, c, cp.lens(0), 24)]);
     let (plain, _) = st::compose(&[&img], &[st::M3::identity()], box_, &cp, &[1.0], &[1.0], &[(h, w)], false);
     let shift = st::translation(6.0, 0.0);
     let map = st::SkyMap { open: Bits { w: w / 4, h: h / 4, v: vec![true; (w / 4) * (h / 4)] }, bg: blur(&panostitch::image::resize(&img, 1.0 / 16.0), 1.0) };
@@ -619,7 +619,7 @@ fn capture_times_and_zoom_groups() {
     assert_eq!(t("2026:03:01 00:00:10") - t("2026:02:28 23:59:50"), 20.0);
     assert_eq!(t("2025:01:01 00:00:00") - t("2024:12:31 23:00:00"), 3600.0);
     assert!(io::raw::exif_seconds("garbage").is_none());
-    let shot = |f: Option<f64>| io::ShotInfo { focal_mm: f, time: None };
+    let shot = |f: Option<f64>| io::ShotInfo { focal_mm: f, time: None, focal_px: None };
     let (g, r) = panostitch::gui::stitch::zoom(&[shot(Some(17.0)), shot(Some(17.0)), shot(Some(15.0)), shot(None), shot(Some(11.5))]);
     assert_eq!(g, vec![0, 0, 2, 0, 1]);
     assert!((r[2] - 15.0 / 17.0).abs() < 1e-9 && r[3] == 1.0 && (r[4] - 11.5 / 17.0).abs() < 1e-9, "{r:?}");
@@ -694,7 +694,7 @@ fn source_masks_force_one_photo() {
     assert!(st::mask_raster(&[st::MaskDab { x: 1.0, y: 1.0, r: 5.0, erase: true }], h, w).is_none());
     for blend in [st::Blend::Average, st::Blend::Feather, st::Blend::Smart] {
         let cp = st::ComposeParams { projection: st::Projection::Rectilinear, f: 400.0, c, blend, ..Default::default() };
-        let box_ = st::bounds(&[st::outline(&id, h, w, cp.projection, cp.f, c, cp.lens, 24)]);
+        let box_ = st::bounds(&[st::outline(&id, h, w, cp.projection, cp.f, c, cp.lens(0), 24)]);
         let force = std::sync::Arc::new(vec![None, Some(std::sync::Arc::new(mask.clone()))]);
         let cpm = st::ComposeParams { force: Some(force), ..cp.clone() };
         let (plain, _) = st::compose(&[&red, &green], &[id, id], box_, &cp, &[1.0, 1.0], &[1.0, 1.0], &[(h, w), (h, w)], false);
@@ -711,9 +711,9 @@ fn source_masks_force_one_photo() {
         }
     }
     // Output point → photo pixel, and outside the photo nothing.
-    let q = st::uv_to_pixel(&id, (h, w), st::Projection::Rectilinear, 400.0, c, (0.0, 1.0), 0.0, 0.0).unwrap();
+    let q = st::uv_to_pixel(&id, (h, w), st::Projection::Rectilinear, 400.0, c, st::Lens::default(), 0.0, 0.0).unwrap();
     assert!((q[0] - c[0]).abs() < 1e-9 && (q[1] - c[1]).abs() < 1e-9, "{q:?}");
-    assert!(st::uv_to_pixel(&id, (h, w), st::Projection::Rectilinear, 400.0, c, (0.0, 1.0), 500.0, 0.0).is_none());
+    assert!(st::uv_to_pixel(&id, (h, w), st::Projection::Rectilinear, 400.0, c, st::Lens::default(), 500.0, 0.0).is_none());
 }
 
 #[test]
@@ -837,4 +837,418 @@ fn wavelet_noise_reduction_keeps_stars_and_brightness() {
     assert!(img.px.iter().zip(&cn.px).all(|(a, b)| (luminance(*a) - luminance(*b)).abs() < 1e-4), "luminance changed");
     // Nothing at strength 0.
     assert_eq!(panostitch::denoise::reduce_noise(&img, 0.0).px, img.px);
+}
+
+/// A photo's stars made from the catalogue: camera turned by `r` (camera ray v
+/// points at the sky direction r·v), focal length f, distortion k1. Stars are
+/// listed by a brightness that the vignetting and the sky disturb, some are
+/// missing, some false ones are added.
+fn fake_photo_stars(r: &st::M3, f: f64, k1: f64, size: (usize, usize), seed: u64) -> Vec<st::Pt> {
+    let cat = st::solve::catalog();
+    let (h, w) = (size.0 as f64, size.1 as f64);
+    let c = [(w + 1.0) / 2.0, (h + 1.0) / 2.0];
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut out: Vec<(f64, st::Pt)> = Vec::new();
+    for (k, s) in cat.dir.iter().enumerate() {
+        let v = r.transpose() * s;
+        if v[2] < 0.1 {
+            continue;
+        }
+        let (x, y) = st::distort(c[0] + f * v[0] / v[2], c[1] + f * v[1] / v[2], c, st::Lens::new(k1, 0.0, f));
+        if x < 10.0 || y < 10.0 || x > w - 10.0 || y > h - 10.0 {
+            continue;
+        }
+        let rr = ((x - c[0]).powi(2) + (y - c[1]).powi(2)).sqrt() / (0.5 * w.hypot(h));
+        let m = cat.mag[k] as f64 + 1.5 * rr * rr + rng.gen_range(-0.6..0.6);
+        if m > 7.0 || rng.gen::<f64>() < 0.2 {
+            continue;
+        }
+        out.push((m, [x + rng.gen_range(-0.4..0.4), y + rng.gen_range(-0.4..0.4)]));
+    }
+    for _ in 0..30 {
+        out.push((rng.gen_range(2.0..7.0), [rng.gen_range(10.0..w - 10.0), rng.gen_range(10.0..h - 10.0)]));
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.truncate(400);
+    out.into_iter().map(|(_, p)| p).collect()
+}
+
+#[test]
+fn plate_solving_wide_fields() {
+    let cat = st::solve::catalog();
+    assert!(cat.dir.len() > 40_000 && cat.mag[0] < -1.0, "catalogue");
+    // Sirius where it belongs (RA 6h45m, Dec −16.7°).
+    let (ra, de) = st::solve::radec(&cat.dir[0]);
+    assert!((ra - 101.29).abs() < 0.05 && (de + 16.72).abs() < 0.05, "{ra} {de}");
+    let size = (1000usize, 1500usize);
+    // A 15 mm lens on full frame at 1500 px (f ≈ 625 px, about 100° across), a
+    // 24 mm one, and a 50 mm one; the focal length given is off by up to 10%.
+    for (k, (f, k1, ra, dec, roll, guess)) in [(625.0, -0.04, 280.0, 10.0, 30.0, 0.92), (940.0, -0.02, 84.0, -5.0, -100.0, 1.08), (1950.0, 0.0, 200.0, 55.0, 170.0, 1.0)].into_iter().enumerate() {
+        let z = st::solve::direction(ra, dec);
+        let up = nalgebra::Vector3::new(0.0, 0.0, 1.0);
+        let x0 = up.cross(&z).normalize();
+        let y0 = z.cross(&x0);
+        let (cr, sr) = (f64::to_radians(roll).cos(), f64::to_radians(roll).sin());
+        let (x, y) = (x0 * cr + y0 * sr, -x0 * sr + y0 * cr);
+        let r = st::M3::from_columns(&[x, y, z]);
+        let stars = fake_photo_stars(&r, f, k1, size, k as u64);
+        let t0 = std::time::Instant::now();
+        let sol = st::solve::solve(&stars, size, f * guess).unwrap_or_else(|e| panic!("field {k}: {e}"));
+        let secs = t0.elapsed().as_secs_f64();
+        let (cra, cde) = sol.centre();
+        let d = st::solve::direction(cra, cde).dot(&z).clamp(-1.0, 1.0).acos().to_degrees();
+        let turn = ((sol.r.transpose() * r).trace() - 1.0).clamp(-2.0, 2.0) / 2.0;
+        assert!(d < 0.02 && turn.acos().to_degrees() < 0.03, "field {k}: centre off by {d}°, turn {}°", turn.acos().to_degrees());
+        assert!((sol.f / f - 1.0).abs() < 0.003, "field {k}: f {} vs {f}", sol.f);
+        assert!((sol.k1 - k1).abs() < 0.01, "field {k}: k1 {} vs {k1}", sol.k1);
+        assert!(sol.stars.len() > 100 && sol.rms < 0.6, "field {k}: {} stars, rms {}", sol.stars.len(), sol.rms);
+        println!("field {k}: {} stars, rms {:.2} px, f {:.1}, k1 {:.3}, {:.2} s", sol.stars.len(), sol.rms, sol.f, sol.k1, secs);
+    }
+    // Random dots are not the sky.
+    let mut rng = ChaCha8Rng::seed_from_u64(9);
+    let junk: Vec<st::Pt> = (0..300).map(|_| [rng.gen_range(10.0..1490.0), rng.gen_range(10.0..990.0)]).collect();
+    assert!(st::solve::solve(&junk, size, 625.0).is_err());
+    // Two overlapping solved photos share their stars.
+    let r1 = st::M3::from_columns(&[nalgebra::Vector3::new(1.0, 0.0, 0.0), nalgebra::Vector3::new(0.0, 0.0, -1.0), nalgebra::Vector3::new(0.0, 1.0, 0.0)]);
+    let r2 = r1 * st::rodrigues(&nalgebra::Vector3::new(0.0, 0.6, 0.0));
+    let a = st::solve::solve(&fake_photo_stars(&r1, 625.0, 0.0, size, 3), size, 625.0).expect("a");
+    let b = st::solve::solve(&fake_photo_stars(&r2, 625.0, 0.0, size, 4), size, 625.0).expect("b");
+    let (p1, p2) = st::solve::common_stars(&a, &b);
+    assert!(p1.len() > 30, "{} common stars", p1.len());
+    let hh = st::stars::rotation_from_points(&p1, &p2, size, size, 625.0, 625.0).unwrap();
+    let err = p1.iter().zip(&p2).map(|(x, y)| st::reproj_err(&hh, *y, *x)).sum::<f64>() / p1.len() as f64;
+    assert!(err < 1.0, "pair error {err}");
+}
+
+#[test]
+fn frame_gradients_and_normalisation() {
+    // One frame with a plane (light pollution) and a galaxy: the plane goes, the
+    // galaxy and the mean level stay.
+    let (h, w) = (200usize, 300usize);
+    let plane = |y: usize, x: usize, a: f64, b: f64| (a * ((x as f64 + 0.5) / w as f64 - 0.5) + b * ((y as f64 + 0.5) / h as f64 - 0.5)) as f32;
+    let galaxy = |y: usize, x: usize| (0.05 * (-(((x as f64 - 200.0) / 25.0).powi(2) + ((y as f64 - 80.0) / 15.0).powi(2))).exp()) as f32;
+    let mut img = Img::from_fn(h, w, |y, x| { let v = 0.1 + plane(y, x, 0.04, -0.02) + galaxy(y, x); [v, v * 0.9, v * 1.1] });
+    let wt = Gray::filled(h, w, 1.0);
+    let sl = sk::remove_frame_gradient(&mut img, &wt);
+    assert!((sl[0][0] - 0.04).abs() < 0.004 && (sl[0][1] + 0.02).abs() < 0.004, "{sl:?}");
+    let off = img.at(20, 20)[0] - 0.1;
+    assert!(off.abs() < 0.003 && (img.at(180, 280)[0] - 0.1).abs() < 0.003, "plane left: {off}");
+    assert!((img.at(80, 200)[0] - 0.1 - 0.05).abs() < 0.004, "galaxy {}", img.at(80, 200)[0]);
+    // Only the sky region is corrected.
+    let mut half = Img::from_fn(h, w, |y, x| { let v = 0.1 + plane(y, x, 0.04, 0.0); [v; 3] });
+    let wt2 = Gray::from_fn(h, w, |y, _| if y < h / 2 { 1.0 } else { 0.0 });
+    sk::remove_frame_gradient(&mut half, &wt2);
+    assert!((half.at(50, 10)[0] - 0.1).abs() < 0.003 && (half.at(150, 10)[0] - (0.1 + plane(150, 10, 0.04, 0.0))).abs() < 1e-6);
+
+    // Stacking: every frame with its own gradient (turning through 90°) and its own sky level.
+    let sc = scene(300, 1);
+    let imgs: Vec<Img> = (0..8)
+        .map(|k| {
+            let mut f = frame(&sc, 0, 0.0, 0.0, 200 + k as u64, 1.0, 1.1);
+            let phi = k as f64 / 7.0 * std::f64::consts::FRAC_PI_2;
+            let (a, b) = (0.03 * phi.cos(), 0.03 * phi.sin());
+            for y in 0..H {
+                for x in 0..W {
+                    let d = (a * ((x as f64 + 0.5) / W as f64 - 0.5) + b * ((y as f64 + 0.5) / H as f64 - 0.5)) as f32 + 0.004 * k as f32;
+                    let p = &mut f.px[y * W + x];
+                    *p = [p[0] + d, p[1] + d, p[2] + d];
+                }
+            }
+            f
+        })
+        .collect();
+    let (mut cfg, lookup, _dir) = memstack(imgs);
+    cfg.sky = line_sky();
+    cfg.align_mode = sk::AlignMode::Best;
+    cfg.auto_brightness = false;
+    let spread = |r: &sk::StackResult| {
+        let mut v: Vec<f32> = (5..(0.45 * H as f64) as usize).flat_map(|y| (5..W - 5).map(move |x| (y, x))).map(|(y, x)| r.raw.at(y, x)[1]).filter(|v| *v < 0.07).collect();
+        let q = panostitch::image::quantiles(&mut v, &[0.05, 0.95]);
+        q[1] - q[0]
+    };
+    let level = |r: &sk::StackResult| { let mut v: Vec<f32> = (5..60).flat_map(|y| (5..W - 5).map(move |x| (y, x))).map(|(y, x)| r.raw.at(y, x)[1]).collect(); median_of(v.drain(..)) };
+    let plain = run(&cfg, &lookup);
+    cfg.frame_gradient = true;
+    let flat = run(&cfg, &lookup);
+    assert!(spread(&flat) < 0.4 * spread(&plain), "spread {} → {}", spread(&plain), spread(&flat));
+    assert!(flat.log.iter().any(|l| l.contains("each frame's gradient removed")));
+    // Normalisation: the frames are brought to the base frame's sky level (the base is frame 4 of 8).
+    let base_level = flat.report.iter().find(|f| f.status == sk::Status::Base).unwrap().level[1];
+    for n in [sk::Normalize::Additive, sk::Normalize::Multiplicative, sk::Normalize::AdditiveScaling] {
+        cfg.normalize = n;
+        let r = run(&cfg, &lookup);
+        assert!((level(&r) - base_level).abs() < 0.0015, "{n:?}: level {} vs base {base_level}", level(&r));
+        let used: Vec<&sk::FrameInfo> = r.report.iter().filter(|f| f.used()).collect();
+        assert!(used.iter().all(|f| (f.level[1] * f.gain[1] + f.offset[1] - base_level).abs() < 1e-4), "{n:?}");
+        assert!(r.log.iter().any(|l| l.contains("frames normalised")));
+    }
+    // Without it the level is the frames' mean: the base is the 4th of 8 frames
+    // whose levels rise by 0.004 each, so the mean is 0.002 above it.
+    cfg.normalize = sk::Normalize::Off;
+    let r = run(&cfg, &lookup);
+    assert!(level(&r) - base_level > 0.0012, "off: level {} vs base {base_level}", level(&r));
+}
+
+#[test]
+fn filling_empty_areas() {
+    // A night sky (gradient, stars, noise) with a ground below; the corners and a
+    // band at the top are empty, as around a panorama.
+    let (h, w) = (240usize, 360usize);
+    let mut rng = ChaCha8Rng::seed_from_u64(5);
+    let mut img = Img::from_fn(h, w, |y, x| {
+        let v = 0.08 + 0.05 * y as f32 / h as f32 + 0.02 * x as f32 / w as f32;
+        if y > 180 { [0.02, 0.018, 0.012] } else { [v * 0.9, v, v * 1.1] }
+    });
+    for p in img.px.iter_mut() {
+        let n = 0.004 * randn(&mut rng) as f32;
+        *p = [p[0] + n, p[1] + n, p[2] + n];
+    }
+    for _ in 0..250 {
+        let (y, x) = (rng.gen_range(2..178), rng.gen_range(2..w - 2));
+        img.px[y * w + x] = [0.9; 3];
+    }
+    let truth = img.clone();
+    let mut cover = panostitch::fill::Cover::new(h, w);
+    for y in 0..h {
+        for x in 0..w {
+            let corner = (x < 80 && y < 60 && (x as f64 / 80.0 + y as f64 / 60.0) < 1.0) || (x > 280 && y > 200);
+            cover.set(y, x, !(corner || y < 12));
+            if !cover.get(y, x) {
+                img.px[y * w + x] = [0.0; 3];
+            }
+        }
+    }
+    let holes = h * w - cover.count();
+    for work in [400usize, 120] {
+        let mut out = img.clone();
+        let n = panostitch::fill::complete_img(&mut out, &cover, work);
+        assert_eq!(n, holes);
+        // Known pixels untouched; filled ones near what was there (level and colour), not black.
+        assert!((0..h * w).filter(|&k| cover.get(k / w, k % w)).all(|k| out.px[k] == img.px[k]));
+        let region = |y0: usize, y1: usize, x0: usize, x1: usize, im: &Img| {
+            let v: Vec<f32> = (y0..y1).flat_map(|y| (x0..x1).map(move |x| (y, x))).filter(|&(y, x)| !cover.get(y, x)).map(|(y, x)| im.at(y, x)[1]).collect();
+            median_of(v.into_iter())
+        };
+        let (a, b) = (region(0, 40, 0, 40, &out), region(0, 40, 0, 40, &truth));
+        assert!((a - b).abs() < 0.012, "work {work}: top left {a} vs {b}");
+        let (a, b) = (region(205, 240, 290, 360, &out), region(205, 240, 290, 360, &truth));
+        assert!((a - b).abs() < 0.008, "work {work}: ground {a} vs {b}");
+        let (a, b) = (region(0, 12, 100, 300, &out), region(0, 12, 100, 300, &truth));
+        assert!((a - b).abs() < 0.012, "work {work}: top band {a} vs {b}");
+        // Texture: the fill is not a flat blur (noise like the sky's), and at full size it has stars.
+        let tex = |im: &Img| { let v: Vec<f32> = (2..10).flat_map(|y| (100..300).map(move |x| (y, x))).map(|(y, x)| im.at(y, x)[1] - im.at(y, x + 1)[1]).filter(|d| d.abs() < 0.1).collect(); (v.iter().map(|d| d * d).sum::<f32>() / v.len() as f32).sqrt() };
+        assert!(tex(&out) > 0.5 * tex(&truth), "work {work}: texture {} vs {}", tex(&out), tex(&truth));
+        let stars = (0..h * w).filter(|&k| !cover.get(k / w, k % w) && out.px[k][1] > 0.4).count();
+        assert!(stars > 0, "work {work}: no stars in the fill");
+    }
+    // Nothing to fill, or nothing to fill from.
+    let mut full = panostitch::fill::Cover::new(4, 4);
+    assert_eq!(panostitch::fill::complete_img(&mut Img::new(4, 4), &full, 100), 0);
+    for k in 0..16 { full.set(k / 4, k % 4, true); }
+    assert_eq!(panostitch::fill::complete_img(&mut Img::new(4, 4), &full, 100), 0);
+}
+
+/// Matches between a row of photos (turned `step`° apart, focal `f`) whose
+/// lenses distort as `lens[i]`: the ideal pixel of each sky point, distorted.
+fn distorted_row(lens: &[st::Lens], f: f64, step: f64, h: usize, w: usize) -> (Vec<st::M3>, Vec<st::MatchSet>) {
+    let n = lens.len();
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let rs: Vec<st::M3> = (0..n).map(|i| rot([0.0, 1.0, 0.0], step * i as f64)).collect();
+    let pts = random_sky(40000, 5);
+    let seen = |i: usize, d: &V3| -> Option<st::Pt> {
+        let p = project(&rs[i], d, f, 4 * h, 4 * w)?; // ideal pixel, anywhere in a big frame
+        let q = [p[0] - 1.5 * w as f64, p[1] - 1.5 * h as f64];
+        let (x, y) = st::distort(q[0], q[1], c, lens[i]);
+        (x >= 1.0 && x <= w as f64 && y >= 1.0 && y <= h as f64).then_some([x, y])
+    };
+    let mut m = Vec::new();
+    for i in 0..n {
+        for j in i + 1..(i + 3).min(n) {
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            for d in &pts {
+                if let (Some(p), Some(q)) = (seen(i, d), seen(j, d)) {
+                    a.push(p);
+                    b.push(q);
+                }
+                if a.len() >= 80 {
+                    break;
+                }
+            }
+            if a.len() >= 20 {
+                m.push((i, j, a, b));
+            }
+        }
+    }
+    let k = st::kmat(f, c);
+    // Start a little off.
+    let g0 = (0..n).map(|i| k * (rot([0.3, 0.5, 0.1], 0.3 * i as f64) * rs[i]).transpose() * st::inv(&k)).collect();
+    (g0, m)
+}
+
+#[test]
+fn refinement_finds_moustache_and_per_image_distortion() {
+    let (h, w, f) = (800usize, 1200usize, 1000.0);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let all: Vec<usize> = (0..5).collect();
+    // The inverse round trip of a moustache lens.
+    let l = st::Lens::new(-0.12, 0.06, f);
+    let (x, y) = st::distort(100.0, 50.0, c, l);
+    let (u, v) = st::undistort(x, y, c, l);
+    assert!((u - 100.0).abs() < 1e-6 && (v - 50.0).abs() < 1e-6, "round trip {u}, {v}");
+    assert!(l.monotonic(0.8) && !st::Lens::new(-0.9, 0.0, f).monotonic(0.8));
+
+    // One moustache lens for all: the polynomial finds k1 and k2; k1 alone cannot fit it.
+    let (g0, m) = distorted_row(&[l; 5], f, 25.0, h, w);
+    let poly = st::BundleOpts { poly: true, ..Default::default() };
+    let b = st::bundle_adjust_with(&g0, &[c; 5], 0, 1030.0, &all, &m, 60, 5.0, 80, true, &poly);
+    assert!(b.rms_after < 0.1, "rms {} → {}", b.rms_before, b.rms_after);
+    assert!((b.k1 + 0.12).abs() < 0.01 && (b.k2 - 0.06).abs() < 0.015, "k1 {}, k2 {}", b.k1, b.k2);
+    assert!((b.f - f).abs() < 3.0, "focal {}", b.f);
+    let radial = st::bundle_adjust_with(&g0, &[c; 5], 0, 1030.0, &all, &m, 60, 5.0, 80, true, &st::BundleOpts::default());
+    assert!(radial.rms_after > 3.0 * b.rms_after.max(0.02), "k1 alone: rms {}", radial.rms_after);
+    assert_eq!(radial.k2, 0.0);
+    println!("moustache: rms {:.3} px, k1 {:.4}, k2 {:.4}; k1 alone rms {:.3}", b.rms_after, b.k1, b.k2, radial.rms_after);
+
+    // Two lenses (three photos strongly barrel-distorted, two nearly not): each image its own.
+    let (la, lb) = (st::Lens::new(-0.10, 0.0, f), st::Lens::new(-0.02, 0.0, f));
+    let (g0, m) = distorted_row(&[la, la, la, lb, lb], f, 25.0, h, w);
+    let own = st::BundleOpts { per_image: true, ..Default::default() };
+    let b = st::bundle_adjust_with(&g0, &[c; 5], 0, 1030.0, &all, &m, 60, 5.0, 80, true, &own);
+    let shared = st::bundle_adjust_with(&g0, &[c; 5], 0, 1030.0, &all, &m, 60, 5.0, 80, true, &st::BundleOpts::default());
+    let ks: Vec<f64> = b.lens.iter().map(|l| l.k1).collect();
+    println!("per image: rms {:.3} px, k1 {ks:.4?}; shared rms {:.3}", b.rms_after, shared.rms_after);
+    assert!(b.rms_after < 0.3 && shared.rms_after > 2.0 * b.rms_after, "rms own {} vs shared {}", b.rms_after, shared.rms_after);
+    for (i, want) in [-0.10, -0.10, -0.10, -0.02, -0.02].into_iter().enumerate() {
+        assert!((ks[i] - want).abs() < 0.015, "image {i}: k1 {} vs {want}", ks[i]);
+    }
+    // Rendering uses each image's own lens: a straight-on render of the photo through its lens is the photo again.
+    let img = smooth_scene(h / 4, w / 4, 3);
+    let lq = st::Lens::new(-0.1, 0.05, f / 4.0);
+    let cq = [(img.w as f64 + 1.0) / 2.0, (img.h as f64 + 1.0) / 2.0];
+    let cp = st::ComposeParams { projection: st::Projection::Rectilinear, f: f / 4.0, c: cq, blend: st::Blend::Average, lenses: vec![lq], ..Default::default() };
+    let box_ = st::bounds(&[st::outline(&st::M3::identity(), img.h, img.w, cp.projection, cp.f, cq, cp.lens(0), 24)]);
+    let (out, _) = st::compose(&[&img], &[st::M3::identity()], box_, &cp, &[1.0], &[1.0], &[(img.h, img.w)], false);
+    assert!(out.w > img.w, "the undistorted photo is wider ({} vs {})", out.w, img.w);
+}
+
+#[test]
+fn auto_horizon_levels_a_tilted_panorama() {
+    use st::horizon;
+    // A horizon 2° above eye level, seen by a tripod that leaned 5° forward and 3° to the side.
+    let tilt = rot([1.0, 0.0, 0.0], 5.0) * rot([0.0, 0.0, 1.0], -3.0);
+    let world = |az: f64, el: f64| V3::new(el.to_radians().cos() * az.to_radians().sin(), -el.to_radians().sin(), el.to_radians().cos() * az.to_radians().cos());
+    for (proj, span) in [(st::Projection::Cylindrical, 120.0), (st::Projection::Spherical, 360.0), (st::Projection::Mercator, 200.0)] {
+        let dirs: Vec<V3> = (0..60).map(|k| tilt * world(-span / 2.0 + span * k as f64 / 59.0, 2.0)).collect();
+        let (p, r, before, after) = horizon::level(&dirs, proj, 0.0, 0.0, 0.0).unwrap();
+        println!("{proj:?} {span}°: pitch {p:.2}, roll {r:.2}; spread {before:.2}° → {after:.4}°");
+        assert!(before > 1.0 && after < 0.02, "{proj:?}: spread {before} → {after}");
+        // Straight in the picture: every point at the same v.
+        let f = 1000.0;
+        let vs: Vec<f64> = dirs.iter().filter_map(|d| horizon::to_output(d, proj, f, 0.0, p, r)).map(|q| q[1]).collect();
+        let (lo, hi) = vs.iter().fold((f64::MAX, f64::MIN), |(a, b), &v| (a.min(v), b.max(v)));
+        assert!(hi - lo < 0.5, "{proj:?}: v from {lo} to {hi}");
+    }
+    // Rectilinear: straight only at eye level, so the horizon ends on the middle line.
+    let dirs: Vec<V3> = (0..30).map(|k| tilt * world(-40.0 + 80.0 * k as f64 / 29.0, 0.0)).collect();
+    let (p, r, _, after) = horizon::level(&dirs, st::Projection::Rectilinear, 0.0, 0.0, 0.0).unwrap();
+    assert!(after < 0.02, "rectilinear spread {after}");
+    for d in &dirs {
+        let q = horizon::to_output(d, st::Projection::Rectilinear, 1000.0, 0.0, p, r).unwrap();
+        assert!(q[1].abs() < 0.5, "rectilinear horizon at v = {}", q[1]);
+    }
+    assert!(horizon::supported(st::Projection::Mercator) && !horizon::supported(st::Projection::LittlePlanet) && !horizon::supported(st::Projection::Tunnel));
+
+    // Finding it: bright sky over dark ground with a wavy horizon and a "tree".
+    let (h, w) = (300usize, 900usize);
+    let truth = |x: f64| 150.0 + 30.0 * (x / w as f64 * std::f64::consts::TAU).sin();
+    let mut rng = ChaCha8Rng::seed_from_u64(9);
+    let img = Img::from_vec(h, w, (0..h * w).map(|k| {
+        let (y, x) = ((k / w) as f64, (k % w) as f64);
+        let tree = (x - 400.0).abs() < 15.0 && y > truth(x) - 60.0;
+        let v = if y < truth(x) && !tree { 0.30 - 0.0003 * y } else { 0.04 };
+        let v = (v + 0.01 * randn(&mut rng)) as f32;
+        [v, v, v]
+    }).collect());
+    let pts = horizon::find_horizon(&img, None);
+    assert!(pts.len() > 100, "{} points", pts.len());
+    let (curve, spread, wts) = horizon::fit_curve(&pts, 4).unwrap();
+    let err: Vec<f64> = (0..w).step_by(10).map(|x| (curve.at(x as f64) - truth(x as f64)).abs()).collect();
+    let worst = err.iter().copied().fold(0.0, f64::max);
+    // The points kept lie on the true horizon (not on the tree).
+    let kept: Vec<&st::Pt> = pts.iter().zip(&wts).filter(|(_, &w)| w > 0.5).map(|(p, _)| p).collect();
+    let off = kept.iter().map(|p| (p[1] - truth(p[0])).abs()).fold(0.0, f64::max);
+    println!("horizon found: {} points ({} kept), spread {spread:.1} px, curve within {worst:.1} px, kept points within {off:.1} px", pts.len(), kept.len());
+    assert!(worst < 12.0, "curve off by {worst} px");
+    assert!(off < 5.0 && kept.len() > pts.len() * 3 / 4, "kept {} points, off by {off} px", kept.len());
+}
+
+#[test]
+fn medians_survive_values_that_are_not_numbers() {
+    // A NaN must not stop the sort (Rust panics on a comparison that is not a total order).
+    let mut v: Vec<f32> = (0..40).map(|k| if k % 7 == 0 { f32::NAN } else { k as f32 }).collect();
+    let m = panostitch::image::median(&mut v);
+    assert!(m.is_finite(), "median {m}");
+    let m2 = panostitch::image::median_f64((0..40).map(|k| if k % 5 == 0 { f64::NAN } else { k as f64 }));
+    assert!(m2.is_finite(), "median {m2}");
+}
+
+#[test]
+fn a_photo_of_the_zenith_fills_the_top_of_a_spherical_panorama() {
+    // A camera looking straight up (and one straight down): in a spherical (or
+    // cylindrical) panorama its outline goes round the pole, and the cap
+    // between its edge and the pole must be rendered too (it was left empty).
+    let (h, w, f) = (300usize, 300usize, 250.0);
+    let c = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+    let img = smooth_scene(h, w, 4).map(|p| [p[0] + 0.1, p[1] + 0.1, p[2] + 0.1]);
+    for (proj, up) in [(st::Projection::Spherical, 90.0), (st::Projection::Spherical, -90.0), (st::Projection::Mollweide, 90.0), (st::Projection::TransverseCylindrical, 0.0)] {
+        // Pointing at the pole: up/down for the others, sideways for the transverse projection.
+        let r = if proj == st::Projection::TransverseCylindrical { rot([0.0, 1.0, 0.0], 90.0) } else { rot([1.0, 0.0, 0.0], up) };
+        let g = st::kmat(f, c) * r.transpose() * st::inv(&st::kmat(f, c));
+        let cp = st::ComposeParams { projection: proj, f, c, blend: st::Blend::Average, scale: 0.5, ..Default::default() };
+        let o = st::outline(&g, h, w, proj, f, c, cp.lens(0), 24);
+        let b = st::bounds(&[o]);
+        let (out, cov) = st::compose(&[&img], &[g], b, &cp, &[1.0], &[1.0], &[(h, w)], true);
+        let cov = cov.unwrap();
+        // The rows (columns, transverse) at the pole side are covered across.
+        // The pole's side: the one where the box reaches the projection's limit.
+        let (la, lb) = (4.0 * f, if proj == st::Projection::Spherical { std::f64::consts::FRAC_PI_2 * f } else { 2f64.sqrt() * f });
+        let (lines, len, at): (usize, usize, Box<dyn Fn(usize, usize) -> bool>) = if proj == st::Projection::TransverseCylindrical {
+            assert!(b.0 <= -la + 1.0 || b.1 >= la - 1.0, "{proj:?}: box {b:?} does not reach the pole");
+            let left = b.0 <= -la + 1.0;
+            (out.w, out.h, Box::new(move |line, k| cov.v[k * cov.w + if left { line } else { cov.w - 1 - line }]))
+        } else {
+            assert!(b.2 <= -lb + 1.0 || b.3 >= lb - 1.0, "{proj:?}: box {b:?} does not reach the pole");
+            let top = b.2 <= -lb + 1.0;
+            (out.h, out.w, Box::new(move |line, k| cov.v[(if top { line } else { cov.h - 1 - line }) * cov.w + k]))
+        };
+        let edge: Vec<f64> = (0..3.min(lines)).map(|l| (0..len).filter(|&k| at(l, k)).count() as f64 / len as f64).collect();
+        println!("{proj:?} {up}: box {b:?}, pole side covered {edge:.2?}");
+        // Mollweide's pole is a single point: only its middle is covered there.
+        let need = if proj == st::Projection::Mollweide { 0.02 } else { 0.95 };
+        assert!(edge.iter().all(|&e| e >= need), "{proj:?} {up}: the pole side is covered only {edge:?}");
+    }
+}
+
+#[test]
+fn sky_grid_mapping_and_names() {
+    use st::sky_grid;
+    // Names: bright stars and the Messier objects, with sizes for the deep-sky ones.
+    let l = sky_grid::labels();
+    assert!(l.iter().filter(|x| x.star).count() > 150 && l.iter().filter(|x| !x.star).count() > 100);
+    let vega = l.iter().find(|x| x.name == "Vega").expect("Vega");
+    let (ra, dec) = st::solve::radec(&vega.dir);
+    assert!((ra - 279.23).abs() < 0.1 && (dec - 38.78).abs() < 0.1, "Vega at {ra}, {dec}");
+    let m31 = l.iter().find(|x| x.name.starts_with("M31 ")).expect("M31");
+    assert!(m31.size > 2.0, "M31 {}°", m31.size);
+    // The rotation from pairs of sky and panorama directions, with a little noise.
+    let r = rot([0.2, 0.9, -0.4], 73.0);
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
+    let pairs: Vec<(V3, V3)> = random_sky(300, 8).into_iter().map(|d| (d, r * d + V3::new(randn(&mut rng), randn(&mut rng), randn(&mut rng)) * 1e-3)).collect();
+    let (fit, spread) = sky_grid::fit(&pairs).unwrap();
+    assert!((fit - r).norm() < 2e-3 && spread < 0.15, "spread {spread}°");
+    assert_eq!(sky_grid::ra_text(50.0), "3h20m");
+    assert_eq!(sky_grid::ra_text(90.0), "6h");
+    assert_eq!(sky_grid::dec_text(-12.5), "−12.5°");
+    assert_eq!(sky_grid::dec_text(30.0), "+30°");
+    assert!(sky_grid::grid_step(3.0) == 5.0 && sky_grid::ra_step(3.0) == 5.0);
 }

@@ -5,8 +5,10 @@ Rust. Joins overlapping photos (JPEG, TIFF, PNG, camera RAW, FITS, XISF) into a
 panorama or mosaic, and stacks star images (aligned stars or star trails) with
 calibration frames and sky/ground separation.
 
-The Julia version is on the `main` branch. This branch (`v0.3`) is the Rust
-rewrite: one small native program, no runtime to install. Downloads for Linux
+It is one small native program written in Rust, with no runtime to install.
+The `main` branch holds the latest release; development happens on the
+branch of the next version (e.g. `v0.5`). The first version, written in
+Julia, is kept on the `julia` branch. Downloads for Linux
 and Windows are on the Releases page (on macOS, build from source as below); `CHANGELOG.md` lists what changed.
 
 ## Running
@@ -59,4 +61,11 @@ type paths into the path box.
 
 PanoStitch is free software under the GNU General Public License, version 3
 or later (see `LICENSE`). The DejaVu fonts in `assets/fonts` have their own
-free license (`assets/fonts/LICENSE-DejaVu.txt`).
+free license (`assets/fonts/LICENSE-DejaVu.txt`). The star catalogue of the plate
+solver (`assets/stars/stars.bin`: positions and magnitudes of the Hipparcos and
+Tycho-2 stars to magnitude 8, ESA) is made from the star data of KStars
+(GPL-2.0-or-later) by `tools/make_star_catalog.py`. The names on the sky grid
+(`assets/stars/labels.tsv`, made by `tools/make_sky_labels.py`) come from
+KStars' star names and from OpenNGC by Mattia Verga
+(https://github.com/mattiaverga/OpenNGC, CC-BY-SA-4.0): the Messier objects
+and other bright deep-sky objects, with their positions and sizes.

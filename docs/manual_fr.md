@@ -118,7 +118,7 @@ Remarques :
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -204,7 +204,7 @@ valeur peut encore être changée ensuite.
 | Préréglage | Pour | Réglages principaux |
 |---|---|---|
 | **paysage de jour** | panoramas de jour, appareil tourné sur place | débruitage léger, homographie, cylindrique |
-| **astro / paysage de nuit** | ciels nocturnes, Voie lactée sur un paysage | fort débruitage, appariement plus souple, sphérique, +1 EV (puis **Exposition automatique**), seuil des coins plus haut (moins de faux coins dans le bruit) |
+| **astro / paysage de nuit** | ciels nocturnes, Voie lactée sur un paysage | fort débruitage, appariement plus souple, sphérique, seuil des coins plus haut (moins de faux coins dans le bruit). Luminosité : **Exposition automatique** ou **Exposition (EV)** ; les préréglages n'y touchent pas |
 | **mosaïque de ciel profond** | mosaïques de champs stellaires au télescope, p. ex. FITS | peu de débruitage (les étoiles sont minuscules), modèle de similitude (décalage + rotation de champ), pas d'affinage, rectilinéaire ; utilisez **Étirement automatique** |
 | **macro / microscope** | une lame ou une platine déplacée sous un appareil fixe | modèle de translation (les images ne font que se décaler), pas d'affinage, rectilinéaire |
 | **scan / document plat** | cartes, tableaux, documents photographiés par morceaux | modèle affine, pas d'affinage, rectilinéaire |
@@ -278,6 +278,9 @@ géométrique (les *inliers*).
 | **Inliers min.** | 20 | Nombre minimal d'inliers pour qu'une paire compte comme un vrai recouvrement. |
 | **Modèle** | homographie | Comment une image se projette sur une autre, voir plus bas. |
 | **affiner** | activé | Affinage global, voir plus bas. |
+| **plate solving des photos du ciel** | activé | Retrouve les photos du ciel dans un catalogue d'étoiles, voir plus bas. |
+| **Distorsion de l'objectif** | Barillet / coussinet (k1) | Ce que l'affinage ajuste de la distorsion de l'objectif, voir plus bas. |
+| **chaque image sa propre distorsion** | désactivé | Chaque photo a sa propre distorsion d'objectif, voir plus bas. |
 
 **Quand une paire compte comme un vrai recouvrement :** il lui faut au moins
 *Inliers min.* inliers, une nette majorité de ses correspondances doit
@@ -306,6 +309,20 @@ automatiquement**, car ce sont en général de fausses correspondances ou
 quelque chose qui a bougé. La ligne d'état indique combien ont été rejetées et
 l'**erreur typique par paire** (1–3 px, c'est bien).
 
+**Distorsion de l'objectif.** **Distorsion de l'objectif** fixe ce que
+l'affinage ajuste en plus des rotations : **Désactivé (rotations seules)** pour
+les objectifs sans distorsion (ou des photos déjà corrigées) ; **Barillet /
+coussinet (k1)**, par défaut, pour la simple courbure des lignes droites ;
+**Polynomiale, en moustache (k1, k2)** pour la distorsion ondulée de nombreux
+grands-angles, où les lignes se courbent dans un sens au centre et dans
+l'autre dans les coins (k1·r² + k2·r⁴, comme dans Hugin et PTGui). Avec
+**chaque image sa propre distorsion**, chaque photo a ses propres valeurs,
+gardées proches des valeurs communes là où ses points en disent peu : pour un
+zoom qui a glissé entre les prises, ou des photos de deux objectifs. La
+rotation de chaque photo est toujours affinée séparément. La ligne d'état
+indique les valeurs trouvées. Si l'erreur typique par paire baisse nettement,
+le modèle plus riche en vaut la peine ; sinon, gardez le plus simple.
+
 **Ciels de nuit : appariement par les étoiles.** Les points de coin apparient
 rarement des images qui ne montrent que du ciel : chaque étoile ressemble à
 toutes les autres. Quand les points d'une paire échouent, ce sont donc ses
@@ -318,6 +335,32 @@ recouvrement, dont une bonne part correspond, sont acceptées. Quand les
 appareils visent très loin l'un de l'autre (une rangée vers le haut, une vers
 le bas), les coins éloignés d'une photo sont derrière l'autre appareil ; seule
 la partie couverte par les correspondances est alors jugée.
+
+**Ciels nocturnes : plate solving.** Les photos qui ne montrent (presque) que
+du ciel (95 % ou plus, tel que le programme le mesure) sont retrouvées dans un
+catalogue d'étoiles fourni avec le programme (Hipparcos et Tycho-2, environ
+42 000 étoiles jusqu'à la magnitude 8) : leurs étoiles sont identifiées, sans
+aucune indication de la direction de l'appareil. Deux telles photos qui se
+chevauchent sont alors reliées par les étoiles identifiées dans les deux, même
+si le recouvrement est petit ou si l'appariement a échoué, et une paire mal
+appariée est corrigée. Le catalogue mesure aussi exactement la focale de chaque
+photo, de sorte qu'un zoom qui a glissé entre des prises de même focale EXIF
+est lui aussi pris en compte. La liste des images marque les photos trouvées
+d'un ★ ; la vue de l'image donne le centre (ascension droite, déclinaison), le
+nombre d'étoiles identifiées et le champ, et entoure ces étoiles en bleu. Les
+photos avec du paysage restent à l'autre appariement. Moins d'une seconde par
+photo ; **plate solving des photos du ciel** le désactive.
+
+**Grille du ciel.** Avec des photos retrouvées dans le catalogue d'étoiles,
+**⊕ Grille du ciel** au-dessus de la vue trace les coordonnées du ciel sur le
+panorama, comme la grille céleste de Siril : lignes d'ascension droite et de
+déclinaison avec leurs valeurs, et cercles avec les noms des étoiles les plus
+brillantes, des objets de Messier et d'autres objets du ciel profond brillants
+(davantage en zoomant ; seulement là où une photo montre le ciel). Elle repose
+sur toutes les étoiles identifiées sur les photos et suit donc la projection,
+le tangage et le roulis du panorama ; là où le ciel a tourné entre les prises,
+elle est approximative (le coin de la vue indique sa précision). Elle n'est
+dessinée que dans la vue, pas enregistrée.
 
 **Un zoom qui a glissé.** Tourné vers le haut ou le bas, une bague de zoom peut
 tourner sous son propre poids entre les prises. Avec des fichiers RAW, la
@@ -393,12 +436,43 @@ Voir [Projections](#7-projections) pour l'aspect de chacune.
 | **Tangage (°)** | Incline tout le panorama vers le haut ou le bas. Servez-vous-en pour **redresser un horizon courbé** (par exemple si l'appareil visait vers le bas). |
 | **Roulis (°)** | Fait pivoter tout le panorama. Servez-vous-en pour mettre de niveau un horizon penché. |
 | *Réglage fin* | Lacet, tangage et roulis ont chacun un curseur, un champ numérique et **◀ ▶**. Les curseurs de tangage et de roulis sont fins près de 0° (là où sont en général les corrections) et grossiers plus loin. Faites glisser lentement le champ numérique pour 0,02° par pixel, ou double-cliquez et tapez. **◀ ▶** avancent de 0,1° (avec Maj, de 1°). |
+| **⟷ Horizon auto** | Trouve l'horizon dans l'aperçu et règle le tangage et le roulis pour qu'il soit droit (le lacet reste). Voir plus bas. |
+| **✎ Horizon à la main** | Cliquez vous-même des points le long de l'horizon, puis **✔ Redresser l'horizon**. Voir plus bas. |
 | **Réinitialiser focale / lacet / tangage / roulis** | Remet ces quatre curseurs à leurs valeurs par défaut. |
 
 Le titre de la vue indique la taille du panorama, la focale en pixels, le
 champ de l'image de référence et l'erreur d'alignement typique.
 
 Ces commandes mettent l'aperçu à jour aussitôt (dès qu'un aperçu existe).
+
+**Redresser l'horizon automatiquement.** Un panorama sort rarement avec un
+horizon droit : si la photo de référence visait un peu vers le haut ou le bas,
+l'horizon se courbe en vague ou en U, et un trépied pas de niveau l'incline.
+**⟷ Horizon auto** trouve le bord du ciel dans l'aperçu (où le ciel rencontre
+le sol, colonne par colonne), le lisse par une courbe du 4e ordre (arbres
+isolés, collines et lampadaires comptent moins) et tourne la vue (**tangage**
+et **roulis** ; le **lacet** reste) jusqu'à ce que tous ses points soient à la
+même hauteur. Sur la sphère c'est exact : un horizon de niveau est une droite
+à travers un panorama cylindrique, sphérique, Mercator, Hammer ou Mollweide ;
+en rectiligne il est placé sur la ligne du milieu, le seul endroit où il y est
+droit. L'horizon trouvé est tracé en vert (avec les **superpositions**), on le
+voit devenir droit ; la ligne d'état dit de combien il était décalé. Annuler
+(Ctrl+Z) rend les anciens angles. Le bord du ciel est la silhouette, pas
+toujours le vrai horizon : dans un panorama de moins de 90° une pente du
+terrain ressemblerait à une inclinaison, un roulis de plus de 8° n'y est donc
+pas appliqué.
+
+**Marquer l'horizon à la main.** Là où la silhouette n'est pas l'horizon
+(collines, ville, brouillard), **✎ Horizon à la main** permet de le marquer :
+cliquez 4 points ou plus le long de l'horizon sur le panorama, répartis sur sa
+longueur (clic droit retire le plus proche). Une courbe passe par eux (du 4e
+ordre ; par 4 points, du 3e) ; **✔ Redresser l'horizon** (ou Entrée) le
+redresse comme ci-dessus, Échap annule.
+
+Les deux ne sont proposés que là où un horizon de niveau peut être droit :
+rectiligne, cylindrique, sphérique, Mercator, Hammer et Mollweide, pas pour
+petite planète, tunnel, fisheye, stéréographique ni les projections
+transverses.
 
 ### 5.5 Étape 4 : composition
 
@@ -416,7 +490,9 @@ Ces commandes mettent l'aperçu à jour aussitôt (dès qu'un aperçu existe).
 | **Annuler le recadrage** | Retire le recadrage. Il est aussi retiré automatiquement quand vous changez quoi que ce soit qui déplace les images (projection, focale, lacet, tangage, roulis, déplacements, appariement). |
 | **✂ Recadrer** (au-dessus de la vue) | Délimitez la partie du panorama à garder : tracez un cadre, ajustez-le par ses bords ou ses coins, faites-le glisser de l'intérieur pour le déplacer, puis **✂ Recadrage : terminé** (Échap annule). Seule cette partie est calculée et enregistrée : un grand panorama demande moins de mémoire, et l'onglet Post-traitement n'est pas nécessaire pour un simple recadrage. Il s'annule comme le recadrage automatique et disparaît quand la géométrie change. |
 | **⬇ Enregistrer et post-traiter…** (au-dessus de la vue) | Enregistre le panorama, puis l'ouvre dans l'onglet Post-traitement. |
+| **◧ Remplir les zones vides** (au-dessus de la vue) | Remplit les coins et bords vides d'un ciel et d'un sol inventés (remplissage automatique), voir plus bas. |
 | **Décaler la sélection ← ↑ ↓ →** | Déplace l'image courante d'un pixel d'aperçu (voir plus bas). |
+| **Corriger l'image choisie** | Tourne à la main l'image choisie autour de son propre centre et ajoute à sa distorsion d'objectif (k1, k2), voir plus bas. |
 
 Dans la vue **Panorama**, le contour de chaque image est dessiné et numéroté :
 
@@ -438,6 +514,18 @@ bouge avec les images qui y sont rattachées plus loin de la référence (le lon
 des liens jaunes). L'image de référence ne bouge pas ; utilisez le tangage et
 le roulis pour tout déplacer.
 
+**Corriger une image.** **Corriger l'image choisie** (sous les boutons de
+décalage) tourne l'image choisie autour de son propre centre (**Rotation
+(°)**), pour une photo un peu tournée par rapport à ses voisines, et ajoute à
+sa distorsion d'objectif : **Distorsion k1 +** courbe les lignes droites
+(− barillet, + coussinet), **Distorsion k2 +** agit surtout dans les coins ; de
+signe opposé à k1, il corrige la distorsion en moustache. Les valeurs trouvées
+par l'affinage sont affichées en dessous. Les corrections s'appliquent à
+toutes les images choisies ; **Distorsion pour toutes les images** donne à
+chaque image les mêmes k1 et k2 (un seul objectif), **Réinitialiser** les
+supprime. Elles peuvent être annulées, sont enregistrées dans le projet, et un
+nouvel affinage les conserve.
+
 **Masques d'image source.** Là où le fondu choisit la mauvaise photo (un arbre
 ou une personne qui a bougé, une voiture, un fantôme), indiquez-lui laquelle
 prendre : **✐ Masques d'image** au-dessus de la vue. Maj+clic sur le panorama
@@ -450,6 +538,19 @@ masques sont affichés teintés et numérotés, l'aperçu se met à jour après 
 trait, et le bord est doux, si bien que le changement est sans couture. Les
 masques appartiennent à l'image (ils restent en place quand vous changez la
 projection ou le recadrage), s'annulent et sont enregistrés dans le projet.
+
+**Remplir les zones vides (remplissage automatique).** **◧ Remplir les zones
+vides** au-dessus de la vue remplit les parties du rectangle qu'aucune photo ne
+couvre (coins et bords vides ; dans le cadre de recadrage s'il y en a un) d'un
+contenu inventé qui prolonge les alentours, comme le fait Microsoft ICE : le
+ciel continue avec sa luminosité et sa couleur, avec des étoiles et du grain
+copiés des photos, le sol avec son herbe. Chaque petite partie de la zone vide
+prend le morceau le plus semblable des photos, du grossier au fin, et en taille
+réelle le détail photographié y est recopié. L'aperçu le montre et
+l'enregistrement le fait en taille réelle (le message indique la part
+inventée). Cela convient à un ciel un peu court en haut ou à un bord irrégulier
+; une grande zone vide devient un ciel plausible mais inventé. C'est inventé :
+vérifiez avant de publier, et dites-le là où cela compte (concours, science).
 
 ### 5.6 Étape 5 : étirement
 
@@ -533,8 +634,8 @@ points de correspondance enregistrés : environ 50 ko par image.
 | Action | Souris | Clavier | Bouton |
 |---|---|---|---|
 | Déplacer | glisser avec le bouton **gauche** | flèches (vues Image et Paire) | |
-| Zoomer | molette vers le haut | `+` | **Zoom +** |
-| Dézoomer | molette vers le bas | `-` | **Zoom -** |
+| Zoomer | molette vers le haut | `+` | **+** |
+| Dézoomer | molette vers le bas | `-` | **−** |
 | Réinitialiser le zoom | | `F`, `0` ou `Début` | **Ajuster** |
 | Sélectionner une image (vue Panorama) | clic dans son contour | | |
 | Afficher / masquer contours, numéros, liens | | | interrupteur **superpositions** |
@@ -855,7 +956,7 @@ enregistré avec sa taille, ou ce qui n'a pas marché. × le ferme.
 
 | Entrée | Quoi photographier |
 |---|---|
-| **Brutes** (*Images d'étoiles* en mode simple) | Les prises du ciel : même focale, même ouverture, même exposition. Le RAW est préférable ; TIFF, FITS ou XISF seulement si les données sont encore linéaires (non retouchées). **Unifier l'exposition** égalise des images prises dans d'autres conditions. |
+| **Brutes** (*Images d'étoiles* en mode simple) | Les prises du ciel : même focale, même ouverture, même exposition. Le RAW est préférable ; TIFF, FITS ou XISF seulement si les données sont encore linéaires (non retouchées). **Normalisation** et **Retirer le gradient de chaque image** : voir sous le tableau. |
 | **Image de référence** | L'image sur laquelle les autres sont alignées. Vide = la brute du milieu. Choisissez-en une autre dans la liste à côté de **Image de référence**, ou choisissez une brute dans sa liste et cliquez sur **Utiliser comme référence**. |
 | **Darks** (*Images de bruit* en mode simple) | Images noires : bouchon sur l'objectif, même ISO et même temps de pose, prises juste avant ou après les images d'étoiles. Enlèvent le bruit thermique et les pixels chauds. |
 | **Offsets** (*Images d'offset* en mode simple) | Pose la plus courte, bouchon sur l'objectif, même ISO. |
@@ -864,8 +965,29 @@ enregistré avec sa taille, ou ce qui n'a pas marché. × le ferme.
 | **Image de premier plan** | Facultatif : une prise du sol depuis la même position du trépied – à l'heure bleue, en pose longue ou à ISO bas. Elle remplace le premier plan empilé (bruité, sombre) sous la zone du ciel. **Accorder la luminosité au sol empilé** l'ajuste au sol empilé ; **Exposition (EV)** l'éclaircit ou l'assombrit à partir de là. Nécessite une zone du ciel. |
 | **Sortie** | Se règle sur la ligne **Enregistrer sous** : nom, type et dossier. `.tif` / `.png` (16 bits), `.jpg` (8 bits), ou `.fits` / `.xisf` (virgule flottante 32 bits, linéaire, pour la suite du traitement dans Siril, PixInsight, etc.). |
 
+**Photos en portrait** (appareil tourné) : elles sont empilées droites. Après
+les darks et les flats (qui ont besoin de l'orientation du capteur), chaque image
+est tournée comme l'indique l'appareil pour l'image de référence. L'aperçu, la
+région de ciel que vous tracez et l'empilement enregistré sont droits. Un projet
+ou un réglage enregistré avant la version 0.4.1 avec une région de ciel tracée à
+la main garde l'ancienne orientation (couchée), pour que la ligne tracée
+corresponde toujours.
+
 Toutes les images de calibration sont facultatives. Même quelques darks
 aident beaucoup à ISO élevé.
+
+**La normalisation** ramène le ciel de chaque image à celui de l'image de
+référence avant de combiner les images : *Additive* décale le niveau de chaque
+image (pour un fond qui change : pollution lumineuse, la Lune, le crépuscule),
+*Multiplicative* le met à l'échelle (pour d'autres expositions ou nuits ;
+l'ancien *Unifier l'exposition*), *Additive avec mise à l'échelle* le décale et
+le met à l'échelle de la dispersion de l'image de référence, comme Siril le
+fait par défaut pour l'empilement avec rejet. **Retirer le gradient de chaque
+image** ajuste avant l'empilement un plan (un gradient du premier ordre, comme
+*subsky 1* de Siril) au ciel de chaque image et le retire, en gardant son
+niveau : pour une pollution lumineuse qui change d'une image à l'autre, que
+l'image empilée ne pourrait plus perdre. Les étoiles et les objets sont exclus
+de l'ajustement ; sur les paysages, seule la région du ciel est corrigée.
 
 **Les listes de fichiers :** chaque groupe montre ses fichiers dans une liste
 à côté de son nom, des centaines de brutes ne demandent donc aucun défilement.

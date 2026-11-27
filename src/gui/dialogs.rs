@@ -29,8 +29,18 @@ pub fn remember_folder(path: &str) {
     }
 }
 
+/// Whether other programs (file dialogs, the file manager, the browser) may be
+/// started: not when PANOSTITCH_NO_EXTERNAL is set (headless tests that click
+/// around, so no window opens on the screen).
+pub fn external_allowed() -> bool {
+    std::env::var_os("PANOSTITCH_NO_EXTERNAL").is_none()
+}
+
 /// Show a file in the system's file manager (its folder; the file selected where possible).
 pub fn show_in_folder(path: &str) {
+    if !external_allowed() {
+        return;
+    }
     let p = std::path::Path::new(path);
     let dir = if p.is_dir() { p.to_path_buf() } else { p.parent().map(|d| d.to_path_buf()).unwrap_or_default() };
     let mut c = if cfg!(windows) {
@@ -68,6 +78,9 @@ pub fn show_in_folder(path: &str) {
 
 fn tool() -> Option<&'static str> {
     use crate::io::raw::which;
+    if !external_allowed() {
+        return None;
+    }
     if cfg!(windows) {
         return ["powershell", "pwsh"].into_iter().find(|t| which(t).is_some());
     }
@@ -80,7 +93,8 @@ fn tool() -> Option<&'static str> {
 }
 
 fn run(mut c: Command) -> Option<String> {
-    let out = c.output().ok()?;
+    // The dialog shows; the PowerShell that draws it gets no console window.
+    let out = crate::sys::no_console(&mut c).output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (out.status.success() && !s.is_empty()).then_some(s)
 }

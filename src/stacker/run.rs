@@ -176,9 +176,12 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         ),
     );
 
+    // Upright like the base frame (after the calibration: darks and flats are
+    // in the sensor's orientation, and cameras tag them inconsistently).
+    let rot = if cfg.upright { crate::io::orientation_code(&infos[base_i].path) } else { 1 };
     // Load, calibrate and measure every frame (the base first: it fixes the size).
     let prepare = |fi: &FrameInfo| -> Result<Img, String> {
-        let mut img = calibrate(load(&fi.path)?, &cal)?;
+        let mut img = crate::io::orient(calibrate(load(&fi.path)?, &cal)?, rot);
         if cfg.dynamic_noise {
             let hot = dynamic_hot_pixels(&img);
             fix_pixels(&mut img, &hot);
@@ -204,9 +207,12 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         note(&mut log, format!("Sky region ({}): {pct} % of the frame", cfg.sky.mode.name()));
     }
     let store = FrameStore::new(h, w, cand.len(), &dir)?;
-    let measure = |fi: &mut FrameInfo, k: usize, img: Img| -> Result<(), String> {
+    let measure = |fi: &mut FrameInfo, k: usize, mut img: Img| -> Result<(), String> {
         if (img.h, img.w) != (h, w) {
             return Err(format!("{} is {}×{}, the base image {}×{}.", basename(&fi.path), img.w, img.h, w, h));
+        }
+        if cfg.frame_gradient {
+            remove_frame_gradient(&mut img, &wt);
         }
         fi.detected = detect_stars(&img, &wt);
         let good: Vec<&Star> = fi.detected.iter().filter(|s| s.peak < 0.9).take(30).collect(); // bright, unsaturated
@@ -223,6 +229,10 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
             crate::image::median_of(idx.iter().map(|&i| img.px[i][1])),
             crate::image::median_of(idx.iter().map(|&i| img.px[i][2])),
         ];
+        for c in 0..3 {
+            let l = fi.level[c];
+            fi.spread[c] = 1.4826 * crate::image::median_of(idx.iter().map(|&i| (img.px[i][c] - l).abs()));
+        }
         fi.background = crate::image::luminance(fi.level) as f64;
         fi.light = fi.detected.iter().take(20).map(|s| s.flux).sum(); // made relative below
         store.store_shared(k, &img);
@@ -367,15 +377,24 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
         );
         gaps = Some(g);
     }
-    if cfg.unify_exposure {
-        let bl = infos[base_i].level;
+    if cfg.normalize != Normalize::Off {
+        // To the base frame's sky: its level (additive: shifted, multiplicative:
+        // scaled) and, with scaling, also its spread, so that rejection compares like with like.
+        let (bl, bs) = (infos[base_i].level, infos[base_i].spread);
         for &(_, i) in &frames_idx {
-            let l = infos[i].level;
-            infos[i].gain = [
-                if l[0] > 0.0 { bl[0] / l[0] } else { 1.0 },
-                if l[1] > 0.0 { bl[1] / l[1] } else { 1.0 },
-                if l[2] > 0.0 { bl[2] / l[2] } else { 1.0 },
-            ];
+            let (l, sp) = (infos[i].level, infos[i].spread);
+            for c in 0..3 {
+                let (g, o) = match cfg.normalize {
+                    Normalize::Multiplicative => (if l[c] > 0.0 { bl[c] / l[c] } else { 1.0 }, 0.0),
+                    Normalize::Additive => (1.0, bl[c] - l[c]),
+                    _ => {
+                        let g = if sp[c] > 0.0 { bs[c] / sp[c] } else { 1.0 };
+                        (g, bl[c] - l[c] * g)
+                    }
+                };
+                infos[i].gain[c] = g;
+                infos[i].offset[c] = o;
+            }
         }
     }
     let mut kind = cfg.distortion;
@@ -385,7 +404,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
             let med = median_f64(frames_idx.iter().filter(|&&(_, i)| i != base_i).map(|&(_, i)| infos[i].matched as f64));
             kind = if med >= 80.0 { Distortion::Complex } else { Distortion::Lens };
         }
-        progress(&format!("Correcting distortion ({})…", kind.name().to_lowercase()))?;
+        progress(&format!("Correcting distortion ({})…", kind.name()))?;
         let mut sub: Vec<FrameInfo> = frames_idx.iter().map(|&(_, i)| infos[i].clone()).collect();
         let bpos = frames_idx.iter().position(|&(_, i)| i == base_i).unwrap_or(0);
         let k1 = correct_distortion(&mut sub, bpos, kind == Distortion::Complex, h, w);
@@ -405,7 +424,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
     let mut fg: Option<Img> = None;
     if usefg {
         progress("Loading the foreground image…")?;
-        fg = Some(load_foreground(&cfg, load, h, w)?);
+        fg = Some(load_foreground(&cfg, load, h, w, rot)?);
     }
     let frames: Vec<&FrameInfo> = frames_idx.iter().map(|&(_, i)| &infos[i]).collect();
     let ks: Vec<usize> = frames_idx.iter().map(|&(k, _)| k).collect();
@@ -434,9 +453,9 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
                 progress(&format!("Writing aligned frame {}/{}", n + 1, frames.len()))?;
                 let stem = Path::new(&fi.path).file_stem().and_then(|s| s.to_str()).unwrap_or("frame").to_string();
                 let p = outdir.join(format!("{stem}{ext}")).to_string_lossy().to_string();
-                let g = fi.gain;
+                let (g, o) = (fi.gain, fi.offset);
                 let mut img = resample(&store, k, &fi.warp, cfg.interpolation == Interpolation::Lanczos);
-                img.map_inplace(move |c| [c[0] * g[0], c[1] * g[1], c[2] * g[2]]);
+                img.map_inplace(move |c| [c[0] * g[0] + o[0], c[1] * g[1] + o[1], c[2] * g[2] + o[2]]);
                 save_panorama(&p, &img)?;
                 saved.push(p);
             }
@@ -497,7 +516,7 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
                 Mode::AlignOnly => "aligned frames written".to_string(),
             },
             if cfg.timelapse.0 && mode != Mode::AlignOnly { format!("; time-lapse of every {} frames", cfg.timelapse.1) } else { String::new() },
-            if cfg.unify_exposure { "; exposure unified" } else { "" }
+            match cfg.normalize { Normalize::Off => String::new(), n => format!("; frames normalised ({})", n.name().to_lowercase()) } + if cfg.frame_gradient { "; each frame's gradient removed" } else { "" }
         ),
     );
     let mut stacked = stacked;
@@ -559,8 +578,14 @@ pub fn stack(cfg: &StackConfig, preview: bool, progress: Progress, loader: Optio
 
 /// The frame report as a text table.
 pub fn report_text(infos: &[FrameInfo]) -> String {
+    report_text_with(infos, ["frame", "stars", "FWHM", "elong", "sky", "light", "align", "status"], &|st| st.name().to_string(), &|r| r.to_string())
+}
+
+/// `report_text` with the column names, status names and reasons in another
+/// language (the window's).
+pub fn report_text_with(infos: &[FrameInfo], head: [&str; 8], status: &dyn Fn(Status) -> String, reason: &dyn Fn(&str) -> String) -> String {
     let f = |v: f64, d: usize| if v.is_finite() { format!("{:.*}", d, v) } else { "–".to_string() };
-    let mut s = format!("{:<26}{:>6}{:>7}{:>7}{:>8}{:>7}{:>8}  status\n", "frame", "stars", "FWHM", "elong", "sky", "light", "align");
+    let mut s = format!("{:<26}{:>6}{:>7}{:>7}{:>8}{:>7}{:>8}  {}\n", head[0], head[1], head[2], head[3], head[4], head[5], head[6], head[7]);
     for fi in infos {
         let name: String = basename(&fi.path).chars().take(25).collect();
         s += &format!(
@@ -572,8 +597,8 @@ pub fn report_text(infos: &[FrameInfo]) -> String {
             f(fi.background, 4),
             f(fi.light, 2),
             f(fi.err, 2),
-            fi.status.name(),
-            if fi.reason.is_empty() { String::new() } else { format!(": {}", fi.reason) }
+            status(fi.status),
+            if fi.reason.is_empty() { String::new() } else { format!(": {}", reason(&fi.reason)) }
         );
     }
     s

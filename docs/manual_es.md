@@ -114,7 +114,7 @@ Notas:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -198,7 +198,7 @@ puede cambiar después.
 | Preajuste | Para | Ajustes principales |
 |---|---|---|
 | **paisaje de día** | panorámicas diurnas, cámara girada en el sitio | poca reducción de ruido, homografía, cilíndrica |
-| **astro / paisaje nocturno** | cielos nocturnos, Vía Láctea sobre un paisaje | mucha reducción de ruido, emparejado más tolerante, esférica, +1 EV (luego **Exposición automática**), umbral de esquinas más alto (menos esquinas falsas en el ruido) |
+| **astro / paisaje nocturno** | cielos nocturnos, Vía Láctea sobre un paisaje | mucha reducción de ruido, emparejado más tolerante, esférica, umbral de esquinas más alto (menos esquinas falsas en el ruido). Brillo: **Exposición automática** o **Exposición (EV)**; los ajustes predefinidos no lo cambian |
 | **mosaico de cielo profundo** | mosaicos de campos estelares con telescopio, p. ej. FITS | poca reducción de ruido (las estrellas son diminutas), modelo de semejanza (desplazamiento + rotación de campo), sin refinado, rectilínea; use **Estirado automático** |
 | **macro / microscopio** | un portaobjetos o una plataforma movidos bajo una cámara fija | modelo de traslación (las tomas solo se desplazan), sin refinado, rectilínea |
 | **escaneo / documento plano** | mapas, cuadros, documentos fotografiados por partes | modelo afín, sin refinado, rectilínea |
@@ -272,6 +272,9 @@ geométrico (los *inliers*).
 | **Inliers mín.** | 20 | Mínimo de inliers para que un par cuente como solape real. |
 | **Modelo** | homografía | Cómo se proyecta una imagen sobre otra, ver abajo. |
 | **refinar** | activado | Refinado global, ver abajo. |
+| **plate solving de las fotos del cielo** | activado | Encuentra las fotos del cielo en un catálogo estelar, ver abajo. |
+| **Distorsión del objetivo** | Barril / cojín (k1) | Qué ajusta el refinado de la distorsión del objetivo, ver abajo. |
+| **cada imagen su propia distorsión** | desactivado | Cada foto tiene su propia distorsión del objetivo, ver abajo. |
 
 **Cuándo un par cuenta como solape real:** necesita al menos *Inliers mín.*
 inliers, una clara mayoría de sus coincidencias debe concordar y la
@@ -299,6 +302,20 @@ solución común se **descartan automáticamente**, porque suelen ser
 coincidencias falsas o algo que se movió. La línea de estado indica cuántos se
 descartaron y el **error típico por par** (1–3 px es bueno).
 
+**Distorsión del objetivo.** **Distorsión del objetivo** fija qué ajusta el
+refinado además de las rotaciones: **Desactivado (solo rotaciones)** para
+objetivos sin distorsión (o fotos ya corregidas); **Barril / cojín (k1)**, por
+defecto, para la simple curvatura de las líneas rectas; **Polinómica, de
+bigote (k1, k2)** para la distorsión ondulada de muchos gran angulares, en la
+que las líneas se curvan hacia un lado en el centro y hacia el otro en las
+esquinas (k1·r² + k2·r⁴, como en Hugin y PTGui). Con **cada imagen su propia
+distorsión** cada foto tiene sus propios valores, mantenidos cerca de los
+comunes donde sus puntos dicen poco: para un zoom que se desplazó entre tomas
+o fotos de dos objetivos. La rotación de cada foto se refina siempre por
+separado. La línea de estado muestra los valores hallados. Si el error típico
+por par baja claramente, el modelo más rico vale la pena; si no, quédese con el
+más sencillo.
+
 **Cielos nocturnos: emparejar por las estrellas.** Los puntos de esquina rara
 vez emparejan tomas que solo muestran cielo: cada estrella se parece a todas
 las demás. Por eso, cuando fallan los puntos de un par, se comparan sus
@@ -310,6 +327,32 @@ aceptan pares con suficientes estrellas en el solapamiento y una buena parte de
 ellas coincidiendo. Cuando las cámaras apuntan muy separadas (una fila hacia
 arriba y otra hacia abajo), las esquinas lejanas de una foto quedan detrás de
 la otra cámara; ahí solo se juzga la parte que cubren las coincidencias.
+
+**Cielos nocturnos: plate solving.** Las fotos que son (casi) solo cielo (un
+95 % o más, según lo mide el programa) se encuentran en un catálogo estelar
+incluido en el programa (Hipparcos y Tycho-2, unas 42 000 estrellas hasta
+magnitud 8): se identifican sus estrellas, sin ninguna pista de adónde apuntaba
+la cámara. Dos de esas fotos que se solapan se enlazan entonces por las
+estrellas identificadas en ambas, aunque el solapamiento sea pequeño o el
+emparejamiento haya fallado, y un par mal emparejado se corrige. El catálogo
+también mide exactamente la focal de cada foto, de modo que se tiene en cuenta
+un zoom que se deslizó entre tomas con la misma focal EXIF. La lista de imágenes
+marca las fotos encontradas con ★; la vista de la imagen da el centro
+(ascensión recta, declinación), el número de estrellas identificadas y el
+campo, y rodea esas estrellas en azul. Las fotos con paisaje quedan para el
+otro emparejamiento. Tarda menos de un segundo por foto; **plate solving de las
+fotos del cielo** lo desactiva.
+
+**Cuadrícula celeste.** Con fotos halladas en el catálogo estelar,
+**⊕ Cuadrícula celeste** sobre la vista dibuja las coordenadas del cielo en la
+panorámica, como la cuadrícula celeste de Siril: líneas de ascensión recta y
+declinación con sus valores, y círculos con los nombres de las estrellas más
+brillantes, de los objetos Messier y otros objetos de cielo profundo brillantes
+(más al acercar; solo donde una foto muestra el cielo). Se basa en todas las
+estrellas identificadas en las fotos, así que sigue la proyección, el cabeceo y
+el alabeo de la panorámica; donde el cielo giró entre tomas es aproximada (la
+esquina de la vista indica su precisión). Solo se dibuja en la vista, no se
+guarda.
 
 **Un zoom que se movió.** Apuntando hacia arriba o hacia abajo, el anillo del
 zoom puede girar por su propio peso entre tomas. Con archivos RAW se conoce la
@@ -385,12 +428,43 @@ Vea [Proyecciones](#7-proyecciones) para saber cómo es cada una.
 | **Cabeceo (°)** | Inclina toda la panorámica arriba o abajo. Úselo para **enderezar un horizonte curvado** (por ejemplo si la cámara apuntaba hacia abajo). |
 | **Alabeo (°)** | Gira toda la panorámica sobre sí misma. Úselo para nivelar un horizonte inclinado. |
 | *Control fino* | Guiñada, cabeceo y alabeo tienen cada uno un deslizador, un campo numérico y **◀ ▶**. Los deslizadores de cabeceo y alabeo son finos cerca de 0° (donde suelen estar las correcciones) y gruesos más lejos. Arrastre el campo numérico despacio para 0,02° por píxel, o haga doble clic y escriba. **◀ ▶** avanzan 0,1° (con Mayús, 1°). |
+| **⟷ Horizonte automático** | Encuentra el horizonte en la vista previa y ajusta cabeceo y alabeo para que quede recto (la guiñada se mantiene). Ver abajo. |
+| **✎ Horizonte a mano** | Haga clic usted en puntos a lo largo del horizonte y luego **✔ Nivelar horizonte**. Ver abajo. |
 | **Restablecer focal / guiñada / cabeceo / alabeo** | Devuelve estos cuatro deslizadores a sus valores por defecto. |
 
 El título de la vista muestra el tamaño de la panorámica, la focal en píxeles,
 el campo de visión de la imagen de referencia y el error típico de alineación.
 
 Estos controles actualizan la vista previa al instante (una vez que existe).
+
+**Enderezar el horizonte automáticamente.** Una panorámica rara vez sale con
+el horizonte recto: si la foto de referencia apuntaba un poco arriba o abajo,
+el horizonte se curva en ola o en U, y un trípode sin nivelar lo inclina.
+**⟷ Horizonte automático** encuentra el borde del cielo en la vista previa
+(donde el cielo se junta con el suelo, columna a columna), lo suaviza con una
+curva de 4.º orden (árboles sueltos, colinas y farolas cuentan menos) y gira la
+vista (**cabeceo** y **alabeo**; la **guiñada** se mantiene) hasta que todos
+sus puntos están a la misma altura. En la esfera es exacto: un horizonte
+nivelado es una recta a través de una panorámica cilíndrica, esférica,
+Mercator, Hammer o Mollweide; en rectilínea queda en la línea central, el único
+sitio donde allí es recto. El horizonte hallado se dibuja en verde (con las
+**superposiciones** activadas), así se ve quedar recto; la línea de estado dice
+cuánto se desviaba. Deshacer (Ctrl+Z) recupera los ángulos anteriores. El borde
+del cielo es la silueta, no siempre el horizonte real: en una panorámica de
+menos de 90° una pendiente del terreno parecería una inclinación, por eso allí
+no se aplica un alabeo de más de 8°.
+
+**Marcar el horizonte a mano.** Donde la silueta no es el horizonte (colinas,
+una ciudad, niebla), **✎ Horizonte a mano** permite marcarlo: haga clic en 4 o
+más puntos a lo largo del horizonte en la panorámica, repartidos por su
+longitud (clic derecho quita el más cercano). Se traza una curva por ellos (de
+4.º orden; por 4 puntos, de 3.º); **✔ Nivelar horizonte** (o Intro) lo nivela
+como arriba, Esc cancela.
+
+Ambos se ofrecen solo donde un horizonte nivelado puede ser recto:
+rectilínea, cilíndrica, esférica, Mercator, Hammer y Mollweide, no para
+pequeño planeta, túnel, ojo de pez, estereográfica ni las proyecciones
+transversas.
 
 ### 5.5 Paso 4: composición
 
@@ -408,7 +482,9 @@ Estos controles actualizan la vista previa al instante (una vez que existe).
 | **Quitar recorte** | Quita el recorte. El recorte también se quita solo cuando cambia algo que mueve las imágenes (proyección, focal, guiñada, cabeceo, alabeo, desplazamientos, emparejado). |
 | **✂ Recortar** (sobre la vista) | Marque la parte de la panorámica que se queda: arrastre un marco, ajústelo por sus bordes o esquinas, arrastre dentro para moverlo y pulse **✂ Recorte: hecho** (Esc cancela). Solo esa parte se calcula y se guarda: una panorámica grande necesita menos memoria y no hace falta la pestaña Posprocesado solo para recortar. Se quita como el recorte automático y desaparece al cambiar la geometría. |
 | **⬇ Guardar y posprocesar…** (sobre la vista) | Guarda la panorámica y la abre después en la pestaña Posprocesado. |
+| **◧ Rellenar zonas vacías** (sobre la vista) | Rellena las esquinas y bordes vacíos con cielo y suelo inventados (autocompletar), ver abajo. |
 | **Mover la seleccionada ← ↑ ↓ →** | Mueve la imagen actual un píxel de vista previa (ver abajo). |
+| **Corregir la imagen elegida** | Gira a mano la imagen elegida en torno a su propio centro y suma a su distorsión del objetivo (k1, k2), ver abajo. |
 
 En la vista **Panorámica** se dibuja y numera el contorno de cada imagen:
 
@@ -430,6 +506,17 @@ con las imágenes unidas a ella más lejos de la referencia (por los enlaces
 amarillos). La imagen de referencia no se mueve; use cabeceo y alabeo para
 mover todo.
 
+**Corregir una imagen.** **Corregir la imagen elegida** (bajo los botones
+de mover) gira la imagen elegida en torno a su propio centro (**Giro (°)**),
+para una foto algo girada respecto a sus vecinas, y suma a su distorsión del
+objetivo: **Distorsión k1 +** curva las líneas rectas (− barril, + cojín),
+**Distorsión k2 +** actúa sobre todo en las esquinas; con el signo opuesto a k1
+corrige la distorsión de bigote. Debajo se muestran los valores que halló el
+refinado. Las correcciones se aplican a todas las imágenes elegidas;
+**Distorsión a todas las imágenes** da a cada imagen los mismos k1 y k2 (un
+objetivo), **Restablecer** las quita. Se pueden deshacer, se guardan en el
+proyecto y un nuevo refinado las conserva.
+
 **Máscaras de imagen fuente.** Donde la fusión elige la foto equivocada (un
 árbol o una persona que se movió, un coche, un fantasma), dígale cuál usar:
 **✐ Máscaras de imagen** sobre la vista. Mayús+clic en la panorámica elige la
@@ -442,6 +529,19 @@ vista previa se actualiza tras cada trazo y el borde es suave, de modo que el
 cambio no deja costura. Las máscaras pertenecen a la imagen (se quedan en su
 sitio al cambiar la proyección o el recorte), se pueden deshacer y se guardan en
 el proyecto.
+
+**Rellenar zonas vacías (autocompletar).** **◧ Rellenar zonas vacías** sobre la
+vista rellena las partes del rectángulo que ninguna foto cubre (esquinas y
+bordes vacíos; dentro del marco de recorte si lo hay) con contenido inventado
+que continúa lo que hay alrededor, como hace Microsoft ICE: el cielo sigue con
+su brillo y color, con estrellas y grano copiados de las fotos, el suelo con su
+hierba. Cada pequeña parte de la zona vacía toma el trozo más parecido de las
+fotos, de lo grueso a lo fino, y a tamaño completo se copia el detalle
+fotografiado. La vista previa lo muestra y al guardar se hace a tamaño completo
+(el mensaje dice qué parte se inventó). Sirve para un cielo un poco corto
+arriba o un borde irregular; una zona vacía grande se convierte en un cielo
+plausible pero inventado. Es inventado: revíselo antes de publicar y dígalo
+donde importe (concursos, ciencia).
 
 ### 5.6 Paso 5: estirado
 
@@ -524,8 +624,8 @@ puntos de coincidencia guardados: unos 50 kB por imagen.
 | Acción | Ratón | Teclado | Botón |
 |---|---|---|---|
 | Desplazar | arrastrar con el botón **izquierdo** | flechas (vistas Imagen y Par) | |
-| Acercar | rueda hacia arriba | `+` | **Zoom +** |
-| Alejar | rueda hacia abajo | `-` | **Zoom -** |
+| Acercar | rueda hacia arriba | `+` | **+** |
+| Alejar | rueda hacia abajo | `-` | **−** |
 | Restablecer zoom | | `F`, `0` o `Inicio` | **Ajustar** |
 | Seleccionar imagen (vista Panorámica) | clic dentro de su contorno | | |
 | Mostrar / ocultar contornos, números, enlaces | | | interruptor **superposiciones** |
@@ -845,7 +945,7 @@ el archivo guardado con su tamaño, o qué salió mal. × lo cierra.
 
 | Entrada | Qué fotografiar |
 |---|---|
-| **Lights** (*Imágenes de estrellas* en modo simple) | Las tomas del cielo: misma focal, apertura y exposición. Lo mejor es RAW; TIFF, FITS o XISF solo si los datos siguen siendo lineales (sin editar). **Unificar exposición** iguala tomas hechas en condiciones distintas. |
+| **Lights** (*Imágenes de estrellas* en modo simple) | Las tomas del cielo: misma focal, apertura y exposición. Lo mejor es RAW; TIFF, FITS o XISF solo si los datos siguen siendo lineales (sin editar). **Normalización** y **Quitar el gradiente de cada toma**: ver debajo de la tabla. |
 | **Toma base** (*Imagen base* en modo simple) | La toma a la que se alinean las demás. Vacía = el light del medio. Elija otra en la lista junto a **Toma base**, o elija un light en su lista y haga clic en **Usar como base**. |
 | **Darks** (*Imágenes de ruido* en modo simple) | Tomas oscuras: tapa puesta, mismo ISO y tiempo de exposición, hechas justo antes o después de las tomas de estrellas. Quitan el ruido térmico y los píxeles calientes. |
 | **Tomas bias** (*Imágenes bias* en modo simple) | Exposición más corta, tapa puesta, mismo ISO. |
@@ -854,8 +954,28 @@ el archivo guardado con su tamaño, o qué salió mal. × lo cierra.
 | **Imagen de primer plano** | Opcional: una toma del suelo desde la misma posición del trípode – en la hora azul, con exposición larga o ISO bajo. Sustituye el primer plano apilado (ruidoso, oscuro) bajo la región del cielo. **Igualar brillo al suelo apilado** la ajusta al suelo apilado; **Exposición (EV)** la aclara u oscurece a partir de ahí. Necesita una región del cielo. |
 | **Salida** | Se fija en la fila **Guardar como**: nombre, tipo y carpeta. `.tif` / `.png` (16 bits), `.jpg` (8 bits), o `.fits` / `.xisf` (coma flotante de 32 bits, lineal, para procesar después en Siril, PixInsight, etc.). |
 
+**Fotos en vertical** (cámara girada): se apilan derechas. Tras aplicar los
+darks y flats (que necesitan la orientación del sensor), cada fotograma se gira
+según lo que la cámara anotó en el fotograma base. La vista previa, la región de
+cielo que dibuja y el apilado guardado quedan derechos. Un proyecto o ajuste
+guardado antes de la versión 0.4.1 con una región de cielo dibujada a mano
+conserva la orientación antigua (tumbada), para que la línea dibujada siga
+encajando.
+
 Todas las tomas de calibración son opcionales. Incluso unos pocos darks ayudan
 mucho a ISO alto.
+
+**La normalización** lleva el cielo de cada toma al de la toma base antes de
+combinarlas: *Aditiva* desplaza el nivel de cada toma (para un fondo que
+cambia: contaminación lumínica, la Luna, el crepúsculo), *Multiplicativa* lo
+escala (para otras exposiciones o noches; el antiguo *Unificar exposición*),
+*Aditiva con escalado* lo desplaza y lo escala a la dispersión de la toma base,
+como hace Siril por defecto al apilar con rechazo. **Quitar el gradiente de
+cada toma** ajusta antes de apilar un plano (un gradiente de primer orden, como
+*subsky 1* de Siril) al cielo de cada toma y lo resta, manteniendo su nivel:
+para la contaminación lumínica que cambia de una toma a otra, que la imagen
+apilada ya no podría perder. Las estrellas y los objetos quedan fuera del
+ajuste; en paisajes solo se corrige la región del cielo.
 
 **Las listas de archivos:** cada grupo muestra sus archivos en una lista junto
 a su nombre, así cientos de lights no necesitan desplazamiento. Elija ahí un

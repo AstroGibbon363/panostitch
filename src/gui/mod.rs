@@ -2,6 +2,7 @@
 //! zoomable image view, and native file dialogs.
 
 pub mod dialogs;
+pub mod engine_text;
 pub mod finish;
 pub mod help;
 pub mod i18n;
@@ -129,6 +130,18 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
     let as_processed = processed.as_deref().copied().unwrap_or(false);
     let offers_processed = processed.is_some();
     let name = |m: Display| if offers_processed && m == Display::Linear { tr("Linear") } else { tr(m.name()) };
+    // Compound widgets (a slider with its value, the combo box) are laid out in
+    // a row of their own, so a wrapping toolbar does not move them to the next
+    // line: they would run past the panel's edge, hidden under the side panel.
+    // Start a new line when the rest of this one is too short.
+    let room = |ui: &mut egui::Ui, w: f32| {
+        if ui.available_size_before_wrap().x < w {
+            ui.end_row();
+        }
+    };
+    let text_w = |ui: &egui::Ui, t: &str| egui::WidgetText::from(t).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x;
+    let combo_w = ui.spacing().combo_width.max(text_w(ui, if as_processed { tr("As processed") } else { name(v.mode) }) + 30.0);
+    room(ui, text_w(ui, tr("Display")) + combo_w + 2.0 * ui.spacing().item_spacing.x);
     ui.label(tr("Display"));
     egui::ComboBox::from_id_salt(id).selected_text(if as_processed { tr("As processed") } else { name(v.mode) }).show_ui(ui, |ui| {
         if let Some(p) = processed.as_deref_mut() {
@@ -149,8 +162,15 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
     if !as_processed && v.has_range() {
         ui.spacing_mut().slider_width = 90.0;
         let tip = tr("Low: values below it are shown black. High: values above it are shown white. For faint linear data try High around 0.01–0.1.");
-        ui.add(egui::Slider::new(&mut v.low, 0.0..=1.0).logarithmic(true).smallest_positive(1e-5).max_decimals(5).text(tr("Low"))).on_hover_text(tip);
-        ui.add(egui::Slider::new(&mut v.high, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).max_decimals(5).text(tr("High"))).on_hover_text(tip);
+        // slider + its value (up to "0.00001") + its name
+        let slider_w = |ui: &egui::Ui, t: &str| 90.0 + text_w(ui, "0.000001") + text_w(ui, t) + 4.0 * ui.spacing().item_spacing.x;
+        // The name before its slider (as "Display" before its menu), slider and value kept together.
+        room(ui, slider_w(ui, tr("Low")));
+        ui.label(tr("Low")).on_hover_text(tip);
+        ui.add(egui::Slider::new(&mut v.low, 0.0..=1.0).logarithmic(true).smallest_positive(1e-5).max_decimals(5)).on_hover_text(tip);
+        room(ui, slider_w(ui, tr("High")) + 30.0);
+        ui.label(tr("High")).on_hover_text(tip);
+        ui.add(egui::Slider::new(&mut v.high, 0.0..=1.0).logarithmic(true).smallest_positive(1e-4).max_decimals(5)).on_hover_text(tip);
         if v.low >= v.high {
             v.low = (v.high * 0.5).max(0.0);
         }
@@ -159,6 +179,7 @@ pub fn view_stretch_ui(ui: &mut egui::Ui, id: &str, v: &mut crate::finish::ViewS
         }
     }
     if !as_processed && !v.plain() {
+        room(ui, text_w(ui, tr("view only")) + ui.spacing().item_spacing.x);
         ui.colored_label(Color32::from_rgb(230, 150, 30), tr("view only"));
     }
     (*v, processed.as_deref().copied()) != before
@@ -179,10 +200,11 @@ pub fn save_kind_ui(ui: &mut egui::Ui, linear: bool, ext: &str) -> Option<bool> 
     let mut pick = None;
     ui.horizontal_wrapped(|ui| {
         ui.label(tr("Save"));
-        if ui.selectable_label(linear, tr("Linear (for processing)")).on_hover_text(save_kind_tip(true)).clicked() {
+        // Radio buttons: a highlighted label next to a plain one did not read as a choice.
+        if ui.radio(linear, tr("Linear (for processing)")).on_hover_text(save_kind_tip(true)).clicked() {
             pick = Some(true);
         }
-        if ui.selectable_label(!linear, tr("Stretched (for viewing)")).on_hover_text(save_kind_tip(false)).clicked() {
+        if ui.radio(!linear, tr("Stretched (for viewing)")).on_hover_text(save_kind_tip(false)).clicked() {
             pick = Some(false);
         }
     });
@@ -191,6 +213,29 @@ pub fn save_kind_ui(ui: &mut egui::Ui, linear: bool, ext: &str) -> Option<bool> 
         ui.colored_label(Color32::from_rgb(230, 150, 30), tr("JPEG and PNG have too few levels for linear data: the faint detail is lost. Save linear data as FITS, XISF or TIFF."));
     }
     pick
+}
+
+/// The file name and its folder under a path field, which shows only the
+/// start of a long path (its whole on hover).
+pub fn path_note(ui: &mut egui::Ui, path: &str) {
+    let path = path.trim();
+    if path.is_empty() {
+        return;
+    }
+    let p = std::path::Path::new(path);
+    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let dir = p.parent().map(|d| d.to_string_lossy().to_string()).filter(|d| !d.is_empty());
+    let text = match dir {
+        Some(d) => crate::trf!("→ {} in {}", name, d),
+        None => format!("→ {name}"),
+    };
+    ui.add(egui::Label::new(egui::RichText::new(text).weak().size(12.0)).wrap()).on_hover_text(path);
+}
+
+/// `x` kept within lo…hi; when the range is empty (lo > hi: points or frame
+/// edges closer than the margin), its middle. (`f64::clamp` stops the program then.)
+pub fn clamp_safe(x: f64, lo: f64, hi: f64) -> f64 {
+    if lo <= hi { x.clamp(lo, hi) } else { (lo + hi) / 2.0 }
 }
 
 /// A slider with a label (row of a grid).
@@ -618,7 +663,7 @@ impl App {
                             ui.selectable_value(&mut self.prefs.lang, l, tr(l.name()));
                         }
                     });
-                    ui.checkbox(&mut self.prefs.simple, tr("✓ Simple")).on_hover_text(tr("Leave out the advanced controls"));
+                    ui.checkbox(&mut self.prefs.simple, tr("Simple")).on_hover_text(tr("Leave out the advanced controls"));
                     ui.checkbox(&mut self.prefs.modern, tr("◆ Modern"));
                     ui.checkbox(&mut self.prefs.dark, tr("☾ Dark"));
                     if self.prefs != before {

@@ -7,6 +7,9 @@
 //! Assumes the images were shot by rotating the camera (standard panorama case).
 
 pub mod render;
+pub mod solve;
+pub mod horizon;
+pub mod sky_grid;
 pub mod stars;
 
 use crate::image::{blur, luminance, median_f64, quantiles, resize, to_full, Gray, Img};
@@ -278,7 +281,7 @@ pub fn detect(img: &Img, p: &DetectParams) -> Features {
             })
         })
         .collect();
-    cands.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    cands.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
     // Even spread: each grid cell gets a quota first, then the strongest of the rest.
     let gxn = 16usize;
     let gyn = ((16.0 * h as f64 / w as f64).round() as usize).max(1);
@@ -649,7 +652,7 @@ pub fn spanning_tree(n: usize, edges: &[(usize, usize, f64)]) -> Vec<Vec<usize>>
     }
     let mut adj = vec![Vec::new(); n];
     let mut e: Vec<&(usize, usize, f64)> = edges.iter().collect();
-    e.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    e.sort_by(|a, b| b.2.total_cmp(&a.2));
     for &(i, j, _) in e {
         let (a, b) = (find(&mut uf, i), find(&mut uf, j));
         if a == b {
@@ -839,7 +842,11 @@ pub struct BundleResult {
     pub g: Vec<M3>,
     /// Focal length (px) of the reference image.
     pub f: f64,
+    /// The lens distortion shared by all images (with `per_image`: their mean).
     pub k1: f64,
+    pub k2: f64,
+    /// Each image's lens distortion (r in units of its own focal length).
+    pub lens: Vec<Lens>,
     pub rms_before: f64,
     pub rms_after: f64,
     /// Median error (px) of each entry of `matches`, NaN for pairs that were not used.
@@ -862,13 +869,24 @@ pub struct BundleOpts {
     pub time: Vec<f64>,
     /// Which entries of `matches` are star pairs: the sky turned between their shots.
     pub sky: Vec<bool>,
+    /// Lens distortion as a polynomial (k1·r² + k2·r⁴, for the wavy "moustache"
+    /// distortion) instead of k1 alone (with `distortion`).
+    pub poly: bool,
+    /// Each image gets its own lens distortion (kept near the common one where
+    /// its points say little), instead of one for all (with `distortion`).
+    pub per_image: bool,
 }
+
+/// How strongly an image's own distortion is held to the common one: a
+/// difference of 0.05 in k1 or k2 costs as much as 100 px² of residuals.
+const LENS_PRIOR: f64 = 100.0 / (0.05 * 0.05);
 
 /// Refine all images together, assuming the camera only rotated: every
 /// accepted pair at once, the error spread evenly.
 /// `g`: initial transforms (image → reference plane); `members`: images to
 /// refine; `huber`: residuals above this (px) count less. With `distortion`
-/// the lens's radial k1 is estimated too.
+/// the lens's radial distortion is estimated too (see `BundleOpts` for k2 and
+/// a distortion per image).
 #[allow(clippy::too_many_arguments)]
 pub fn bundle_adjust(
     g: &[M3],
@@ -918,7 +936,8 @@ pub fn bundle_adjust_with(
     let e: Vec<MatchSet> = used.iter().map(|&k| (matches[k].0, matches[k].1, sub(&matches[k].2), sub(&matches[k].3))).collect();
     let rho0: Vec<f64> = (0..n).map(|i| opts.focal.get(i).copied().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0)).collect();
     if e.is_empty() {
-        return BundleResult { g: g.to_vec(), f, k1: 0.0, rms_before: f64::NAN, rms_after: f64::NAN, med: vec![f64::NAN; matches.len()], focal: rho0, sky: None };
+        let lens = (0..n).map(|i| Lens::new(0.0, 0.0, f * rho0[i] / rho0[ref_])).collect();
+        return BundleResult { g: g.to_vec(), f, k1: 0.0, k2: 0.0, lens, rms_before: f64::NAN, rms_after: f64::NAN, med: vec![f64::NAN; matches.len()], focal: rho0, sky: None };
     }
     // Zoom groups: the reference's group is 0 (its focal length is f), the others are numbered 1…
     let gid = |i: usize| opts.group.get(i).copied().unwrap_or(0);
@@ -940,37 +959,54 @@ pub fn bundle_adjust_with(
         .collect();
     let free: Vec<usize> = members.iter().copied().filter(|&i| i != ref_).collect();
     let col: HashMap<usize, usize> = free.iter().enumerate().map(|(k, &i)| (i, 3 * k)).collect();
-    // Parameters: rotations (3 per free image), log focal, log focal ratio per other group, k1, sky turning (3).
+    // Parameters: rotations (3 per free image), log focal, log focal ratio per
+    // other group, the common k1 and k2, each member's own Δk1 and Δk2, sky turning (3).
     let c_lf = 3 * free.len();
     let c_grp = c_lf + 1; // group q ≥ 1 at c_grp + q - 1
     let c_k1 = c_grp + groups.len() - 1;
-    let c_sky = c_k1 + 1;
+    let c_own = c_k1 + 2;
+    let own: HashMap<usize, usize> = members.iter().enumerate().map(|(k, &i)| (i, c_own + 2 * k)).collect();
+    let (fit_k1, fit_k2, fit_own) = (distortion, distortion && opts.poly, distortion && opts.per_image);
+    let c_sky = c_own + 2 * members.len();
     let np = c_sky + if use_sky { 3 } else { 0 };
     let mut x = vec![0.0; np];
     x[c_lf] = f.ln();
+    // Within a group the focal lengths keep their given ratios (all alike for
+    // an EXIF focal length; measured ones for photos found on the star
+    // catalogue); the group as a whole is fitted.
+    let mut mean_ln = vec![rho0[ref_].ln(); groups.len()];
     for (q, _) in groups.iter().enumerate().skip(1) {
-        // start from the mean EXIF ratio of the group
+        // start from the mean ratio of the group
         let v: Vec<f64> = members.iter().filter(|&&m| grp[m] == q).map(|&m| rho0[m].ln()).collect();
-        x[c_grp + q - 1] = v.iter().sum::<f64>() / v.len().max(1) as f64;
+        mean_ln[q] = v.iter().sum::<f64>() / v.len().max(1) as f64;
+        x[c_grp + q - 1] = mean_ln[q];
     }
+    let rel: Vec<f64> = (0..n).map(|i| rho0[i].ln() - mean_ln[grp[i]]).collect();
     let rot = |x: &[f64], i: usize| -> M3 {
         match col.get(&i) {
             Some(&c) => rodrigues(&Vector3::new(x[c], x[c + 1], x[c + 2])) * r0[i],
             None => r0[i],
         }
     };
-    let focal = |x: &[f64], i: usize| -> f64 { (x[c_lf] + if grp[i] == 0 { 0.0 } else { x[c_grp + grp[i] - 1] }).exp() };
+    let focal = |x: &[f64], i: usize| -> f64 { (x[c_lf] + rel[i] + if grp[i] == 0 { 0.0 } else { x[c_grp + grp[i] - 1] }).exp() };
+    let lens = |x: &[f64], i: usize| -> Lens {
+        let d = own.get(&i).map(|&c| (x[c], x[c + 1])).unwrap_or((0.0, 0.0));
+        Lens::new(x[c_k1] + d.0, x[c_k1 + 1] + d.1, focal(x, i))
+    };
+    // Each image's corner radius in units of its focal length (the lens must not fold the photo up to there).
+    let rmax = |x: &[f64], i: usize| 1.05 * (centers[i][0] - 0.5).hypot(centers[i][1] - 0.5) / focal(x, i);
+    let prior = |x: &[f64]| -> f64 { if fit_own { own.values().map(|&c| LENS_PRIOR * (x[c] * x[c] + x[c + 1] * x[c + 1])).sum() } else { 0.0 } };
     let resid = |x: &[f64], q: usize| -> Vec<Pt> {
         let (i, j, pi, pj) = &e[q];
         let (ri, rj) = (rot(x, *i), rot(x, *j));
         let s = if use_sky && skyed[q] { rodrigues(&(Vector3::new(x[c_sky], x[c_sky + 1], x[c_sky + 2]) * (time(*j) - time(*i)))) } else { M3::identity() };
         let h = kmat(focal(x, *j), centers[*j]) * rj * s * ri.transpose() * inv(&kmat(focal(x, *i), centers[*i]));
-        let lens = (x[c_k1], x[c_lf].exp());
+        let (li, lj) = (lens(x, *i), lens(x, *j));
         (0..pi.len())
             .map(|k| {
-                let (ux, uy) = undistort(pi[k][0], pi[k][1], centers[*i], lens);
+                let (ux, uy) = undistort(pi[k][0], pi[k][1], centers[*i], li);
                 let (px, py) = apply_h(&h, ux, uy);
-                let (u, v) = undistort(pj[k][0], pj[k][1], centers[*j], lens);
+                let (u, v) = undistort(pj[k][0], pj[k][1], centers[*j], lj);
                 [px - u, py - v]
             })
             .collect()
@@ -990,8 +1026,19 @@ pub fn bundle_adjust_with(
                 c.push(c_grp + grp[img] - 1);
             }
         }
-        if distortion {
+        if fit_k1 {
             c.push(c_k1);
+        }
+        if fit_k2 {
+            c.push(c_k1 + 1);
+        }
+        if fit_own {
+            for img in [i, j] {
+                c.push(own[&img]);
+                if fit_k2 {
+                    c.push(own[&img] + 1);
+                }
+            }
         }
         if use_sky && skyed[q] {
             c.extend([c_sky, c_sky + 1, c_sky + 2]);
@@ -999,7 +1046,7 @@ pub fn bundle_adjust_with(
         c
     };
     let rhof = |d: f64| if d <= huber { d * d } else { 2.0 * huber * d - huber * huber };
-    let cost = |x: &[f64]| -> f64 { (0..e.len()).into_par_iter().map(|q| resid(x, q).iter().map(|r| rhof(r[0].hypot(r[1]))).sum::<f64>()).collect::<Vec<f64>>().iter().sum() };
+    let cost = |x: &[f64]| -> f64 { (0..e.len()).into_par_iter().map(|q| resid(x, q).iter().map(|r| rhof(r[0].hypot(r[1]))).sum::<f64>()).collect::<Vec<f64>>().iter().sum::<f64>() + prior(x) };
     let rms = |x: &[f64]| -> f64 {
         let (mut s, mut c) = (0.0, 0usize);
         for q in 0..e.len() {
@@ -1048,6 +1095,19 @@ pub fn bundle_adjust_with(
             .collect();
         let mut jtj = DMatrix::<f64>::zeros(np, np);
         let mut jtr = DVector::<f64>::zeros(np);
+        if fit_own {
+            for &c in own.values() {
+                for k in [c, c + 1] {
+                    jtj[(k, k)] += LENS_PRIOR;
+                    jtr[k] += LENS_PRIOR * x[k];
+                }
+            }
+        }
+        // Lens terms not fitted stay put (and keep the system regular).
+        let unused = (!fit_k1).then_some(c_k1).into_iter().chain((!fit_k2).then_some(c_k1 + 1)).chain(own.values().flat_map(|&c| [c, c + 1]).filter(|_| !fit_own));
+        for k in unused.collect::<Vec<_>>() {
+            jtj[(k, k)] = 1.0;
+        }
         for (cols, a, b) in &blocks {
             let nc = cols.len();
             for u in 0..nc {
@@ -1065,7 +1125,17 @@ pub fn bundle_adjust_with(
             }
             let Some(delta) = a.lu().solve(&(-&jtr)) else { lambda *= 4.0; continue };
             let mut xn: Vec<f64> = (0..np).map(|k| x[k] + delta[k]).collect();
-            xn[c_k1] = if distortion { xn[c_k1].clamp(-0.5, 0.5) } else { 0.0 };
+            xn[c_k1] = if fit_k1 { xn[c_k1].clamp(-0.5, 0.5) } else { 0.0 };
+            xn[c_k1 + 1] = if fit_k2 { xn[c_k1 + 1].clamp(-0.5, 0.5) } else { 0.0 };
+            for &c in own.values() {
+                xn[c] = if fit_own { xn[c].clamp(-0.5, 0.5) } else { 0.0 };
+                xn[c + 1] = if fit_own && fit_k2 { xn[c + 1].clamp(-0.5, 0.5) } else { 0.0 };
+            }
+            // A lens that folds a photo over itself is no solution.
+            if !members.iter().all(|&i| lens(&xn, i).monotonic(rmax(&xn, i))) {
+                lambda *= 4.0;
+                continue;
+            }
             let cn = cost(&xn);
             if cn < c0 {
                 let rel = (c0 - cn) / c0;
@@ -1098,7 +1168,14 @@ pub fn bundle_adjust_with(
         let w = r0[ref_] * Vector3::new(x[c_sky], x[c_sky + 1], x[c_sky + 2]);
         [w[0], w[1], w[2]]
     });
-    BundleResult { g: gn, f: fn_, k1: x[c_k1], rms_before: rms0, rms_after: rms(&x), med, focal: rho, sky }
+    let lenses: Vec<Lens> = (0..n).map(|i| lens(&x, i)).collect();
+    let (k1, k2) = if fit_own {
+        let m = members.len().max(1) as f64;
+        (members.iter().map(|&i| lenses[i].k1).sum::<f64>() / m, members.iter().map(|&i| lenses[i].k2).sum::<f64>() / m)
+    } else {
+        (x[c_k1], x[c_k1 + 1])
+    };
+    BundleResult { g: gn, f: fn_, k1, k2, lens: lenses, rms_before: rms0, rms_after: rms(&x), med, focal: rho, sky }
 }
 
 /// Camera rotation (yaw right, pitch down, roll clockwise; radians) as a
@@ -1227,13 +1304,13 @@ pub fn stitch(imgs: &[Img], p: &StitchParams, log: &mut dyn FnMut(String)) -> Re
     let (g, f, lens) = if p.refine && p.model == Model::Homography {
         let b = bundle_adjust(&g, &centers, ref_, f, &members, &matches, 40, p.ransac_thresh, 60, true);
         log(format!("Global refinement: rms error {:.2} → {:.2} px, lens distortion k1 = {:.3}", b.rms_before, b.rms_after, b.k1));
-        (b.g, b.f, (b.k1, b.f))
+        (b.g, b.f, b.lens)
     } else {
-        (g, f, (0.0, f))
+        (g, f, vec![Lens::new(0.0, 0.0, f); n])
     };
-    let o: Vec<Vec<Pt>> = g.iter().zip(imgs).map(|(gi, im)| outline(gi, im.h, im.w, p.projection, f, centers[ref_], lens, 24)).collect();
+    let o: Vec<Vec<Pt>> = g.iter().zip(imgs).enumerate().map(|(i, (gi, im))| outline(gi, im.h, im.w, p.projection, f, centers[ref_], lens[i], 24)).collect();
     let refs: Vec<&Img> = imgs.iter().collect();
-    let cp = ComposeParams { projection: p.projection, f, c: centers[ref_], blend: p.blend, lens, sharpness: p.sharpness, ..Default::default() };
+    let cp = ComposeParams { projection: p.projection, f, c: centers[ref_], blend: p.blend, lenses: lens, sharpness: p.sharpness, ..Default::default() };
     Ok(compose(&refs, &g, bounds(&o), &cp, &vec![1.0; n], &vec![1.0; n], &imgs.iter().map(|im| (im.h, im.w)).collect::<Vec<_>>(), false).0)
 }
 
@@ -1242,4 +1319,29 @@ pub fn stitch_files(paths: &[String], p: &StitchParams, raw_half: bool, log: &mu
     let opt = crate::io::LoadOptions { half: raw_half, ..Default::default() };
     let imgs: Result<Vec<Img>, String> = paths.par_iter().map(|pth| crate::io::load_any(pth, &opt)).collect();
     stitch(&imgs?, p, log)
+}
+
+/// What of the lens distortion the global refinement fits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LensFit {
+    /// None: only the rotations (and focal lengths).
+    Off,
+    /// Radial k1: plain barrel or pincushion distortion.
+    Radial,
+    /// Polynomial k1·r² + k2·r⁴: also the wavy "moustache" distortion.
+    Poly,
+}
+
+impl LensFit {
+    pub const ALL: [LensFit; 3] = [LensFit::Off, LensFit::Radial, LensFit::Poly];
+    pub fn name(self) -> &'static str {
+        match self {
+            LensFit::Off => "Off (rotations only)",
+            LensFit::Radial => "Barrel / pincushion (k1)",
+            LensFit::Poly => "Polynomial, moustache (k1, k2)",
+        }
+    }
+    pub fn from_name(s: &str) -> Option<LensFit> {
+        LensFit::ALL.iter().copied().find(|m| m.name() == s)
+    }
 }

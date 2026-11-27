@@ -6,6 +6,7 @@
 //! (u, v) = f·(a, b), so one unit ≈ one reference pixel near the centre.
 
 use super::{inv, kmat, Pt, M3};
+type V3 = nalgebra::Vector3<f64>;
 use crate::image::{bilinear, blur, luminance, Bits, Gray, Image, Img, Px, Rgb, Sample};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -207,9 +208,14 @@ pub fn proj_forward(p: Projection, x: f64, y: f64, z: f64) -> (f64, f64) {
 pub fn proj_inverse(p: Projection, a: f64, b: f64) -> Option<(f64, f64, f64)> {
     use Projection::*;
     let (la, lb) = proj_limits(p);
-    if a.abs() > la || b.abs() > lb {
+    // Where the limits are the poles and the seam (cylindrical-type
+    // projections), a point just beyond them (the last row of a canvas whose
+    // size was rounded up) is the pole or the seam itself, not empty.
+    let slack = if polar_axis(p).is_some() { 1.02 } else { 1.0 };
+    if a.abs() > la * slack || b.abs() > lb * slack {
         return None;
     }
+    let (a, b) = (a.clamp(-la, la), b.clamp(-lb, lb));
     Some(match p {
         Rectilinear => (a, b, 1.0),
         Stereographic | LittlePlanet | Tunnel => {
@@ -278,39 +284,86 @@ pub fn proj_inverse(p: Projection, a: f64, b: f64) -> Option<(f64, f64, f64)> {
 }
 
 // --------------------------------------------------------------------------
-// Lens distortion: observed = c + (ideal - c)·(1 + k1·r²), r in units of the
-// camera focal length fc. `lens = (k1, fc)`.
+// Lens distortion (radial polynomial): observed = c + (ideal - c)·(1 + k1·r² + k2·r⁴),
+// r in units of the camera focal length fc. k1 alone is barrel (< 0) or
+// pincushion (> 0) distortion; k1 and k2 of opposite signs make the wavy
+// "moustache" distortion of many wide-angle lenses.
 // --------------------------------------------------------------------------
 
-pub type Lens = (f64, f64);
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lens {
+    pub k1: f64,
+    pub k2: f64,
+    /// Focal length (px) that r is measured in.
+    pub fc: f64,
+}
+
+impl Default for Lens {
+    fn default() -> Self {
+        Lens { k1: 0.0, k2: 0.0, fc: 1.0 }
+    }
+}
+
+impl Lens {
+    pub fn new(k1: f64, k2: f64, fc: f64) -> Self {
+        Lens { k1, k2, fc }
+    }
+    pub fn is_none(&self) -> bool {
+        self.k1 == 0.0 && self.k2 == 0.0
+    }
+    /// Observed radius ÷ ideal radius at ideal radius² `r2`.
+    #[inline]
+    pub fn scale(&self, r2: f64) -> f64 {
+        1.0 + r2 * (self.k1 + self.k2 * r2)
+    }
+    /// Does the observed radius keep growing with the ideal one up to ideal radius
+    /// `rmax` (in units of fc)? Else the photo would fold over itself.
+    pub fn monotonic(&self, rmax: f64) -> bool {
+        (0..=32).all(|k| {
+            let r2 = (rmax * k as f64 / 32.0).powi(2);
+            1.0 + 3.0 * self.k1 * r2 + 5.0 * self.k2 * r2 * r2 > 0.05
+        })
+    }
+}
 
 /// Ideal (distortion-free) pixel → observed pixel.
 #[inline]
 pub fn distort(x: f64, y: f64, c: Pt, lens: Lens) -> (f64, f64) {
-    let (k1, fc) = lens;
-    if k1 == 0.0 {
+    if lens.is_none() {
         return (x, y);
     }
+    let fc = lens.fc;
     let (dx, dy) = ((x - c[0]) / fc, (y - c[1]) / fc);
-    let s = 1.0 + k1 * (dx * dx + dy * dy);
+    let s = lens.scale(dx * dx + dy * dy);
     (c[0] + dx * s * fc, c[1] + dy * s * fc)
 }
 
 /// Observed pixel → ideal pixel (inverse of `distort`).
 #[inline]
 pub fn undistort(x: f64, y: f64, c: Pt, lens: Lens) -> (f64, f64) {
-    let (k1, fc) = lens;
-    if k1 == 0.0 {
+    if lens.is_none() {
         return (x, y);
     }
+    let fc = lens.fc;
     let (ox, oy) = ((x - c[0]) / fc, (y - c[1]) / fc);
-    let (mut ux, mut uy) = (ox, oy);
-    for _ in 0..6 {
-        let s = 1.0 + k1 * (ux * ux + uy * uy);
-        ux = ox / s;
-        uy = oy / s;
+    let rd = ox.hypot(oy);
+    if rd < 1e-12 {
+        return (x, y);
     }
-    (c[0] + ux * fc, c[1] + uy * fc)
+    // Newton on r·(1 + k1 r² + k2 r⁴) = rd, from r = rd.
+    let mut r = rd;
+    for _ in 0..8 {
+        let r2 = r * r;
+        let fr = r * lens.scale(r2) - rd;
+        let d = (1.0 + 3.0 * lens.k1 * r2 + 5.0 * lens.k2 * r2 * r2).max(0.05);
+        let step = fr / d;
+        r -= step;
+        if step.abs() < 1e-12 {
+            break;
+        }
+    }
+    let k = r / rd;
+    (c[0] + ox * k * fc, c[1] + oy * k * fc)
 }
 
 /// Outline of an h×w image placed by G (image → reference plane), in output
@@ -324,14 +377,76 @@ pub fn outline(g: &M3, h: usize, w: usize, p: Projection, f: f64, c: Pt, lens: L
     pts.extend(lin(1.0, hf).map(|y| (wf, y)));
     pts.extend(lin(wf, 1.0).map(|x| (x, hf)));
     pts.extend(lin(hf, 1.0).map(|y| (1.0, y)));
-    pts.into_iter()
+    let dirs: Vec<V3> = pts
+        .into_iter()
         .map(|(x, y)| {
             let (ux, uy) = undistort(x, y, ci, lens);
             let q = g * nalgebra::Vector3::new(ux, uy, 1.0);
-            let (a, b) = proj_forward(p, (q[0] - c[0] * q[2]) / f, (q[1] - c[1] * q[2]) / f, q[2]);
-            [f * a, f * b]
+            V3::new((q[0] - c[0] * q[2]) / f, (q[1] - c[1] * q[2]) / f, q[2])
         })
-        .collect()
+        .collect();
+    let mut out: Vec<Pt> = dirs.iter().map(|d| { let (a, b) = proj_forward(p, d[0], d[1], d[2]); [f * a, f * b] }).collect();
+    // A photo around a pole of the projection (the zenith or nadir of a
+    // spherical panorama, e.g. after the horizon was levelled): its edge goes
+    // round the pole and crosses the seam behind, so the outline alone would
+    // leave out the cap between its edge and the pole (no box reaches it: an
+    // empty hole at the zenith). Close the outline over the pole, along the seam.
+    if let Some(transverse) = polar_axis(p) {
+        let shows = |d: V3| -> bool {
+            let ip = inv(g) * (kmat(f, c) * d);
+            if ip[2] <= 0.0 {
+                return false;
+            }
+            let (ox, oy) = distort(ip[0] / ip[2], ip[1] / ip[2], ci, lens);
+            (1.0..=wf).contains(&ox) && (1.0..=hf).contains(&oy)
+        };
+        // (azimuth around the polar axis, angle towards the pole) of a direction, and back.
+        let polar = |d: &V3| -> (f64, f64) {
+            let (x, y, z) = if transverse { (d[1], d[0], d[2]) } else { (d[0], d[1], d[2]) };
+            (x.atan2(z), y.atan2(x.hypot(z)))
+        };
+        let dir = |lam: f64, phi: f64| -> V3 {
+            let (a, b, z) = (phi.cos() * lam.sin(), phi.sin(), phi.cos() * lam.cos());
+            if transverse { V3::new(b, a, z) } else { V3::new(a, b, z) }
+        };
+        for sgn in [-1.0f64, 1.0] {
+            let pole = if transverse { V3::new(sgn, 0.0, 0.0) } else { V3::new(0.0, sgn, 0.0) };
+            if !shows(pole) {
+                continue;
+            }
+            let pol: Vec<(f64, f64)> = dirs.iter().map(&polar).collect();
+            let m = pol.len();
+            let Some(k) = (0..m).find(|&k| (pol[(k + 1) % m].0 - pol[k].0).abs() > PI) else { continue };
+            let (a0, a1) = (pol[k].0.signum() * (PI - 1e-9), pol[(k + 1) % m].0.signum() * (PI - 1e-9));
+            let phi_c = (pol[k].1 + pol[(k + 1) % m].1) / 2.0;
+            let top = sgn * PI / 2.0;
+            let steps = 12;
+            let mut cap: Vec<Pt> = Vec::with_capacity(2 * steps + 2);
+            for (lam, from, to) in [(a0, phi_c, top), (a1, top, phi_c)] {
+                for t in 0..=steps {
+                    let phi = from + (to - from) * t as f64 / steps as f64;
+                    let d = dir(lam, phi);
+                    let (a, b) = proj_forward(p, d[0], d[1], d[2]);
+                    cap.push([f * a, f * b]);
+                }
+            }
+            out.splice(k + 1..k + 1, cap);
+            break;
+        }
+    }
+    out
+}
+
+/// The axis whose poles a projection spreads into a line (the zenith and
+/// nadir of cylindrical-type projections; the sides for the transverse ones):
+/// Some(transverse), or None.
+fn polar_axis(p: Projection) -> Option<bool> {
+    use Projection::*;
+    match p {
+        Cylindrical | Spherical | Mercator | Hammer | Mollweide => Some(false),
+        TransverseCylindrical | TransverseMercator => Some(true),
+        _ => None,
+    }
 }
 
 /// Bounding box (umin, umax, vmin, vmax) of outlines.
@@ -366,7 +481,8 @@ pub struct ComposeParams {
     pub f: f64,
     pub c: Pt,
     pub blend: Blend,
-    pub lens: Lens,
+    /// Lens distortion of each image (indexed like the images; missing = none).
+    pub lenses: Vec<Lens>,
     /// Feathering weight = (distance to the border)^sharpness.
     pub sharpness: f64,
     /// Relative brightness difference above which `Smart` treats photos as disagreeing.
@@ -452,9 +568,10 @@ pub fn source_map(g: &[M3], sizes: &[(usize, usize)], box_: (f64, f64, f64, f64)
     for (i, m) in force.iter().enumerate() {
         let (Some(m), Some(gi), Some(&(h, w))) = (m, g.get(i), sizes.get(i)) else { continue };
         let ms = inv(gi) * k;
-        let o = outline(gi, h, w, p.projection, p.f, p.c, p.lens, 24);
+        let o = outline(gi, h, w, p.projection, p.f, p.c, p.lens(i), 24);
         let Some((x0, x1, y0, y1)) = outline_box(&o, umin, vmin, p.scale, wc, hc) else { continue };
         let ci = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+        let lens = p.lens(i);
         let (kh, kw) = (m.h as f64 / h as f64, m.w as f64 / w as f64);
         fi.par_chunks_mut(wc).zip(fm.par_chunks_mut(wc)).enumerate().skip(y0 - 1).take(y1 - y0 + 1).for_each(|(y, (irow, mrow))| {
             for x in x0..=x1 {
@@ -464,7 +581,7 @@ pub fn source_map(g: &[M3], sizes: &[(usize, usize)], box_: (f64, f64, f64, f64)
                     continue;
                 }
                 let (ix, iy) = ((ms[(0, 0)] * xx + ms[(0, 1)] * yy + ms[(0, 2)] * zz) / sw, (ms[(1, 0)] * xx + ms[(1, 1)] * yy + ms[(1, 2)] * zz) / sw);
-                let (ox, oy) = distort(ix, iy, ci, p.lens);
+                let (ox, oy) = distort(ix, iy, ci, lens);
                 if !(1.0 <= ox && ox <= w as f64 && 1.0 <= oy && oy <= h as f64) {
                     continue;
                 }
@@ -499,9 +616,16 @@ pub struct SkyMap {
     pub bg: Img,
 }
 
+impl ComposeParams {
+    /// The lens distortion of image i.
+    pub fn lens(&self, i: usize) -> Lens {
+        self.lenses.get(i).copied().unwrap_or_default()
+    }
+}
+
 impl Default for ComposeParams {
     fn default() -> Self {
-        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lens: (0.0, 1.0), sharpness: 1.0, deghost: 0.12, levels: None, sky: None, force: None }
+        Self { scale: 1.0, projection: Projection::Rectilinear, f: 1000.0, c: [0.0, 0.0], blend: Blend::Feather, lenses: Vec::new(), sharpness: 1.0, deghost: 0.12, levels: None, sky: None, force: None }
     }
 }
 
@@ -529,6 +653,7 @@ impl<S: Sample> Sampler<'_, S> {
         let (xx, yy, zz) = proj_inverse(p.projection, ((x - 0.5) / p.scale + self.umin - 0.5) / p.f, ((y - 0.5) / p.scale + self.vmin - 0.5) / p.f)?;
         let (h, w) = self.sizes[i];
         let ci = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
+        let lens = p.lens(i);
         let at = |m: &M3| -> Option<(f64, f64)> {
             let sw = m[(2, 0)] * xx + m[(2, 1)] * yy + m[(2, 2)] * zz;
             if sw <= 0.0 {
@@ -541,7 +666,7 @@ impl<S: Sample> Sampler<'_, S> {
         // sky there and at its own position (else the ground decides).
         let sky = self.sky[i].as_ref().and_then(|(ms, map)| {
             let open = |(x, y): (f64, f64)| {
-                let (ox, oy) = distort(x, y, ci, p.lens);
+                let (ox, oy) = distort(x, y, ci, lens);
                 let m = &map.open;
                 let (my, mx) = ((oy - 0.5) / h as f64 * m.h as f64, (ox - 0.5) / w as f64 * m.w as f64);
                 my >= 0.0 && mx >= 0.0 && (my as usize) < m.h && (mx as usize) < m.w && m.at(my as usize, mx as usize)
@@ -553,7 +678,7 @@ impl<S: Sample> Sampler<'_, S> {
             }
             // background at its own position minus that at the turned-back one
             let bg = |(x, y): (f64, f64)| {
-                let (ox, oy) = distort(x, y, ci, p.lens);
+                let (ox, oy) = distort(x, y, ci, lens);
                 bilinear(&map.bg, (oy - 0.5) / h as f64 * map.bg.h as f64 + 0.5, (ox - 0.5) / w as f64 * map.bg.w as f64 + 0.5)
             };
             let (b0, b1) = (bg(g0), bg(q));
@@ -563,10 +688,10 @@ impl<S: Sample> Sampler<'_, S> {
             Some((q, d)) => (q, Some(d)),
             None => (ground?, None),
         };
-        if ((ix - ci[0]).powi(2) + (iy - ci[1]).powi(2)) / p.lens.1.powi(2) > self.rlim2[i] {
+        if ((ix - ci[0]).powi(2) + (iy - ci[1]).powi(2)) / lens.fc.powi(2) > self.rlim2[i] {
             return None;
         }
-        let (ox, oy) = distort(ix, iy, ci, p.lens);
+        let (ox, oy) = distort(ix, iy, ci, lens);
         if !(1.0 <= ox && ox <= w as f64 && 1.0 <= oy && oy <= h as f64) {
             return None;
         }
@@ -617,15 +742,17 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
     // each photo's own extent (its undistorted corners, plus a margin) may sample it.
     let rlim2: Vec<f64> = sizes
         .iter()
-        .map(|&(h, w)| {
+        .enumerate()
+        .map(|(i, &(h, w))| {
+            let lens = p.lens(i);
             let ci = [(w as f64 + 1.0) / 2.0, (h as f64 + 1.0) / 2.0];
             let corners = [(1.0, 1.0), (w as f64, 1.0), (1.0, h as f64), (w as f64, h as f64)];
             1.05f64.powi(2)
                 * corners
                     .iter()
                     .map(|&(x, y)| {
-                        let (ux, uy) = undistort(x, y, ci, p.lens);
-                        ((ux - ci[0]).powi(2) + (uy - ci[1]).powi(2)) / p.lens.1.powi(2)
+                        let (ux, uy) = undistort(x, y, ci, lens);
+                        ((ux - ci[0]).powi(2) + (uy - ci[1]).powi(2)) / lens.fc.powi(2)
                     })
                     .fold(f64::MIN, f64::max)
         })
@@ -644,7 +771,7 @@ pub fn compose<S: Sample>(imgs: &[&S], g: &[M3], box_: (f64, f64, f64, f64), p: 
     let mut best = if smart { Img::new(hc, wc) } else { Img::new(0, 0) };
     let mut bestw = if smart { Gray::new(hc, wc) } else { Gray::new(0, 0) };
     let mut besti: Vec<i32> = vec![0; if smart { hc * wc } else { 0 }];
-    let outlines: Vec<Vec<Pt>> = (0..n).map(|i| outline(&g[i], sizes[i].0, sizes[i].1, p.projection, p.f, p.c, p.lens, 24)).collect();
+    let outlines: Vec<Vec<Pt>> = (0..n).map(|i| outline(&g[i], sizes[i].0, sizes[i].1, p.projection, p.f, p.c, p.lens(i), 24)).collect();
     // Source masks: where photo k is asked for with strength m, the other photos
     // weigh (1 - m) times as much, so the masked photo takes over smoothly.
     let fmap = source_map(g, sizes, box_, p).map(|(_, _, fi, fm)| (fi, fm));
@@ -772,9 +899,9 @@ fn pyramid_levels(hc: usize, wc: usize) -> usize {
     ((hc.min(wc) as f64 / 16.0).log2().floor() as i64).clamp(0, 7) as usize
 }
 
-/// As `compose` (without the coverage), but rendered in bands of about
-/// `band_rows` rows: `band(y0, img)` receives each band (output rows y0 …) in
-/// turn, so only one band is in memory at a time. Smart blending also renders
+/// As `compose`, but rendered in bands of about `band_rows` rows:
+/// `band(y0, img, coverage)` receives each band (output rows y0 …; its
+/// coverage when `coverage`) in turn, so only one band is in memory at a time. Smart blending also renders
 /// a margin above and below each band (its deghosting and the blend across the
 /// photos' seams reach that far), so the bands join without a visible step.
 /// Returns the output size (w, h).
@@ -788,7 +915,8 @@ pub fn compose_bands<S: Sample>(
     scales: &[f64],
     sizes: &[(usize, usize)],
     band_rows: usize,
-    band: &mut dyn FnMut(usize, Img) -> Result<(), String>,
+    coverage: bool,
+    band: &mut dyn FnMut(usize, Img, Option<Bits>) -> Result<(), String>,
 ) -> Result<(usize, usize), String> {
     let (umin, umax, vmin, vmax) = box_;
     let wc = (((umax - umin + 1.0) * p.scale).round() as usize).max(1);
@@ -811,12 +939,13 @@ pub fn compose_bands<S: Sample>(
         let (a, b) = (y0.saturating_sub(pad), (y0 + n + pad).min(hc));
         let top = vmin + a as f64 / p.scale;
         let sub = (umin, umax, top, top + (b - a) as f64 / p.scale - 1.0);
-        let (img, _) = compose(imgs, g, sub, &p2, gains, scales, sizes, false);
+        let (img, cov) = compose(imgs, g, sub, &p2, gains, scales, sizes, coverage);
         if img.h != b - a || img.w != wc {
             return Err(format!("internal error: band of {}×{} px, expected {wc}×{}", img.w, img.h, b - a));
         }
         let core = if (a, b) == (y0, y0 + n) { img } else { img.crop(y0 - a, y0 - a + n, 0, wc) };
-        band(y0, core)?;
+        let cov = cov.map(|c| Bits { w: wc, h: n, v: c.v[(y0 - a) * wc..(y0 - a + n) * wc].to_vec() });
+        band(y0, core, cov)?;
         y0 += n;
     }
     Ok((wc, hc))

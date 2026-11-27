@@ -565,7 +565,7 @@ impl FinishTab {
                 let img = finish::export_size(&img, &p);
                 io::save_image(&out, &img, p.jpeg_quality)?;
                 let extra = if linear { tr(", linear: stretch, light, curves, colour, detail and the sky / foreground looks left out") } else if local.is_some() { tr(", sky and foreground looks") } else { "" };
-                Ok((crate::trf!("Saved {} ({}×{} px; {}{}).", out, img.w, img.h, finish::summary(&p), extra), Box::new((p, local))))
+                Ok((crate::trf!("Saved {} ({}×{} px; {}{}).", out, img.w, img.h, finish::summary(&p, tr), extra), Box::new((p, local))))
             })
             .unwrap_or_else(|_| Err(panic_text()));
             let _ = tx.send(Msg::Saved(r));
@@ -642,7 +642,7 @@ impl FinishTab {
             ui.horizontal_wrapped(|ui| {
                 ui.label(tr("Preset"));
                 let mut chosen = None;
-                egui::ComboBox::from_id_salt("fin_preset").selected_text(if list.is_empty() { "none saved yet" } else { "apply…" }).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt("fin_preset").selected_text(if list.is_empty() { tr("none saved yet") } else { tr("apply…") }).show_ui(ui, |ui| {
                     for n in &list {
                         if ui.selectable_label(false, n).clicked() {
                             chosen = Some(n.clone());
@@ -950,7 +950,11 @@ impl FinishTab {
             });
             ui.end_row();
             ui.label("");
-            ui.add(egui::DragValue::new(&mut self.p.long_edge).range(0..=60000).suffix(tr(" px")).speed(10)).on_hover_text(tr("Longest side of the saved image; 0 = full size"));
+            // 0 means full size: say so instead of showing "0 px".
+            ui.add(egui::DragValue::new(&mut self.p.long_edge).range(0..=60000).speed(10)
+                .custom_formatter(|v, _| if v < 0.5 { tr("full size").to_string() } else { format!("{v:.0} px") })
+                .custom_parser(|s| s.trim().trim_end_matches("px").trim().parse::<f64>().ok().or(Some(0.0))))
+                .on_hover_text(tr("Longest side of the saved image in pixels (drag, or double-click and type); 0 = full size"));
             ui.end_row();
             if matches!(io::ext_of(&self.out).as_str(), "jpg" | "jpeg") {
                 ui.label(tr("JPEG quality"));
@@ -962,7 +966,7 @@ impl FinishTab {
         ui.label(format!("→ {ow} × {oh} px ({:.1} MP)", (ow * oh) as f64 / 1e6));
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.out).desired_width(ui.available_width().min(240.0)).hint_text(tr("output file")));
+            ui.add(egui::TextEdit::singleline(&mut self.out).desired_width(ui.available_width().min(240.0)).hint_text(tr("output file"))).on_hover_text(self.out.as_str());
             let cur = io::ext_of(&self.out);
             egui::ComboBox::from_id_salt("fin_fmt").selected_text(if cur.is_empty() { tr("type").to_string() } else { cur.clone() }).show_ui(ui, |ui| {
                 for (e, l) in io::OUTPUT_FORMATS {
@@ -972,6 +976,7 @@ impl FinishTab {
                 }
             });
         });
+        super::path_note(ui, &self.out);
         if io::is_astro(&self.out) {
             ui.label(egui::RichText::new(tr("FITS / XISF get the finished (stretched) image here, as 32-bit float.")).weak().size(12.0));
         }
@@ -1012,7 +1017,7 @@ impl FinishTab {
         }
         ui.separator();
         let extra = if self.mask.local.used() { tr(", sky and foreground looks") } else { "" };
-        ui.label(egui::RichText::new(crate::trf!("In use: {}{}", finish::summary(&self.p), extra)).weak().size(12.0));
+        ui.label(egui::RichText::new(crate::trf!("In use: {}{}", finish::summary(&self.p, tr), extra)).weak().size(12.0));
     }
 
     // ----------------------------------------------------------------------
@@ -1168,8 +1173,8 @@ impl FinishTab {
             match grip {
                 CropGrip::New => f = [a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)],
                 CropGrip::Move => {
-                    let dx = (b.0 - a.0).clamp(-f0[0], 1.0 - f0[2]);
-                    let dy = (b.1 - a.1).clamp(-f0[1], 1.0 - f0[3]);
+                    let dx = super::clamp_safe(b.0 - a.0, -f0[0], 1.0 - f0[2]);
+                    let dy = super::clamp_safe(b.1 - a.1, -f0[1], 1.0 - f0[3]);
                     f = [f0[0] + dx, f0[1] + dy, f0[2] + dx, f0[3] + dy];
                 }
                 CropGrip::Edges(e) => {
@@ -1389,7 +1394,9 @@ fn curve_editor(ui: &mut egui::Ui, pts: &mut Vec<[f64; 2]>, hist: Option<&[f32]>
                 Some(i) => i,
                 None => {
                     let (x, y) = to_c(q);
-                    if x <= 0.005 || x >= 0.995 {
+                    // Not on top of another point (two points closer than 0.02
+                    // could not be moved apart).
+                    if x <= 0.005 || x >= 0.995 || pts.iter().any(|c| (c[0] - x).abs() < 0.02) {
                         usize::MAX
                     } else {
                         let i = pts.iter().position(|c| c[0] > x).unwrap_or(pts.len());
@@ -1412,7 +1419,7 @@ fn curve_editor(ui: &mut egui::Ui, pts: &mut Vec<[f64; 2]>, hist: Option<&[f32]>
             } else if i == n - 1 {
                 x = 1.0;
             } else {
-                x = x.clamp(pts[i - 1][0] + 0.01, pts[i + 1][0] - 0.01);
+                x = super::clamp_safe(x, pts[i - 1][0] + 0.01, pts[i + 1][0] - 0.01);
             }
             if pts[i] != [x, y] {
                 pts[i] = [x, y];
@@ -1446,6 +1453,9 @@ fn curve_editor(ui: &mut egui::Ui, pts: &mut Vec<[f64; 2]>, hist: Option<&[f32]>
 /// Hooks for the headless window tests (tests/gui.rs).
 #[doc(hidden)]
 impl FinishTab {
+    pub fn t_set_display(&mut self, v: crate::finish::ViewStretch) {
+        self.display = v;
+    }
     pub fn t_status(&self) -> &str {
         &self.status
     }

@@ -364,7 +364,7 @@ pub fn median(v: &mut [f32]) -> f32 {
     if n == 0 {
         return f32::NAN;
     }
-    v.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    v.sort_unstable_by(|a, b| a.total_cmp(b));
     if n % 2 == 1 {
         v[n / 2]
     } else {
@@ -385,7 +385,7 @@ pub fn median_f64(it: impl IntoIterator<Item = f64>) -> f64 {
     if n == 0 {
         return f64::NAN;
     }
-    v.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    v.sort_unstable_by(|a, b| a.total_cmp(b));
     if n % 2 == 1 {
         v[n / 2]
     } else {
@@ -408,7 +408,7 @@ pub fn quantile_sorted(v: &[f32], p: f64) -> f32 {
 
 /// Quantiles of an unsorted slice (sorted in place).
 pub fn quantiles(v: &mut [f32], ps: &[f64]) -> Vec<f32> {
-    v.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    v.sort_unstable_by(|a, b| a.total_cmp(b));
     ps.iter().map(|&p| quantile_sorted(v, p)).collect()
 }
 

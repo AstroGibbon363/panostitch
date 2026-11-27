@@ -114,7 +114,7 @@ Uwagi:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -197,7 +197,7 @@ potem zmienić.
 | Ustawienie | Do czego | Główne parametry |
 |---|---|---|
 | **krajobraz dzienny** | panoramy dzienne, aparat obracany w miejscu | lekkie odszumianie, homografia, cylindryczna |
-| **astro / krajobraz nocny** | nocne niebo, Droga Mleczna nad krajobrazem | mocne odszumianie, luźniejsze dopasowanie, sferyczna, +1 EV (potem **Automatyczna ekspozycja**), wyższy próg narożników (mniej fałszywych narożników w szumie) |
+| **astro / krajobraz nocny** | nocne niebo, Droga Mleczna nad krajobrazem | mocne odszumianie, luźniejsze dopasowanie, sferyczna, wyższy próg narożników (mniej fałszywych narożników w szumie). Jasność: **Automatyczna ekspozycja** lub **Ekspozycja (EV)**; ustawienia wstępne jej nie zmieniają |
 | **mozaika deep-sky** | mozaiki pól gwiazdowych z teleskopu, np. FITS | małe odszumianie (gwiazdy są malutkie), model podobieństwa (przesunięcie + obrót pola), bez dopracowania, prostoliniowa; użyj **Automatyczne rozciągnięcie** |
 | **makro / mikroskop** | szkiełko lub stolik przesuwany pod nieruchomym aparatem | model przesunięcia (klatki tylko się przesuwają), bez dopracowania, prostoliniowa |
 | **skan / płaski dokument** | mapy, obrazy, dokumenty fotografowane częściami | model afiniczny, bez dopracowania, prostoliniowa |
@@ -270,6 +270,9 @@ zostawia tylko dopasowania zgodne z jednym modelem geometrycznym (*inliery*).
 | **Min. inlierów** | 20 | Najmniejsza liczba inlierów, by para liczyła się jako prawdziwa zakładka. |
 | **Model** | homografia | Jak jedno zdjęcie przechodzi na drugie, zob. niżej. |
 | **dopracuj** | wł. | Globalne dopracowanie, zob. niżej. |
+| **plate solving zdjęć nieba** | włączone | Odnajduje zdjęcia nieba w katalogu gwiazd, zob. niżej. |
+| **Dystorsja obiektywu** | Beczka / poduszka (k1) | Co z dystorsji obiektywu dopasowuje dopracowanie, zob. niżej. |
+| **każde zdjęcie własna dystorsja** | wyłączone | Każde zdjęcie ma własną dystorsję obiektywu, zob. niżej. |
 
 **Kiedy para liczy się jako prawdziwa zakładka:** potrzebuje co najmniej
 *Min. inlierów* inlierów, wyraźna większość jej dopasowań musi się zgadzać, a
@@ -297,6 +300,19 @@ wspólnego rozwiązania, są **odrzucane automatycznie**, bo to zwykle fałszywe
 dopasowania lub coś, co się poruszyło. Pasek stanu podaje, ile odrzucono, i
 **typowy błąd pary** (1–3 px to dobrze).
 
+**Dystorsja obiektywu.** **Dystorsja obiektywu** określa, co dopracowanie
+dopasowuje oprócz obrotów: **Wyłączone (tylko obroty)** dla obiektywów bez
+dystorsji (lub już poprawionych zdjęć); **Beczka / poduszka (k1)**, domyślnie,
+dla zwykłego wygięcia prostych linii; **Wielomianowa, falista (k1, k2)** dla
+falistej dystorsji wielu obiektywów szerokokątnych („wąsy”), gdy linie wyginają
+się w środku w jedną stronę, a w rogach w drugą (k1·r² + k2·r⁴, jak w Huginie
+i PTGui). Z **każde zdjęcie własna dystorsja** każde zdjęcie dostaje własne
+wartości, trzymane blisko wspólnych tam, gdzie jego punkty mówią niewiele: dla
+zoomu, który przesunął się między ujęciami, lub zdjęć z dwóch obiektywów.
+Obrót każdego zdjęcia jest zawsze dopracowywany osobno. Pasek stanu pokazuje
+znalezione wartości. Gdy typowy błąd pary wyraźnie spada, bogatszy model się
+opłaca; w przeciwnym razie zostaw prostszy.
+
 **Nocne niebo: dopasowanie po gwiazdach.** Punkty narożne rzadko dopasowują
 klatki, na których jest tylko niebo: każda gwiazda wygląda jak każda inna. Gdy
 punkty pary zawiodą, porównywane są więc jej **gwiazdy**: trójkąty sąsiednich
@@ -307,6 +323,30 @@ stanu je liczy. Akceptowane są tylko pary z wystarczającą liczbą gwiazd w
 części wspólnej, z których spora część pasuje. Gdy aparaty celują daleko od
 siebie (rząd w górę i rząd w dół), dalekie rogi zdjęcia leżą za drugim
 aparatem; wtedy oceniana jest tylko część pokryta dopasowaniami.
+
+**Nocne niebo: plate solving.** Zdjęcia, które są (prawie) samym niebem (95 %
+lub więcej, tak jak mierzy to program), odnajduje się w katalogu gwiazd
+dołączonym do programu (Hipparcos i Tycho-2, około 42 000 gwiazd do 8
+magnitudo): ich gwiazdy są identyfikowane, bez żadnej wskazówki, gdzie
+celował aparat. Dwa takie zdjęcia, które się nakładają, łączy się następnie
+gwiazdami zidentyfikowanymi w obu, nawet gdy nakładanie jest małe lub
+dopasowanie zawiodło, a źle dopasowana para jest poprawiana. Katalog mierzy też
+dokładnie ogniskową każdego zdjęcia, więc uwzględniony zostaje także zoom,
+który przesunął się między ujęciami z tą samą ogniskową w EXIF. Lista obrazów
+oznacza znalezione zdjęcia znakiem ★; widok obrazu podaje środek (rektascensja,
+deklinacja), liczbę zidentyfikowanych gwiazd i pole oraz zakreśla te gwiazdy na
+niebiesko. Zdjęcia z krajobrazem zostają dla zwykłego dopasowania. Trwa poniżej
+sekundy na zdjęcie; wyłącza się je opcją **plate solving zdjęć nieba**.
+
+**Siatka nieba.** Gdy zdjęcia zostały odnalezione w katalogu gwiazd,
+**⊕ Siatka nieba** nad podglądem rysuje na panoramie współrzędne nieba, jak
+siatka niebieska w Sirilu: linie rektascensji i deklinacji z wartościami oraz
+okręgi z nazwami najjaśniejszych gwiazd, obiektów Messiera i innych jasnych
+obiektów głębokiego nieba (więcej po przybliżeniu; tylko tam, gdzie zdjęcie
+pokazuje niebo). Opiera się na wszystkich gwiazdach zidentyfikowanych na
+zdjęciach, więc podąża za odwzorowaniem, pochyleniem i przechyłem panoramy;
+tam, gdzie niebo obróciło się między ujęciami, jest przybliżona (róg podglądu
+podaje dokładność). Jest rysowana tylko w podglądzie, nie zapisuje się.
 
 **Zoom, który się przesunął.** Skierowany w górę lub w dół pierścień zoomu może
 się obrócić pod własnym ciężarem między ujęciami. W plikach RAW ogniskowa
@@ -380,12 +420,43 @@ Zob. [Projekcje](#7-projekcje), jak wygląda każda z nich.
 | **Pochylenie (°)** | Pochyla całą panoramę w górę lub w dół. Użyj, by **wyprostować wygięty horyzont** (np. gdy aparat był skierowany w dół). |
 | **Przechył (°)** | Obraca całą panoramę. Użyj, by wypoziomować przekrzywiony horyzont. |
 | *Dokładne ustawianie* | Odchylenie, pochylenie i przechył mają suwak, pole liczbowe i **◀ ▶**. Suwaki pochylenia i przechyłu są dokładne w pobliżu 0° (gdzie zwykle są poprawki) i zgrubne dalej. Przeciągaj pole liczbowe powoli, by zmieniać o 0,02° na piksel, albo kliknij dwukrotnie i wpisz. **◀ ▶** zmieniają o 0,1° (z Shiftem o 1°). |
+| **⟷ Automatyczny horyzont** | Znajduje horyzont w podglądzie i ustawia pochylenie i przechył tak, by był prosty (odchylenie zostaje). Zob. niżej. |
+| **✎ Horyzont ręcznie** | Sam kliknij punkty wzdłuż horyzontu, potem **✔ Wypoziomuj horyzont**. Zob. niżej. |
 | **Resetuj ogniskową / odchylenie / pochylenie / przechył** | Przywraca te cztery suwaki do wartości domyślnych. |
 
 Tytuł widoku pokazuje rozmiar panoramy, ogniskową w pikselach, pole widzenia
 zdjęcia odniesienia i typowy błąd wyrównania.
 
 Te elementy od razu aktualizują podgląd (gdy podgląd już istnieje).
+
+**Automatyczne prostowanie horyzontu.** Panorama rzadko wychodzi z prostym
+horyzontem: gdy zdjęcie odniesienia celowało trochę w górę lub w dół, horyzont
+wygina się w falę albo w literę U, a niewypoziomowany statyw go przechyla.
+**⟷ Automatyczny horyzont** znajduje w podglądzie krawędź nieba (gdzie niebo
+styka się z ziemią, kolumna po kolumnie), wygładza ją krzywą 4. rzędu
+(pojedyncze drzewa, wzgórza i latarnie liczą się mniej) i obraca widok
+(**pochylenie** i **przechył**; **odchylenie** zostaje), aż każdy jej punkt
+jest na tej samej wysokości. Na sferze to dokładne: poziomy horyzont jest
+prostą w panoramie walcowej, sferycznej, Merkatora, Hammera czy Mollweidego;
+w prostoliniowej trafia na linię środkową, jedyne miejsce, gdzie jest tam
+prosty. Znaleziony horyzont jest rysowany na zielono (z włączonymi
+**nakładkami**), widać więc, jak się prostuje; pasek stanu podaje, o ile był
+przesunięty. Cofnij (Ctrl+Z) przywraca dawne kąty. Krawędź nieba to sylwetka,
+nie zawsze prawdziwy horyzont: w panoramie węższej niż 90° zbocze terenu
+wyglądałoby jak przechylenie, dlatego przechył ponad 8° nie jest tam
+stosowany.
+
+**Ręczne zaznaczanie horyzontu.** Tam, gdzie sylwetka nie jest horyzontem
+(wzgórza, miasto, mgła), **✎ Horyzont ręcznie** pozwala go zaznaczyć: kliknij
+na panoramie 4 lub więcej punktów wzdłuż horyzontu, rozłożonych na jego
+długości (prawy przycisk usuwa najbliższy). Przez punkty prowadzona jest krzywa
+(4. rzędu; przez 4 punkty 3. rzędu); **✔ Wypoziomuj horyzont** (lub Enter)
+poziomuje go jak wyżej, Esc anuluje.
+
+Oba są dostępne tylko tam, gdzie poziomy horyzont może być prosty:
+prostoliniowe, walcowe, sferyczne, Merkatora, Hammera i Mollweidego, nie dla
+małej planety, tunelu, rybiego oka, stereograficznego ani odwzorowań
+poprzecznych.
 
 ### 5.5 Krok 4: składanie
 
@@ -403,7 +474,9 @@ Te elementy od razu aktualizują podgląd (gdy podgląd już istnieje).
 | **Usuń kadrowanie** | Usuwa kadrowanie. Kadrowanie znika też samo, gdy zmienisz coś, co przesuwa zdjęcia (projekcja, ogniskowa, odchylenie, pochylenie, przechył, przesunięcia, dopasowanie). |
 | **✂ Kadruj** (nad widokiem) | Zaznacz część panoramy, która zostaje: przeciągnij ramkę, dopasuj ją krawędziami lub rogami, przeciągnij wewnątrz, by ją przesunąć, i kliknij **✂ Kadrowanie: gotowe** (Esc anuluje). Liczona i zapisywana jest tylko ta część: duża panorama potrzebuje mniej pamięci, a do samego kadrowania nie trzeba karty Obróbka. Usuwa się je jak automatyczne kadrowanie; znika przy zmianie geometrii. |
 | **⬇ Zapisz i obrób…** (nad widokiem) | Zapisuje panoramę, a potem otwiera ją w karcie Obróbka. |
+| **◧ Wypełnij puste miejsca** (nad widokiem) | Wypełnia puste rogi i krawędzie wymyślonym niebem i ziemią (autouzupełnianie), zob. niżej. |
 | **Przesuń zaznaczone ← ↑ ↓ →** | Przesuwa bieżące zdjęcie o jeden piksel podglądu (zob. niżej). |
+| **Popraw wybrane zdjęcie** | Ręcznie obraca wybrane zdjęcie wokół jego środka i dodaje do jego dystorsji obiektywu (k1, k2), zob. niżej. |
 
 W widoku **Panorama** rysowany i numerowany jest obrys każdego zdjęcia:
 
@@ -425,6 +498,16 @@ zdjęciami do niego dołączonymi dalej od odniesienia (wzdłuż żółtych poł
 Zdjęcie odniesienia się nie rusza; do przesunięcia wszystkiego użyj pochylenia
 i przechyłu.
 
+**Poprawianie jednego zdjęcia.** **Popraw wybrane zdjęcie** (pod przyciskami
+przesuwania) obraca wybrane zdjęcie wokół jego własnego środka (**Obrót (°)**),
+dla zdjęcia lekko obróconego względem sąsiednich, i dodaje do jego dystorsji
+obiektywu: **Dystorsja k1 +** wygina proste linie (− beczka, + poduszka),
+**Dystorsja k2 +** działa głównie w rogach; ze znakiem przeciwnym do k1 poprawia
+falistą dystorsję. Poniżej widać wartości znalezione przez dopracowanie.
+Poprawki dotyczą wszystkich wybranych zdjęć; **Dystorsja dla wszystkich zdjęć**
+daje każdemu zdjęciu te same k1 i k2 (jeden obiektyw), **Wyzeruj** je usuwa.
+Można je cofnąć, zapisują się w projekcie, a nowe dopracowanie je zachowuje.
+
 **Maski zdjęć źródłowych.** Tam, gdzie łączenie wybiera złe zdjęcie (drzewo
 lub osoba, które się poruszyły, samochód, duch), wskaż, którego użyć: **✐ Maski
 zdjęć** nad widokiem. Shift+klik na panoramie wybiera zdjęcie pod kursorem
@@ -436,6 +519,20 @@ jedną). Maski są pokazane w kolorze i ponumerowane, podgląd odświeża się p
 każdym pociągnięciu, a krawędź jest miękka, więc zmiana nie ma szwu. Maski
 należą do zdjęcia (zostają na miejscu przy zmianie projekcji czy kadrowania),
 można je cofnąć i zapisują się w projekcie.
+
+**Wypełnianie pustych miejsc (autouzupełnianie).** **◧ Wypełnij puste
+miejsca** nad widokiem wypełnia części prostokąta, których nie pokrywa żadne
+zdjęcie (puste rogi i krawędzie; wewnątrz ramki kadrowania, jeśli jest),
+wymyśloną treścią przedłużającą otoczenie, jak robi to Microsoft ICE: niebo
+ciągnie się dalej ze swoją jasnością i kolorem, z gwiazdami i ziarnem
+skopiowanymi ze zdjęć, ziemia ze swoją trawą. Każda mała część pustego miejsca
+bierze najbardziej podobny fragment zdjęć, od zgrubnego do dokładnego, a w
+pełnej rozdzielczości dokopiowuje się sfotografowany detal. Podgląd to pokazuje,
+a zapis robi to w pełnej rozdzielczości (komunikat podaje, jaka część została
+dorobiona). Nadaje się do nieba, którego u góry jest trochę za mało, lub do
+postrzępionej krawędzi; duże puste miejsce staje się wiarygodnym, ale
+wymyślonym niebem. To jest wymyślone: sprawdź przed publikacją i zaznacz to tam,
+gdzie ma to znaczenie (konkursy, nauka).
 
 ### 5.6 Krok 5: rozciąganie
 
@@ -515,8 +612,8 @@ dopasowań: około 50 kB na zdjęcie.
 | Czynność | Mysz | Klawiatura | Przycisk |
 |---|---|---|---|
 | Przesuwanie | przeciąganie **lewym** przyciskiem | strzałki (widoki Obraz i Para) | |
-| Powiększenie | kółko w górę | `+` | **Powiększ +** |
-| Pomniejszenie | kółko w dół | `-` | **Pomniejsz -** |
+| Powiększenie | kółko w górę | `+` | **+** |
+| Pomniejszenie | kółko w dół | `-` | **−** |
 | Reset powiększenia | | `F`, `0` lub `Home` | **Dopasuj** |
 | Zaznaczenie zdjęcia (widok Panorama) | klik wewnątrz jego obrysu | | |
 | Pokaż / ukryj obrysy, numery, połączenia | | | przełącznik **nakładki** |
@@ -827,7 +924,7 @@ trwało, rozmiar wyniku i zapisany plik z jego rozmiarem albo co poszło źle.
 
 | Wpis | Co sfotografować |
 |---|---|
-| **Lighty** (*Zdjęcia gwiazd* w trybie prostym) | Ujęcia nieba: ta sama ogniskowa, przysłona i ekspozycja. Najlepszy jest RAW; TIFF, FITS lub XISF tylko, jeśli dane są wciąż liniowe (nieedytowane). **Ujednolić ekspozycję** wyrównuje klatki zrobione w innych warunkach. |
+| **Lighty** (*Zdjęcia gwiazd* w trybie prostym) | Ujęcia nieba: ta sama ogniskowa, przysłona i ekspozycja. Najlepszy jest RAW; TIFF, FITS lub XISF tylko, jeśli dane są wciąż liniowe (nieedytowane). **Normalizacja** i **Usuń gradient każdej klatki**: zob. pod tabelą. |
 | **Klatka bazowa** (*Zdjęcie bazowe* w trybie prostym) | Klatka, do której wyrównywane są pozostałe. Puste = środkowy light. Wybierz inną z listy obok **Klatka bazowa** albo wybierz light z jego listy i kliknij **Użyj jako bazowej**. |
 | **Darki** (*Zdjęcia szumu* w trybie prostym) | Ciemne klatki: dekielek na obiektywie, to samo ISO i czas, zrobione tuż przed zdjęciami gwiazd lub po nich. Usuwają szum termiczny i gorące piksele. |
 | **Biasy** (*Zdjęcia bias* w trybie prostym) | Najkrótszy czas, dekielek na obiektywie, to samo ISO. |
@@ -836,8 +933,27 @@ trwało, rozmiar wyniku i zapisany plik z jego rozmiarem albo co poszło źle.
 | **Zdjęcie pierwszego planu** | Opcjonalne: jedno ujęcie ziemi z tego samego miejsca statywu – o niebieskiej godzinie, z długim czasem lub niskim ISO. Zastępuje (zaszumiony, ciemny) stackowany pierwszy plan pod obszarem nieba. **Dopasuj jasność do stackowanej ziemi** skaluje je do stackowanej ziemi; **Ekspozycja (EV)** rozjaśnia lub przyciemnia je od tego punktu. Wymaga obszaru nieba. |
 | **Wynik** | Ustawiany w wierszu **Zapisz jako**: nazwa, typ i folder. `.tif` / `.png` (16 bitów), `.jpg` (8 bitów) lub `.fits` / `.xisf` (32-bitowe liczby zmiennoprzecinkowe, liniowo, do dalszej obróbki w Sirilu, PixInsight itp.). |
 
+**Zdjęcia pionowe** (aparat obrócony) są składane pionowo: po odjęciu darków i
+flatów (te wymagają orientacji matrycy) każda klatka jest obracana tak, jak
+aparat zapisał przy klatce bazowej. Podgląd, rysowany obszar nieba i zapisany
+stos są pionowe. Projekt lub ustawienia zapisane przed wersją 0.4.1 z ręcznie
+narysowanym obszarem nieba zachowują starą (obróconą na bok) orientację, żeby
+narysowana linia nadal pasowała.
+
 Wszystkie klatki kalibracyjne są opcjonalne. Nawet kilka darków bardzo pomaga
 przy wysokim ISO.
+
+**Normalizacja** dopasowuje niebo każdej klatki do klatki bazowej przed
+połączeniem klatek: *Addytywna* przesuwa poziom każdej klatki (dla tła, które
+się zmienia: zanieczyszczenie światłem, Księżyc, zmierzch), *Multiplikatywna*
+go skaluje (dla innych ekspozycji lub nocy; dawne *Ujednolić ekspozycję*),
+*Addytywna ze skalowaniem* przesuwa go i skaluje do rozrzutu klatki bazowej,
+jak domyślnie robi Siril przy stackowaniu z odrzucaniem. **Usuń gradient każdej
+klatki** przed stackowaniem dopasowuje do nieba każdej klatki płaszczyznę
+(gradient pierwszego rzędu, jak *subsky 1* w Sirilu) i ją odejmuje, zachowując
+poziom: na zanieczyszczenie światłem zmieniające się z klatki na klatkę,
+którego obraz po stackowaniu już by się nie pozbył. Gwiazdy i obiekty są
+pomijane w dopasowaniu; w krajobrazach poprawiany jest tylko obszar nieba.
 
 **Listy plików:** każda grupa pokazuje swoje pliki na liście obok swojej nazwy,
 więc setki lightów nie wymagają przewijania. Wybierz tam plik, by zobaczyć go

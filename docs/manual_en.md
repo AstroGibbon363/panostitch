@@ -106,7 +106,7 @@ Notes:
 ```
 ┌──────────────────────┬──────────────────────────────────────┬─────────────────────┐
 │ [Open…] [Save proj.] │ [Image+keypoints] [Pair matches]     │ 3 · Projection      │
-│ Images               │ [Panorama] [Zoom +] [Zoom -] [Fit]   │  projection menu    │
+│ Images               │ [Panorama] [ + ] [ − ] [Fit]         │  projection menu    │
 │  Add Remove Clear ▲▼ │ (o) overlays  [Undo] [Redo]          │  Focal, Yaw, Pitch, │
 │  path box            │                                      │  Roll               │
 │  image list          │                                      │ 4 · Compose         │
@@ -182,7 +182,7 @@ changed afterwards.
 | Preset | For | Main settings |
 |---|---|---|
 | **day landscape** | daylight panoramas, camera rotated in place | light denoising, homography, cylindrical |
-| **astro / night landscape** | night skies, Milky Way over a landscape | strong denoising, looser matching, spherical, +1 EV (then **Auto exposure**), higher corner threshold (fewer false corners in the noise) |
+| **astro / night landscape** | night skies, Milky Way over a landscape | strong denoising, looser matching, spherical, higher corner threshold (fewer false corners in the noise). Brightness: **Auto exposure** or **Exposure (EV)**; presets leave it alone |
 | **deep-sky mosaic** | telescope mosaics of star fields, e.g. FITS | little denoising (stars are tiny), similarity model (shift + field rotation), no refinement, rectilinear; use **Auto stretch** |
 | **macro / microscope** | a slide or stage moved under a fixed camera | translation model (frames only shift), no refinement, rectilinear |
 | **scan / flat document** | maps, paintings, documents photographed in parts | affine model, no refinement, rectilinear |
@@ -255,6 +255,9 @@ the matches that agree with a single geometric model (the *inliers*).
 | **Min. inliers** | 20 | Fewest inliers for a pair to count as a real overlap. |
 | **Model** | homography | How one image maps onto another, see below. |
 | **refine** | on | Global refinement, see below. |
+| **plate solve photos of the sky** | on | Find the photos of the sky on a star catalogue, see below. |
+| **Lens distortion** | Barrel / pincushion (k1) | What of the lens distortion the refinement fits, see below. |
+| **each image its own distortion** | off | Each photo gets its own lens distortion, see below. |
 
 **When a pair counts as a real overlap:** it needs at least *Min. inliers*
 inliers, a clear majority of its matches must agree, and the transform must be
@@ -283,6 +286,19 @@ automatically**, because they are usually false matches or something that
 moved. The status line reports how many were rejected and the **typical pair
 error** (1–3 px is good).
 
+**Lens distortion.** **Lens distortion** sets what the refinement fits
+besides the rotations: **Off (rotations only)** for lenses without distortion
+(or photos already corrected); **Barrel / pincushion (k1)**, the default, for
+the plain bowing of straight lines; **Polynomial, moustache (k1, k2)** for the
+wavy distortion of many wide-angle lenses, where lines bow one way in the
+middle and the other way in the corners (k1·r² + k2·r⁴, as in Hugin and
+PTGui). With **each image its own distortion** every photo gets its own
+values, kept close to the common ones where its points say little: for a zoom
+that crept between the shots, or photos from two lenses. Each photo's rotation
+is always refined on its own. The status line shows the values found. When
+the typical pair error drops clearly, the richer model is worth it; otherwise
+keep the simpler one.
+
 **Night skies: matching by stars.** Corner features rarely match frames that
 show only sky: every star looks like every other star. So when the features of
 a pair fail, its **stars** are compared instead: triangles of neighbouring
@@ -291,6 +307,30 @@ turns and when the sky turns, so frames shot minutes apart still match. Such
 pairs say *(stars)* in the Pair menu and the status line counts them. Only
 pairs with enough stars in their overlap, and a good share of them matching,
 are accepted.
+
+**Night skies: plate solving.** Photos that are (nearly) all sky (95 % or
+more, as the program measures it) are found on a star catalogue that comes with
+the program (Hipparcos and Tycho-2, about 42 000 stars to magnitude 8): their
+stars are identified, with no hint of where the camera pointed. Two such photos
+that overlap are then linked by the stars identified in both, even where the
+overlap is small or the matching failed, and a pair the matching got wrong is
+corrected. The catalogue also measures each photo's focal length exactly, so a
+zoom that crept between shots tagged with the same focal length is fitted too.
+The image list marks the photos found with ★; the image view gives the centre
+(right ascension, declination), the number of stars identified and the field,
+and circles those stars in blue. Photos with landscape are left to the other
+matching. It takes under a second per photo; **plate solve photos of the sky**
+switches it off.
+
+**Sky grid.** With photos found on the star catalogue, **⊕ Sky grid** above
+the view draws the sky's coordinates on the panorama, as Siril's celestial
+grid: lines of right ascension and declination with their numbers, and circles
+with the names of the brightest stars and of the Messier and other bright
+deep-sky objects (more of them as you zoom in; only where a photo shows the
+sky). It comes from all the stars identified on the photos, so it follows the
+panorama's projection, pitch and roll; where the sky turned between the shots
+it is approximate (the corner of the view says how close it fits). It is drawn
+on the view only, not saved in the panorama.
 
 **A zoom lens that crept.** Pointed up or down, a zoom ring can turn by its own
 weight between shots. With RAW files the focal length of every photo is known:
@@ -360,12 +400,40 @@ See [Projections](#7-projections) for what each one looks like.
 | **Pitch (°)** | Tilts the whole panorama up or down. Use it to **straighten a curved horizon** (for example if the camera was pointed down). |
 | **Roll (°)** | Rotates the whole panorama. Use it to level a sloping horizon. |
 | *Fine control* | Yaw, pitch and roll each have a slider, a number box and **◀ ▶**. The pitch and roll sliders are fine near 0° (where corrections usually are) and coarse further out. Drag the number box slowly for 0.02° per pixel, or double-click it and type. **◀ ▶** step by 0.1° (with Shift by 1°). |
+| **⟷ Auto horizon** | Finds the horizon in the preview and sets pitch and roll so that it is straight (yaw stays). See below. |
+| **✎ Horizon by hand** | Click points along the horizon yourself, then **✔ Level horizon**. See below. |
 | **Reset focal / yaw / pitch / roll** | Returns these four sliders to their defaults. |
 
 The view title shows the panorama size, the focal length in pixels, the field
 of view of the reference image, and the typical alignment error.
 
 These controls update the preview immediately (once a preview exists).
+
+**Straightening the horizon automatically.** A panorama rarely comes out with
+a straight horizon: when the reference photo pointed a little up or down, the
+horizon bows into a wave or a U, and a tripod that was not level tilts it.
+**⟷ Auto horizon** finds the edge of the sky in the preview (where sky meets
+ground, column by column), smooths it with a curve of the 4th order (single
+trees, hills and lamps count less) and turns the view (**pitch** and **roll**;
+**yaw** stays) until every point of it is at the same height. On the sphere
+that is exact: a level horizon is a straight line across a cylindrical,
+spherical, Mercator, Hammer or Mollweide panorama; a rectilinear one puts it on
+the middle line, the only place it is straight there. The found horizon is
+drawn as a green line (with **overlays** on), so you can see it come out
+straight; the status line says how much it was off. Undo (Ctrl+Z) brings the
+old angles back. The edge of the sky is the skyline, not always the true
+horizon: in a panorama narrower than 90° a slope of the land would look like a
+tilt, so a roll of more than 8° is not applied there.
+
+**Marking the horizon by hand.** Where the skyline is not the horizon (hills,
+a town, fog), **✎ Horizon by hand** lets you mark it: click 4 or more points
+along it on the panorama, spread over its length (right click removes the
+nearest one). A curve is drawn through them (of the 4th order; through 4 points
+the 3rd); **✔ Level horizon** (or Enter) levels it as above, Esc cancels.
+
+Both are offered only where a level horizon can be straight: rectilinear,
+cylindrical, spherical, Mercator, Hammer and Mollweide, not for little planet,
+tunnel, fisheye, stereographic or the transverse projections.
 
 ### 5.5 Step 4: Compose
 
@@ -383,7 +451,9 @@ These controls update the preview immediately (once a preview exists).
 | **Uncrop** | Removes the crop. The crop is also removed automatically when you change anything that moves the images (projection, focal, yaw, pitch, roll, moves, matching). |
 | **✂ Crop** (above the view) | Draw the part to keep on the panorama: drag a frame, drag its edges or corners to adjust it, drag inside it to move it, and click **✂ Crop: done** (Esc cancels). Only that part is rendered and saved, so a big panorama needs less memory and you don't need the Post-processing tab just to crop. **Uncrop** removes it; like Auto crop, it is removed when the geometry changes. |
 | **⬇ Save & post-process…** (above the view) | Saves the panorama and then opens it in the Post-processing tab. |
+| **◧ Fill empty areas** (above the view) | Fills the empty corners and edges with made-up sky and ground (auto-complete), see below. |
 | **Nudge ← ↑ ↓ →** | Moves the current image by one preview pixel (see below). |
+| **Correct selected image** | Turn the selected image about its own centre and add to its lens distortion (k1, k2) by hand, see below. |
 
 In the **Panorama** view, every image's outline is drawn and numbered:
 
@@ -402,6 +472,17 @@ keys or the **Nudge** buttons. The image moves together with the images
 attached to it further from the reference (along the yellow links). The
 reference image does not move; use Pitch and Roll to move everything.
 
+**Correcting one image.** **Correct selected image** (under the Nudge
+buttons) turns the selected image about its own centre (**Turn (°)**), for a
+photo that sits slightly rotated against its neighbours, and adds to its lens
+distortion: **Distortion k1 +** bends straight lines (− barrel, + pincushion),
+**Distortion k2 +** acts mostly in the corners; with the opposite sign of k1 it
+corrects moustache distortion. The values the refinement found are shown
+below. The corrections apply to all selected images; **Distortion to all
+images** gives every image the same k1 and k2 (one lens), **Reset** removes
+them. They can be undone, are saved in the project, and a new refinement keeps
+them.
+
 **Source masks.** Where the blend picks the wrong photo (a tree or a person
 that moved, a car, a ghost), tell it which one to use: **✐ Source masks** above
 the view. Shift+click on the panorama picks the image under the cursor (Shift+click
@@ -413,6 +494,19 @@ shown tinted and numbered, the preview updates after each stroke, and the edge
 is soft, so the change is seamless. Masks belong to the image (they stay put
 when you change the projection or crop), are undoable and are saved in the
 project.
+
+**Filling the empty areas (auto-complete).** **◧ Fill empty areas** above
+the view fills the parts of the rectangle no photo covers (the empty corners
+and edges; inside the crop frame, if there is one) with made-up content that
+continues what is around them, as Microsoft ICE does: the sky goes on with its
+brightness and colour, with stars and grain copied from the photos, the ground
+with its grass. Each small part of the empty area takes the most similar patch
+of the photos, coarse to fine, and at full size the photographed detail is
+copied in. The preview shows it and saving does it at full size (the message
+says what share was made up). It suits a sky a little short at the top or a
+ragged edge; a large empty area becomes a plausible but invented sky. It is
+made up: check it before you publish, and say so where it matters
+(competitions, science).
 
 ### 5.6 Step 5: Stretch
 
@@ -488,8 +582,8 @@ points: about 50 kB per image.
 | Action | Mouse | Keyboard | Button |
 |---|---|---|---|
 | Pan | drag with **left** button | arrow keys (Image and Pair views) | |
-| Zoom in | scroll up | `+` | **Zoom +** |
-| Zoom out | scroll down | `-` | **Zoom -** |
+| Zoom in | scroll up | `+` | **+** |
+| Zoom out | scroll down | `-` | **−** |
 | Reset zoom | | `F`, `0` or `Home` | **Fit** |
 | Select image (Panorama view) | click inside its outline | | |
 | Show / hide outlines, numbers, links | | | **overlays** switch |
@@ -791,7 +885,7 @@ it.
 
 | Entry | What to shoot |
 |---|---|
-| **Light frames** (*Star images* in simple mode) | The shots of the sky: same focal length, aperture and exposure. RAW is best; TIFF, FITS or XISF only if the data is still linear (not edited). **Unify exposure** evens out frames taken under different conditions. |
+| **Light frames** (*Star images* in simple mode) | The shots of the sky: same focal length, aperture and exposure. RAW is best; TIFF, FITS or XISF only if the data is still linear (not edited). **Normalisation** and **Remove each frame's gradient**: see below the table. |
 | **Base frame** (*Base image* in simple mode) | The frame the others are aligned to. Empty = the middle light frame. Choose another in the dropdown next to **Base frame**, or pick a light frame in its dropdown and click **Use as base**. |
 | **Dark frames** (*Noise images* in simple mode) | Dark frames: lens cap on, same ISO and exposure time, taken just before or after the star images. Removes thermal noise and hot pixels. |
 | **Bias frames** (*Bias images* in simple mode) | Shortest exposure, lens cap on, same ISO. |
@@ -800,8 +894,27 @@ it.
 | **Foreground image** | Optional: one shot of the ground from the same tripod position – at blue hour, a long exposure or low ISO. It replaces the (noisy, dark) stacked foreground below the sky region. **Match brightness** scales it to the stacked ground; **Exposure (EV)** brightens or darkens it from there. Needs a sky region. |
 | **Output** | Set in the **Save as** row: file name, type and folder. `.tif` / `.png` (16-bit), `.jpg` (8-bit), or `.fits` / `.xisf` (32-bit float, linear, for further processing in Siril, PixInsight etc.). |
 
+**Portrait photos** (the camera turned for an upright frame) are stacked
+upright: after the darks and flats are applied (they need the sensor's own
+orientation), every frame is turned as the base frame's camera tag says. The
+preview, the sky region you draw and the saved stack are all upright. A
+project or setting saved before version 0.4.1 with a sky region drawn by hand
+keeps the old (sideways) orientation, so the drawn line still fits.
+
 All calibration frames are optional. Even a few dark frames help a lot at
 high ISO.
+
+**Normalisation** brings every frame to the base frame's sky before the frames
+are combined: *Additive* shifts each frame's level (for a background that
+changes: light pollution, the Moon, twilight), *Multiplicative* scales it (for
+other exposures or nights; the former *Unify exposure*), *Additive with
+scaling* shifts it and scales it to the base frame's spread, as Siril does by
+default for stacking with rejection. **Remove each frame's gradient** fits a
+plane (a gradient of the first order, as Siril's *subsky 1*) to the sky of
+every frame before stacking and takes it out, keeping its level: for light
+pollution that changes from frame to frame, which the stacked image could not
+lose any more. Stars and objects are left out of the fit; on landscapes only
+the sky region is corrected.
 
 **The file lists:** each group shows its files in a dropdown next to its
 name, so hundreds of light frames need no scrolling. Choose a file there to

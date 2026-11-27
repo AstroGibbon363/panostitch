@@ -122,6 +122,8 @@ pub struct StackTab {
     project: Option<String>,
     /// Fingerprint of the setup last saved to (or opened from) a project file.
     saved_fp: Option<u64>,
+    /// Which note (notes.rs key) explains the last setting touched; translated when drawn.
+    /// Which note (notes.rs key) explains the last setting touched; translated when drawn.
     post_note: &'static str,
 }
 
@@ -136,7 +138,7 @@ impl Default for StackTab {
             post: None, post_key: 0, disp_view: Default::default(), disp_processed: true, post_busy: false, show_bg: false, show_samples: false, cal_pick: None, cal_drag: None, res_tex: None, running: false, loading: false,
             cancel: Arc::new(AtomicBool::new(false)), progress: Arc::new(Mutex::new(Progress::default())),
             status: tr("Add light frames to begin. Choose a group, then Add… (or type a path).").into(), pathbox: String::new(), name_edit: None, tx, rx, dialog: None,
-            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: super::notes::note("Tone"),
+            simple: false, autorun_done: false, running_preview: false, setting: None, project: None, saved_fp: None, post_note: "Tone",
         }
     }
 }
@@ -236,8 +238,11 @@ impl StackTab {
         self.loading = true;
         let tx = self.tx.clone();
         self.status = crate::trf!("Loading preview of {}…", basename(&p));
+        let upright = self.cfg.upright;
         crate::sys::background(move || {
-            let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| {
+            // Turned as the stacking turns the frames (see StackConfig::upright).
+            let rot = if upright { io::orientation_code(&p) } else { 1 };
+            let r = io::load_any(&p, &io::LoadOptions { half: true, orient: false, ..Default::default() }).map(|a| io::orient(a, rot)).map(|a| {
                 let f = PREVIEW_MAX as f64 / a.w.max(a.h) as f64;
                 ((a.h, a.w), if f < 1.0 { resize(&a, f) } else { a })
             });
@@ -325,7 +330,7 @@ impl StackTab {
                 if let Some(d) = done {
                     p.done = d.max(p.done).min(p.total);
                 }
-                p.msg = m.to_string();
+                p.msg = super::engine_text::tr_msg(m);
                 Ok(())
             };
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stack(&cfg, preview, &progress, None))).unwrap_or_else(|_| Err(tr("internal error (panic)").into()));
@@ -336,7 +341,7 @@ impl StackTab {
                     let nused = r.report.iter().filter(|fi| fi.used()).count();
                     let rej: Vec<&FrameInfo> = r.report.iter().filter(|fi| matches!(fi.status, Status::Rejected | Status::Failed)).collect();
                     let nexcl = r.report.iter().filter(|fi| fi.status == Status::Excluded).count();
-                    let s = crate::trf!("{}{} frame(s) stacked{}{}. Brightness ×{}.{} ({} s)", if preview { tr("Quick preview: ") } else { tr("Done: ") }, nused, if rej.is_empty() { String::new() } else { crate::trf!(", {} left out ({}{}) – see Frame report", rej.len(), rej.iter().take(2).map(|fi| format!("{}: {}", basename(&fi.path), fi.reason)).collect::<Vec<_>>().join("; "), if rej.len() > 2 { "; …" } else { "" }) }, if nexcl > 0 { crate::trf!(", {} excluded by you", nexcl) } else { String::new() }, format!("{:.2}", r.gain), if r.saved.is_empty() { String::new() } else if r.saved.len() == 1 { crate::trf!(" Saved {}.", r.saved[0]) } else { crate::trf!(" Saved {} files.", r.saved.len()) }, t0.elapsed().as_secs());
+                    let s = crate::trf!("{}{} frame(s) stacked{}{}. Brightness ×{}.{} ({} s)", if preview { tr("Quick preview: ") } else { tr("Done: ") }, nused, if rej.is_empty() { String::new() } else { crate::trf!(", {} left out ({}{}) – see Frame report", rej.len(), rej.iter().take(2).map(|fi| format!("{}: {}", basename(&fi.path), super::engine_text::tr_msg(&fi.reason))).collect::<Vec<_>>().join("; "), if rej.len() > 2 { "; …" } else { "" }) }, if nexcl > 0 { crate::trf!(", {} excluded by you", nexcl) } else { String::new() }, format!("{:.2}", r.gain), if r.saved.is_empty() { String::new() } else if r.saved.len() == 1 { crate::trf!(" Saved {}.", r.saved[0]) } else { crate::trf!(" Saved {} files.", r.saved.len()) }, t0.elapsed().as_secs());
                     let fw = r.fwhm * f;
                     let mut r = r;
                     r.fwhm = fw.max(r.fwhm * 0.0 + fw);
@@ -500,8 +505,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 }
                 Msg::Status(s) => self.status = s,
                 Msg::Error(e) => {
+                    let cancelled = e == "Cancelled.";
+                    // The engine's message in the window's language.
+                    let e = if cancelled { tr("Cancelled.").to_string() } else { super::engine_text::tr_msg(&e) };
                     if let Some((t0, _)) = self.run_info.take() {
-                        let cancelled = e == "Cancelled.";
                         let mut rep = super::JobReport::new(if cancelled { tr("Stacking cancelled") } else { tr("Stacking failed") }, false);
                         if !cancelled {
                             rep = rep.row(tr("Error"), e.clone());
@@ -593,14 +600,14 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ("foreground ev", c.foreground.ev, Box::new(|c, v| c.foreground.ev = v)),
         ];
         let tg: Vec<(&'static str, &mut bool)> = vec![
-            ("unify exposure", &mut c.unify_exposure), ("homogenize vignetting", &mut c.homogenize_vignetting),
+            ("frame gradient", &mut c.frame_gradient), ("homogenize vignetting", &mut c.homogenize_vignetting),
             ("selective", &mut c.selective), ("fill gaps", &mut c.trails.1), ("reject", &mut c.reject.auto),
             ("foreground match", &mut c.foreground.match_brightness), ("half size", &mut c.raw.half),
             ("auto brightness", &mut c.auto_brightness), ("hdr", &mut c.hdr), ("dynamic noises", &mut c.dynamic_noise),
             ("iaa", &mut c.light_pollution.iaa), ("background extraction", &mut c.bg_extraction.0),
             ("color calibration", &mut c.color_calibration), ("colour noise", &mut c.color_noise.0),
             ("automatic stretch", &mut c.stretch.auto), ("enhance star light", &mut c.enhance_stars.0),
-            ("merge 4 pixels", &mut c.merge4), ("time-lapse", &mut c.timelapse.0),
+            ("merge 4 pixels", &mut c.merge4), ("time-lapse", &mut c.timelapse.0), ("upright", &mut c.upright),
             ("auxiliary highlight", &mut self.aux), ("show stars", &mut self.show_stars), ("show background", &mut self.show_bg),
         ];
         (tg, sl)
@@ -620,6 +627,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ("color space", c.color_space.name().into()),
             ("tone", c.tone.name().into()),
             ("background model", c.bg_model.name().into()),
+            ("normalisation", c.normalize.name().into()),
             ("colour calibration mode", c.color_cal.name().into()),
             ("calibration background", c.manual_cal.background.map(|r| r.map(|v| format!("{v:.5}")).join(",")).unwrap_or_default()),
             ("calibration white", c.manual_cal.white.map(|r| r.map(|v| format!("{v:.5}")).join(",")).unwrap_or_default()),
@@ -651,6 +659,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 let r = (r.len() == 4).then(|| [r[0], r[1], r[2], r[3]]);
                 if k == "calibration background" { c.manual_cal.background = r } else { c.manual_cal.white = r }
             }
+            "normalisation" => c.normalize = Normalize::from_name(v).unwrap_or(c.normalize),
             "save as" => c.save_linear = match v { "linear" => Some(true), "stretched" => Some(false), _ => None },
             "interpolation" => c.interpolation = Interpolation::from_name(v).unwrap_or(c.interpolation),
             "trail fade" => c.trails.0 = Fade::from_name(v).unwrap_or(c.trails.0),
@@ -686,6 +695,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
         }
         let toggles = tbl("toggles");
+        // Before v0.5: "unify exposure" was multiplicative normalisation.
+        if toggles.get("unify exposure").and_then(|v| v.as_bool()) == Some(true) && !tbl("menus").contains_key("normalisation") {
+            self.cfg.normalize = Normalize::Multiplicative;
+        }
         // Version 1 projects: "motion effect" became the trail fade "Fade in".
         if toggles.get("motion effect").and_then(|v| v.as_bool()) == Some(true) && !tbl("menus").contains_key("trail fade") {
             self.cfg.trails.0 = Fade::In;
@@ -693,6 +706,11 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
         let sliders = tbl("sliders");
         if let Some(b) = sliders.get("brush").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))) {
             self.brush = b;
+        }
+        // Saved before frames were turned upright (v0.4.0): a sky region drawn by
+        // hand belongs to the sensor's orientation, so it stays that way.
+        if !toggles.contains_key("upright") {
+            self.cfg.upright = !matches!(self.cfg.sky.mode, SkyMode::BoundaryLine | SkyMode::Gradient | SkyMode::IrregularMask);
         }
         let (tg, sl) = self.named();
         for (k, v) in tg {
@@ -1348,7 +1366,18 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             None => {
                 match self.group {
                     0 => {
-                        ui.checkbox(&mut self.cfg.unify_exposure, tr("Unify exposure"));
+                        ui.horizontal(|ui| {
+                            ui.label(tr("Normalisation"));
+                            egui::ComboBox::from_id_salt("normalize").selected_text(tr(self.cfg.normalize.name())).show_ui(ui, |ui| {
+                                for &n in Normalize::ALL {
+                                    ui.selectable_value(&mut self.cfg.normalize, n, tr(n.name())).on_hover_text(normalize_tip(n));
+                                }
+                            });
+                        })
+                        .response
+                        .on_hover_text(normalize_tip(self.cfg.normalize));
+                        ui.label(egui::RichText::new(normalize_tip(self.cfg.normalize)).weak().size(12.0));
+                        ui.checkbox(&mut self.cfg.frame_gradient, tr("Remove each frame's gradient")).on_hover_text(tr("Before stacking, a plane (a gradient of the first order, as Siril's subsky 1) is fitted to the sky of every frame and taken out, keeping its mean level. For light pollution that changes from frame to frame (a moving Moon, the town lights going out, a sky turning over a glow), which the stacked image could not lose any more. Stars and objects are left out of the fit. On landscapes only the sky region is corrected."));
                     }
                     4 => {
                         ui.checkbox(&mut self.cfg.homogenize_vignetting, tr("Homogenize vignetting"));
@@ -1360,6 +1389,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                     7 => {
                         ui.label(tr("Saved as (edit the full path here, or use the Save as row on the left):"));
                         ui.add(egui::TextEdit::singleline(&mut self.cfg.output).hint_text(tr("output file (.tif / .png / .jpg / .fits / .xisf)")).desired_width(ui.available_width().min(420.0)));
+                        super::path_note(ui, &self.cfg.output);
                         if !self.cfg.output.is_empty() && std::path::Path::new(&self.cfg.output).exists() {
                             ui.colored_label(Color32::from_rgb(200, 120, 0), tr("This file exists and will be replaced."));
                         }
@@ -1656,7 +1686,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             }
         }
         if let Some(n) = changed {
-            self.post_note = super::notes::note(n);
+            self.post_note = n;
         }
         // What the file holds: the linear data or the stretched image.
         let out = if self.cfg.output.is_empty() { "stacked.tif".to_string() } else { self.cfg.output.clone() };
@@ -1692,7 +1722,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 _ => self.status = tr("Press Start first: the saved result goes to Post-processing.").into(),
             }
         }
-        ui.label(egui::RichText::new(self.post_note).weak().size(12.5));
+        ui.label(egui::RichText::new(super::notes::note(self.post_note)).weak().size(12.5));
     }
 
     fn center(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1739,7 +1769,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             ui.centered_and_justified(|ui| ui.weak(tr("Base frame preview: add light frames.")));
             return;
         };
-        ui.label(format!("{}{}", if self.shown == self.base() { "Base frame: " } else { "Preview: " }, self.shown.as_deref().map(basename).unwrap_or_default()));
+        ui.label(format!("{}: {}", if self.shown == self.base() { tr("Base frame") } else { tr("Preview") }, self.shown.as_deref().map(basename).unwrap_or_default()));
         if self.disp_tex.is_none() {
             let img = if self.aux { disp.map(|c| [(3.0 * c[0].max(0.0).powf(0.7)).min(1.0), (3.0 * c[1].max(0.0).powf(0.7)).min(1.0), (3.0 * c[2].max(0.0).powf(0.7)).min(1.0)]) } else { (*disp).clone() };
             self.disp_tex = Some(texture(ctx, "base", &img));
@@ -1851,7 +1881,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
             return;
         };
         let showing_bg = self.show_bg && self.post.as_ref().is_some_and(|p| p.background.is_some());
-        ui.label(format!("{}{}: {}", if showing_bg { "Removed background" } else { "Result" }, if r.preview { " (quick preview)" } else { "" }, r.saved.last().map(|s| basename(s)).unwrap_or_else(|| "not saved".into())));
+        ui.label(format!("{}{}: {}", if showing_bg { tr("Removed background") } else { tr("Result") }, if r.preview { tr(" (quick preview)") } else { "" }, r.saved.last().map(|s| basename(s)).unwrap_or_else(|| tr("not saved").into())));
         let key = self.post_key ^ (showing_bg as u64) ^ if self.disp_processed { 0 } else { self.disp_view.key().rotate_left(3) | 1 };
         if self.res_tex.as_ref().is_none_or(|(k, _)| *k != key) {
             let img = match &self.post {
@@ -1986,7 +2016,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 }
             }
         }
-        let text = report_text(infos);
+        let text = report_text_with(infos, [tr("frame"), tr("stars"), "FWHM", tr("elong"), tr("sky"), tr("light"), tr("align"), tr("status")], &|st| tr(st.name()).to_string(), &super::engine_text::tr_msg);
         let lines: Vec<&str> = text.lines().collect();
         egui::ScrollArea::vertical().id_salt("rep").show(ui, |ui| {
             ui.monospace(lines[0]);
@@ -2013,7 +2043,7 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
                 ui.weak(crate::trf!("{} more light frames were not in the quick preview (it uses up to {}).", skipped, PREVIEW_FRAMES));
             }
             ui.add_space(8.0);
-            ui.label(tr("Process log (time per step):"));
+            ui.label(tr("Process log (time per step; technical, in English):"));
             for l in &r.log {
                 ui.monospace(l);
             }
@@ -2026,6 +2056,10 @@ fn stack_report(r: &StackResult, secs: f64, calib: &str, nlights: usize) -> supe
 impl StackTab {
     pub fn t_report(&self) -> Option<&super::JobReport> {
         self.report.as_ref()
+    }
+    /// Show the Result view in a display mode of its own (not "As processed").
+    pub fn t_set_display(&mut self, v: crate::finish::ViewStretch) {
+        (self.disp_view, self.disp_processed, self.view) = (v, false, ViewKind::Result);
     }
     pub fn t_status(&self) -> &str {
         &self.status
@@ -2061,5 +2095,15 @@ impl StackTab {
     }
     pub fn t_brush(&self) -> f64 {
         self.brush
+    }
+}
+
+/// What each normalisation does (the same words in the menu and under it).
+fn normalize_tip(n: Normalize) -> &'static str {
+    match n {
+        Normalize::Off => tr("The frames are stacked as they are."),
+        Normalize::Additive => tr("Each frame's sky is shifted to the base frame's level: for a background that changes (light pollution, the Moon, twilight) while the exposure stays the same."),
+        Normalize::Multiplicative => tr("Each frame is scaled to the base frame's sky level: for frames of other exposures or nights (a thin cloud, other ISO) that otherwise leave rectangular borders. As the former “Unify exposure”."),
+        Normalize::AdditiveScaling => tr("Shifted to the base frame's level and scaled to its spread, as Siril's default for stacking with rejection: the sigma clipping then compares like with like."),
     }
 }

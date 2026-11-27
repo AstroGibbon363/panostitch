@@ -541,6 +541,9 @@ fn inline(ui: &mut egui::Ui, text: &str, size: f32, follow: &mut Option<String>)
 }
 
 fn open_url(url: &str) {
+    if !super::dialogs::external_allowed() {
+        return;
+    }
     let mut c = if cfg!(windows) {
         let mut c = std::process::Command::new("explorer");
         c.arg(url);
